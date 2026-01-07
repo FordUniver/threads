@@ -859,7 +859,7 @@ cmd_body() {
     # Replace Body section content (between ## Body and next ## or EOF)
     # If no ## Body exists, insert it before first ## section
     export CONTENT="$content"
-    awk '
+    gawk '
       BEGIN { in_body = 0; found_body = 0; inserted = 0 }
       /^## Body/ {
         found_body = 1
@@ -888,7 +888,7 @@ cmd_body() {
   else
     # Append to Body section (before next ## or at end of section)
     export CONTENT="$content"
-    awk '
+    gawk '
       BEGIN { in_body = 0; appended = 0 }
       /^## Body/ { in_body = 1; print; next }
       /^## / && in_body && !appended {
@@ -966,7 +966,7 @@ cmd_note() {
 
   # Ensure Notes section exists (create if missing, between Body/frontmatter and Todo)
   if ! grep -q "^## Notes" "$file"; then
-    awk '
+    gawk '
       BEGIN { inserted = 0 }
       /^## Todo/ && !inserted {
         print "## Notes"
@@ -991,7 +991,7 @@ cmd_note() {
       note_hash=$(echo -n "$text$(date +%s%N)" | md5sum | cut -c1-4)
 
       # Add note to Notes section with hash comment
-      TEXT="$text" HASH="$note_hash" awk '
+      TEXT="$text" HASH="$note_hash" gawk '
         BEGIN { in_notes = 0; added = 0 }
         /^## Notes/ {
           print
@@ -1014,7 +1014,7 @@ cmd_note() {
       # Find note by hash
       local match_pattern="^- .*<!-- ${note_ref}[^>]* -->"
       local match_count
-      match_count=$(awk '/^## Notes/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+      match_count=$(gawk '/^## Notes/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
 
       if [[ "$match_count" -eq 0 ]]; then
         echo "ERROR: No note with hash '$note_ref' found" >&2
@@ -1025,7 +1025,7 @@ cmd_note() {
       fi
 
       # Replace note content, preserving hash
-      HASH="$note_ref" TEXT="$text" awk '
+      HASH="$note_ref" TEXT="$text" gawk '
         BEGIN { in_notes = 0; edited = 0 }
         /^## Notes/ { in_notes = 1; print; next }
         /^## / && in_notes { in_notes = 0; print; next }
@@ -1054,7 +1054,7 @@ cmd_note() {
       # Find note by hash
       local match_pattern="^- .*<!-- ${note_ref}[^>]* -->"
       local match_count
-      match_count=$(awk '/^## Notes/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+      match_count=$(gawk '/^## Notes/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
 
       if [[ "$match_count" -eq 0 ]]; then
         echo "ERROR: No note with hash '$note_ref' found" >&2
@@ -1065,7 +1065,7 @@ cmd_note() {
       fi
 
       # Remove the matching line
-      HASH="$note_ref" awk '
+      HASH="$note_ref" gawk '
         BEGIN { in_notes = 0; removed = 0 }
         /^## Notes/ { in_notes = 1; print; next }
         /^## / && in_notes { in_notes = 0; print; next }
@@ -1088,7 +1088,7 @@ cmd_note() {
   local bullet_entry="- **$timestamp** $log_entry"
 
   if grep -q "^### $today" "$file"; then
-    TODAY="$today" BULLET="$bullet_entry" awk '
+    TODAY="$today" BULLET="$bullet_entry" gawk '
       BEGIN { inserted = 0 }
       /^### / && $0 ~ ENVIRON["TODAY"] && !inserted {
         print $0
@@ -1100,7 +1100,7 @@ cmd_note() {
       { print }
     ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
   elif grep -q "^## Log" "$file"; then
-    HEADING="### $today" BULLET="$bullet_entry" awk '
+    HEADING="### $today" BULLET="$bullet_entry" gawk '
       /^## Log/ {
         print
         print ""
@@ -1177,7 +1177,7 @@ cmd_todo() {
       item_hash=$(echo -n "$item" | md5sum | cut -c1-4)
 
       # Add item to Todo section with hash comment
-      ITEM="$item" HASH="$item_hash" awk '
+      ITEM="$item" HASH="$item_hash" gawk '
         BEGIN { in_todo = 0; added = 0 }
         /^## Todo/ {
           print
@@ -1197,7 +1197,7 @@ cmd_todo() {
       # Find unchecked item by hash
       local match_pattern="^- \\[ \\].*<!-- ${item_ref}[^>]* -->"
       local match_count
-      match_count=$(awk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+      match_count=$(gawk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
 
       if [[ "$match_count" -eq 0 ]]; then
         echo "ERROR: No unchecked item with hash '$item_ref' found" >&2
@@ -1208,7 +1208,7 @@ cmd_todo() {
       fi
 
       # Convert - [ ] to - [x] for the matching item
-      HASH="$item_ref" awk '
+      HASH="$item_ref" gawk '
         BEGIN { in_todo = 0; checked = 0 }
         /^## Todo/ { in_todo = 1; print; next }
         /^## / && in_todo { in_todo = 0; print; next }
@@ -1227,7 +1227,7 @@ cmd_todo() {
       # Find checked item by hash
       local match_pattern="^- \\[x\\].*<!-- ${item_ref}[^>]* -->"
       local match_count
-      match_count=$(awk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+      match_count=$(gawk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
 
       if [[ "$match_count" -eq 0 ]]; then
         echo "ERROR: No checked item with hash '$item_ref' found" >&2
@@ -1238,7 +1238,7 @@ cmd_todo() {
       fi
 
       # Convert - [x] to - [ ] for the matching item
-      HASH="$item_ref" awk '
+      HASH="$item_ref" gawk '
         BEGIN { in_todo = 0; unchecked = 0 }
         /^## Todo/ { in_todo = 1; print; next }
         /^## / && in_todo { in_todo = 0; print; next }
@@ -1257,7 +1257,7 @@ cmd_todo() {
       # Find any item by hash (checked or unchecked)
       local match_pattern="^- \\[[x ]\\].*<!-- ${item_ref}[^>]* -->"
       local match_count
-      match_count=$(awk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+      match_count=$(gawk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
 
       if [[ "$match_count" -eq 0 ]]; then
         echo "ERROR: No item with hash '$item_ref' found" >&2
@@ -1268,7 +1268,7 @@ cmd_todo() {
       fi
 
       # Remove the matching line
-      HASH="$item_ref" awk '
+      HASH="$item_ref" gawk '
         BEGIN { in_todo = 0; removed = 0 }
         /^## Todo/ { in_todo = 1; print; next }
         /^## / && in_todo { in_todo = 0; print; next }
@@ -1339,7 +1339,7 @@ cmd_log() {
 
   if grep -q "^### $today" "$file"; then
     # Today's heading exists - insert bullet after heading line
-    TODAY="$today" BULLET="$bullet_entry" awk '
+    TODAY="$today" BULLET="$bullet_entry" gawk '
       BEGIN { inserted = 0 }
       /^### / && $0 ~ ENVIRON["TODAY"] && !inserted {
         print $0
@@ -1352,7 +1352,7 @@ cmd_log() {
     ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
   elif grep -q "^## Log" "$file"; then
     # Log section exists but no today heading - insert new heading after ## Log
-    HEADING="$heading" BULLET="$bullet_entry" awk '
+    HEADING="$heading" BULLET="$bullet_entry" gawk '
       /^## Log/ {
         print
         print ""
@@ -1421,7 +1421,7 @@ cmd_resolve() {
 
   if grep -q "^### $today" "$file"; then
     # Today's heading exists - insert bullet after it
-    TODAY="$today" BULLET="$bullet_entry" awk '
+    TODAY="$today" BULLET="$bullet_entry" gawk '
       BEGIN { inserted = 0 }
       /^### / && $0 ~ ENVIRON["TODAY"] && !inserted {
         print $0; print ""; print ENVIRON["BULLET"]; inserted = 1; next
@@ -1429,7 +1429,7 @@ cmd_resolve() {
       { print }
     ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
   elif grep -q "^## Log" "$file"; then
-    TODAY="$today" BULLET="$bullet_entry" awk '
+    TODAY="$today" BULLET="$bullet_entry" gawk '
       /^## Log/ { print; print ""; print "### " ENVIRON["TODAY"]; print ""; print ENVIRON["BULLET"]; next }
       { print }
     ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
@@ -1492,7 +1492,7 @@ cmd_reopen() {
 
   if grep -q "^### $today" "$file"; then
     # Today's heading exists - insert bullet after it
-    TODAY="$today" BULLET="$bullet_entry" awk '
+    TODAY="$today" BULLET="$bullet_entry" gawk '
       BEGIN { inserted = 0 }
       /^### / && $0 ~ ENVIRON["TODAY"] && !inserted {
         print $0; print ""; print ENVIRON["BULLET"]; inserted = 1; next
@@ -1500,7 +1500,7 @@ cmd_reopen() {
       { print }
     ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
   elif grep -q "^## Log" "$file"; then
-    TODAY="$today" BULLET="$bullet_entry" awk '
+    TODAY="$today" BULLET="$bullet_entry" gawk '
       /^## Log/ { print; print ""; print "### " ENVIRON["TODAY"]; print ""; print ENVIRON["BULLET"]; next }
       { print }
     ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
@@ -1809,7 +1809,7 @@ cmd_stats() {
   # Sort by count descending
   echo "| Status     | Count |"
   echo "|------------|-------|"
-  for status in $(for k in "${!counts[@]}"; do echo "${counts[$k]} $k"; done | sort -rn | awk '{print $2}'); do
+  for status in $(for k in "${!counts[@]}"; do echo "${counts[$k]} $k"; done | sort -rn | gawk '{print $2}'); do
     printf "| %-10s | %5d |\n" "$status" "${counts[$status]}"
   done
   echo "|------------|-------|"
