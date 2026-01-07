@@ -1,0 +1,1924 @@
+#!/usr/bin/env bash
+# threads - Thread management for LLM workflows
+# Usage: threads <command> [args]
+set -euo pipefail
+
+WORKSPACE="${WORKSPACE:-$(cd "$(dirname "$0")/../../../../" && pwd)}"
+
+# Terminal statuses (filtered by default in list)
+TERMINAL_STATUSES="resolved|superseded|deferred"
+ACTIVE_STATUSES="idea|planning|active|blocked|paused"
+
+usage() {
+  cat <<'EOF'
+Usage: threads <command> [options]
+
+Workspace operations:
+  threads list [path] [-r] [--search=X]    List threads (current level by default)
+  threads new [path] "Title" [opts]        Create new thread (infers from cwd)
+  threads move <id> <path>                 Move thread to new location
+  threads commit --pending [-m msg]        Commit all modified threads
+  threads validate [path]                  Validate thread files
+  threads git                              Show pending thread changes
+  threads stats [path] [-r]                Show thread count by status
+
+Single-thread operations:
+  threads read <id>                        Read thread content
+  threads status <id> <new-status>         Change thread status
+  threads update <id> --title=X            Update thread title/desc
+  threads body <id> [--set|--append]       Edit Body section (stdin)
+  threads note <id> add "text"             Add note (returns hash)
+  threads todo <id> add "item"             Add todo item (returns hash)
+  threads log <id> "entry"                 Add log entry
+  threads resolve <id>                     Mark thread resolved
+  threads reopen <id> [--status=X]         Reopen resolved thread
+  threads remove <id>                      Remove thread entirely (alias: rm)
+  threads commit <id> [-m msg]             Commit single thread
+
+Options for 'list':
+  -r, --recursive    Include nested categories/projects
+  --search=X         Search name/title/desc (substring)
+  --all              Include resolved/terminal threads
+
+Options for 'new':
+  --status=X      Initial status (default: idea)
+  --desc=X        One-line description
+  --body=X        Initial body content
+
+Path notation:
+  .               Workspace level
+  admin           Category level
+  admin/ssot      Project level
+  (no path)       Infer from current directory
+
+Status values:
+  Active:   idea, planning, active, blocked, paused
+  Terminal: resolved, superseded, deferred
+EOF
+}
+
+# Find all thread files
+find_threads() {
+  # Use shell glob on known directory patterns (faster than find)
+  for f in "$WORKSPACE"/.threads/*.md \
+           "$WORKSPACE"/*/.threads/*.md \
+           "$WORKSPACE"/*/*/.threads/*.md; do
+    [[ -f "$f" && "$f" != *"/archive/"* ]] && echo "$f"
+  done | sort
+}
+
+# Extract frontmatter field using yq (handles quotes and special chars properly)
+get_field() {
+  local file="$1" field="$2"
+  yq -f extract ".$field // \"\"" "$file" 2>/dev/null
+}
+
+# Extract frontmatter fields (one per line: name, desc, status)
+get_frontmatter() {
+  local file="$1"
+  yq -f extract '(.name // ""), (.desc // ""), (.status // "")' "$file" 2>/dev/null
+}
+
+# Get base status (strip reason suffix)
+base_status() {
+  echo "${1%% (*}"
+}
+
+# Check if status is terminal
+is_terminal() {
+  local status="$1"
+  local base
+  base=$(base_status "$status")
+  echo "$base" | grep -qE "^($TERMINAL_STATUSES)$"
+}
+
+# Parse path into category, project, name
+parse_thread_path() {
+  local file="$1"
+  local relpath="${file#$WORKSPACE/}"
+
+  # Extract thread filename (without .md), strip ID prefix if present
+  local filename thread_name
+  filename=$(basename "$file" .md)
+  # ID-prefixed format: "abc123-slug-name" -> strip first 7 chars
+  if [[ "$filename" =~ ^[0-9a-f]{6}- ]]; then
+    thread_name="${filename:7}"
+  else
+    thread_name="$filename"
+  fi
+
+  # Check if it's workspace-level or nested
+  if [[ "$relpath" == .threads/* ]]; then
+    echo "-|-|$thread_name"
+  else
+    # Extract category and project from path like: category/project/.threads/name.md
+    local dir_part="${relpath%.threads/*}"
+    dir_part="${dir_part%/}"
+    local category project
+    category=$(echo "$dir_part" | cut -d'/' -f1)
+    project=$(echo "$dir_part" | cut -d'/' -f2-)
+    [[ -z "$project" ]] && project="-"
+    echo "$category|$project|$thread_name"
+  fi
+}
+
+# Infer C/P scope from a path (cwd or explicit)
+# Returns: threads_dir|category|project|level_desc
+infer_scope() {
+  local path="$1"
+  local abs_path category project
+
+  # Handle explicit "." for workspace
+  if [[ "$path" == "." ]]; then
+    echo "$WORKSPACE/.threads|-|-|workspace-level thread"
+    return
+  fi
+
+  # Resolve to absolute path
+  if [[ "$path" == /* ]]; then
+    abs_path="$path"
+  elif [[ -d "$WORKSPACE/$path" ]]; then
+    abs_path="$WORKSPACE/$path"
+  elif [[ -d "$path" ]]; then
+    abs_path=$(cd "$path" && pwd)
+  else
+    echo "ERROR:path_not_found"
+    return 1
+  fi
+
+  # Must be within WORKSPACE
+  if [[ "$abs_path" != "$WORKSPACE"* ]]; then
+    echo "Warning: cwd outside workspace, defaulting to workspace level" >&2
+    echo "$WORKSPACE/.threads|-|-|workspace-level thread"
+    return
+  fi
+
+  local rel="${abs_path#$WORKSPACE}"
+  rel="${rel#/}"
+
+  if [[ -z "$rel" ]]; then
+    echo "$WORKSPACE/.threads|-|-|workspace-level thread"
+  else
+    # Extract C and P (max 2 levels for thread placement)
+    category=$(echo "$rel" | cut -d'/' -f1)
+    project=$(echo "$rel" | cut -d'/' -f2)
+    # Handle case where project equals category (single level path)
+    [[ -z "$project" || "$project" == "$category" ]] && project="-"
+
+    if [[ "$project" == "-" ]]; then
+      echo "$WORKSPACE/$category/.threads|$category|-|category-level thread ($category)"
+    else
+      echo "$WORKSPACE/$category/$project/.threads|$category|$project|project-level thread ($category/$project)"
+    fi
+  fi
+}
+
+# Generate random 6-char hex ID, ensuring uniqueness
+generate_id() {
+  local candidate existing_ids retries=0 max_retries=10
+
+  # Collect all existing IDs from filenames (first 6 chars of ID-prefixed files)
+  existing_ids=$(
+    for f in "$WORKSPACE"/.threads/*.md \
+             "$WORKSPACE"/*/.threads/*.md \
+             "$WORKSPACE"/*/*/.threads/*.md; do
+      [[ -f "$f" ]] && basename "$f" .md
+    done | grep -E '^[0-9a-f]{6}-' | cut -c1-6
+  )
+
+  while [[ $retries -lt $max_retries ]]; do
+    candidate=$(head -c 3 /dev/urandom | xxd -p)
+    if ! echo "$existing_ids" | grep -qx "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+    ((retries++))
+  done
+
+  echo "ERROR: Could not generate unique ID after $max_retries attempts" >&2
+  return 1
+}
+
+# Find thread by ID or name (supports fuzzy matching)
+# Returns: 0=found (prints path), 1=not found (prints error), 2=ambiguous (prints options)
+find_thread_by_ref() {
+  local ref="$1"
+
+  # Fast path: try glob match by ID prefix (for ID-prefixed filenames)
+  if [[ "$ref" =~ ^[0-9a-f]{6}$ ]]; then
+    local matches=()
+    # Use shell glob on known directory patterns (much faster than find)
+    for f in "$WORKSPACE"/.threads/"$ref"-*.md \
+             "$WORKSPACE"/*/.threads/"$ref"-*.md \
+             "$WORKSPACE"/*/*/.threads/"$ref"-*.md; do
+      [[ -f "$f" ]] && matches+=("$f")
+    done
+
+    if [[ ${#matches[@]} -eq 1 ]]; then
+      echo "${matches[0]}"
+      return 0
+    elif [[ ${#matches[@]} -gt 1 ]]; then
+      echo "Ambiguous ID prefix: $ref" >&2
+      return 2
+    fi
+  fi
+
+  # Slow path: scan all threads for name matching
+  local substring_matches=()
+
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+
+    local parsed category project name
+    parsed=$(parse_thread_path "$file")
+    IFS='|' read -r category project name <<< "$parsed"
+
+    # Extract ID from filename (first 6 chars if ID-prefixed)
+    local filename tid
+    filename=$(basename "$file" .md)
+    if [[ "$filename" =~ ^[0-9a-f]{6}- ]]; then
+      tid="${filename:0:6}"
+    else
+      tid=$(get_field "$file" "id")
+    fi
+
+    # Exact match by name
+    if [[ "$name" == "$ref" ]]; then
+      echo "$file"
+      return 0
+    fi
+
+    # Substring match on name (case-insensitive)
+    local lc_ref="${ref,,}"
+    local lc_name="${name,,}"
+    if [[ "$lc_name" == *"$lc_ref"* ]]; then
+      substring_matches+=("${tid:-????}:$name:$file")
+    fi
+  done < <(find_threads)
+
+  # If no exact match, try substring matches
+  if [[ ${#substring_matches[@]} -eq 1 ]]; then
+    local match="${substring_matches[0]}"
+    echo "${match##*:}"
+    return 0
+  elif [[ ${#substring_matches[@]} -gt 1 ]]; then
+    echo "Ambiguous reference '$ref' matches ${#substring_matches[@]} threads:" >&2
+    for m in "${substring_matches[@]}"; do
+      local tid="${m%%:*}"
+      local rest="${m#*:}"
+      local name="${rest%%:*}"
+      echo "  $tid  $name" >&2
+    done
+    return 2
+  fi
+
+  echo "Thread not found: $ref" >&2
+  return 1
+}
+
+# Slugify a human-readable title to kebab-case filename
+slugify() {
+  echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//'
+}
+
+# Auto-commit and push a thread file (only commits the specified file)
+auto_commit() {
+  local file="$1" message="$2"
+  git -C "$WORKSPACE" add "$file" || { echo "ERROR: git add failed" >&2; return 1; }
+  git -C "$WORKSPACE" commit "$file" -m "$message" || { echo "ERROR: git commit failed" >&2; return 1; }
+  git -C "$WORKSPACE" pull --rebase && git -C "$WORKSPACE" push || { echo "WARNING: git push failed (commit succeeded)" >&2; return 0; }
+}
+
+# Generate commit message for thread changes
+# Args: file paths to include in message
+generate_commit_message() {
+  local files=("$@")
+  local added=() modified=() deleted=()
+
+  # Classify each file by git status
+  for file in "${files[@]}"; do
+    local name
+    name=$(basename "$file" .md)
+    # Check if file exists in HEAD
+    if git -C "$WORKSPACE" cat-file -e "HEAD:$file" 2>/dev/null; then
+      # File exists in HEAD - check if deleted or modified
+      if [[ -f "$WORKSPACE/$file" ]]; then
+        modified+=("$name")
+      else
+        deleted+=("$name")
+      fi
+    else
+      # File not in HEAD - it's new
+      added+=("$name")
+    fi
+  done
+
+  # Generate message based on changes
+  local total=$(( ${#added[@]} + ${#modified[@]} + ${#deleted[@]} ))
+
+  if [[ $total -eq 1 ]]; then
+    # Single file - use specific action
+    if [[ ${#added[@]} -eq 1 ]]; then
+      echo "threads: add ${added[0]}"
+    elif [[ ${#modified[@]} -eq 1 ]]; then
+      echo "threads: update ${modified[0]}"
+    else
+      echo "threads: remove ${deleted[0]}"
+    fi
+  elif [[ $total -le 3 ]]; then
+    # 2-3 files - list IDs
+    local all_ids=()
+    for name in "${added[@]}" "${modified[@]}" "${deleted[@]}"; do
+      all_ids+=("${name%%-*}")  # Extract ID prefix
+    done
+    local action="update"
+    [[ ${#added[@]} -eq $total ]] && action="add"
+    [[ ${#deleted[@]} -eq $total ]] && action="remove"
+    echo "threads: $action ${all_ids[*]}"
+  else
+    # Many files - just count
+    local action="update"
+    [[ ${#added[@]} -eq $total ]] && action="add"
+    [[ ${#deleted[@]} -eq $total ]] && action="remove"
+    echo "threads: $action $total threads"
+  fi
+}
+
+# ============ COMMANDS ============
+
+cmd_list() {
+  local show_all=false json_output=false status_filter="" path_filter="" search_filter=""
+  local category_filter="" project_filter="" recursive=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help)
+        echo "Usage: threads list [PATH] [-r] [--all] [--search=X] [--status=X]"
+        echo "       threads list [-c CAT] [-p PROJ] [--json]"
+        echo ""
+        echo "  PATH                 Filter by path (e.g., research, admin/ssot)"
+        echo "  -r, --recursive      Include nested categories/projects"
+        echo "  -s, --search=X       Search name/title/desc (substring)"
+        echo "  -c, --category=CAT   Filter by category (exact match)"
+        echo "  -p, --project=PROJ   Filter by project (exact match)"
+        echo "  --all                Include resolved/terminal threads"
+        echo "  --status=X           Filter by status"
+        echo "  --json               Output as JSON"
+        return 0 ;;
+      --all) show_all=true; shift ;;
+      --json) json_output=true; shift ;;
+      --status=*) status_filter="${1#--status=}"; shift ;;
+      -s|--search) search_filter="$2"; shift 2 ;;
+      --search=*) search_filter="${1#--search=}"; shift ;;
+      -c|--category) category_filter="$2"; shift 2 ;;
+      --category=*) category_filter="${1#--category=}"; shift ;;
+      -p|--project) project_filter="$2"; shift 2 ;;
+      --project=*) project_filter="${1#--project=}"; shift ;;
+      -r|--recursive) recursive=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) path_filter="$1"; shift ;;  # positional arg = path filter
+    esac
+  done
+
+  # Parse path_filter to set category_filter and project_filter
+  if [[ -n "$path_filter" ]]; then
+    # Check if path_filter is a valid directory path
+    if [[ -d "$WORKSPACE/$path_filter" ]]; then
+      local pf_cat pf_proj
+      pf_cat=$(echo "$path_filter" | cut -d'/' -f1)
+      pf_proj=$(echo "$path_filter" | cut -d'/' -f2)
+      [[ -z "$pf_proj" || "$pf_proj" == "$pf_cat" ]] && pf_proj=""
+      category_filter="$pf_cat"
+      [[ -n "$pf_proj" ]] && project_filter="$pf_proj"
+    else
+      echo "Warning: Path '$path_filter' not found, treating as search filter" >&2
+      search_filter="$path_filter"
+      path_filter=""
+    fi
+  fi
+
+  # Determine scope description for output header
+  local scope_desc
+  if [[ -n "$project_filter" && -n "$category_filter" ]]; then
+    scope_desc="project level ($category_filter/$project_filter)"
+  elif [[ -n "$category_filter" ]]; then
+    scope_desc="category level ($category_filter)"
+  else
+    scope_desc="workspace level"
+  fi
+
+  local threads=()
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+
+    # Extract frontmatter fields (one per line)
+    local title desc status
+    {
+      read -r title
+      read -r desc
+      read -r status
+    } < <(get_frontmatter "$file")
+    [[ -z "$status" ]] && status="unknown"
+
+    # Extract ID from filename, name from path
+    local parsed category project name tid filename
+    parsed=$(parse_thread_path "$file")
+    IFS='|' read -r category project name <<< "$parsed"
+    filename=$(basename "$file" .md)
+    if [[ "$filename" =~ ^[0-9a-f]{6}- ]]; then
+      tid="${filename:0:6}"
+    else
+      tid="????"
+    fi
+
+    # Category filter (exact match)
+    [[ -n "$category_filter" && "$category" != "$category_filter" ]] && continue
+
+    # Project filter (exact match)
+    [[ -n "$project_filter" && "$project" != "$project_filter" ]] && continue
+
+    # Non-recursive by default: only threads at current hierarchy level
+    if [[ "$recursive" != true ]]; then
+      if [[ -n "$project_filter" ]]; then
+        : # Already at project level, show all threads here
+      elif [[ -n "$category_filter" ]]; then
+        # Category level: only where project == "-"
+        [[ "$project" != "-" ]] && continue
+      else
+        # Workspace level: only where category == "-"
+        [[ "$category" != "-" ]] && continue
+      fi
+    fi
+
+    # Search filter: match name, title, or desc (case-insensitive)
+    if [[ -n "$search_filter" ]]; then
+      local match=false
+      local lc_filter="${search_filter,,}"
+      [[ "${name,,}" == *"$lc_filter"* ]] && match=true
+      [[ "${title,,}" == *"$lc_filter"* ]] && match=true
+      [[ "${desc,,}" == *"$lc_filter"* ]] && match=true
+      [[ "$match" != true ]] && continue
+    fi
+
+    # Use title if available, else humanize name
+    [[ -z "$title" ]] && title=$(echo "$name" | tr '-' ' ')
+
+    # Filter logic
+    local base
+    base=$(base_status "$status")
+    if [[ -n "$status_filter" ]]; then
+      echo ",$status_filter," | grep -q ",$base," || continue
+    elif [[ "$show_all" != "true" ]] && is_terminal "$status"; then
+      continue
+    fi
+
+    threads+=("$tid|$status|$category|$project|$name|$title|$desc")
+  done < <(find_threads)
+
+  if [[ "$json_output" == "true" ]]; then
+    echo "["
+    local first=true
+    for t in "${threads[@]}"; do
+      IFS='|' read -r tid status category project name title desc <<< "$t"
+      $first || echo ","
+      first=false
+      # Escape quotes in values
+      title="${title//\"/\\\"}"
+      desc="${desc//\"/\\\"}"
+      printf '  {"id": "%s", "status": "%s", "category": "%s", "project": "%s", "name": "%s", "title": "%s", "desc": "%s"}' \
+        "$tid" "$status" "$category" "$project" "$name" "$title" "$desc"
+    done
+    echo ""
+    echo "]"
+  else
+    # Determine status description for header
+    local status_desc
+    if [[ -n "$status_filter" ]]; then
+      status_desc="$status_filter"
+    elif [[ "$show_all" == true ]]; then
+      status_desc=""  # will append "(all statuses)"
+    else
+      status_desc="active"
+    fi
+
+    # Construct header: "Showing X active workspace-level threads"
+    local level_desc path_suffix=""
+    if [[ -n "$project_filter" && -n "$category_filter" ]]; then
+      level_desc="project-level"
+      path_suffix=" ($category_filter/$project_filter)"
+    elif [[ -n "$category_filter" ]]; then
+      level_desc="category-level"
+      path_suffix=" ($category_filter)"
+    else
+      level_desc="workspace-level"
+    fi
+
+    local recursive_suffix=""
+    [[ "$recursive" == true ]] && recursive_suffix=" (including nested)"
+
+    if [[ -n "$status_desc" ]]; then
+      echo "Showing ${#threads[@]} $status_desc $level_desc threads$path_suffix$recursive_suffix"
+    else
+      echo "Showing ${#threads[@]} $level_desc threads$path_suffix (all statuses)$recursive_suffix"
+    fi
+    echo ""
+
+    if [[ ${#threads[@]} -eq 0 ]]; then
+      if [[ "$recursive" != true ]]; then
+        echo "Hint: use -r to include nested categories/projects"
+      fi
+      return 0
+    fi
+    printf "%-6s %-10s %-18s %-22s %s\n" "ID" "STATUS" "CATEGORY" "PROJECT" "NAME"
+    printf "%-6s %-10s %-18s %-22s %s\n" "--" "------" "--------" "-------" "----"
+    for t in "${threads[@]}"; do
+      IFS='|' read -r tid status category project name title desc <<< "$t"
+      # Truncate long values
+      local base_status="${status%% (*}"
+      [[ ${#category} -gt 16 ]] && category="${category:0:15}…"
+      [[ ${#project} -gt 20 ]] && project="${project:0:19}…"
+      printf "%-6s %-10s %-18s %-22s %s\n" "$tid" "$base_status" "$category" "$project" "$title"
+    done
+  fi
+}
+
+cmd_read() {
+  [[ "$1" == "-h" || "$1" == "--help" ]] && { echo "Usage: thread <id> read"; return 0; }
+  local ref="$1"
+  [[ -z "$ref" ]] && { echo "Usage: thread <id> read" >&2; return 1; }
+
+  # Try to find by ID/name first, then fall back to path
+  local file
+  file=$(find_thread_by_ref "$ref") && { cat "$file"; return 0; }
+
+  # find_thread_by_ref already printed an error; check if it's a direct path as fallback
+  [[ -f "$ref" ]] && { cat "$ref"; return 0; }
+  [[ -f "$WORKSPACE/$ref" ]] && { cat "$WORKSPACE/$ref"; return 0; }
+
+  return 1
+}
+
+cmd_new() {
+  local title="" desc="" status="idea" path="" message="" do_commit=false body="" positional=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: threads new [path] <title> [--status=X] [--desc=X] [--body=X] [--commit [-m msg]]"; return 0 ;;
+      --desc=*) desc="${1#--desc=}"; shift ;;
+      --desc) desc="$2"; shift 2 ;;
+      --status=*) status="${1#--status=}"; shift ;;
+      --status) status="$2"; shift 2 ;;
+      --body=*) body="${1#--body=}"; shift ;;
+      --body) body="$2"; shift 2 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) positional+=("$1"); shift ;;
+    esac
+  done
+
+  # Handle positional args: [path] <title>
+  if [[ ${#positional[@]} -eq 2 ]]; then
+    path="${positional[0]}"
+    title="${positional[1]}"
+  elif [[ ${#positional[@]} -eq 1 ]]; then
+    title="${positional[0]}"
+  fi
+
+  [[ -z "$title" ]] && { echo "Usage: threads new [path] <title> [--status=X] [--desc=X] [--body=X] [--commit [-m msg]]" >&2; return 1; }
+
+  # Warn if no description provided
+  if [[ -z "$desc" ]]; then
+    echo "Warning: No --desc provided. Add one with: thread <id> update --desc \"...\"" >&2
+  fi
+
+  # Slugify title to filename
+  local slug
+  slug=$(slugify "$title")
+  [[ -z "$slug" ]] && { echo "ERROR: Title produces empty slug" >&2; return 1; }
+
+  # Read body from stdin if available and not provided via flag
+  if [[ -z "$body" && ! -t 0 ]]; then
+    body=$(cat)
+  fi
+
+  # Determine threads directory and compute ID using infer_scope
+  local threads_dir category project level_desc tid scope_info
+  if [[ -z "$path" ]]; then
+    # Infer from cwd
+    scope_info=$(infer_scope "$PWD")
+  else
+    scope_info=$(infer_scope "$path")
+  fi
+
+  if [[ "$scope_info" == "ERROR:"* ]]; then
+    echo "ERROR: Path not found: $path" >&2
+    return 1
+  fi
+
+  IFS='|' read -r threads_dir category project level_desc <<< "$scope_info"
+  tid=$(generate_id)
+
+  # Ensure threads directory exists
+  [[ ! -d "$threads_dir" ]] && mkdir -p "$threads_dir"
+
+  local filepath="$threads_dir/${tid}-${slug}.md"
+
+  # Check if file already exists
+  if [[ -f "$filepath" ]]; then
+    echo "ERROR: Thread already exists: $filepath" >&2
+    return 1
+  fi
+
+  local today timestamp
+  today=$(date '+%Y-%m-%d')
+  timestamp=$(date '+%H:%M')
+
+  # Write the file using yq for proper YAML escaping
+  {
+    echo '---'
+    yq -n ".id = \"$tid\" | .name = \"$title\" | .desc = \"$desc\" | .status = \"$status\""
+    echo '---'
+    echo ""
+    [[ -n "$body" ]] && echo "$body" && echo ""
+    cat <<BODY
+## Todo
+
+## Log
+
+### $today
+
+- **$timestamp** Created thread.
+BODY
+  } > "$filepath"
+
+  local rel_filepath="${filepath#$WORKSPACE/}"
+  echo "Created $level_desc: $tid"
+  echo "  → $rel_filepath"
+  if [[ -z "$body" ]]; then
+    echo "Hint: Add body with: echo \"content\" | thread body $tid --set" >&2
+  fi
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$filepath")
+    auto_commit "$filepath" "$message"
+  else
+    echo "Note: Thread $tid has uncommitted changes. Use 'thread commit $tid' when ready."
+  fi
+}
+
+cmd_move() {
+  local ref="" new_path="" message="" do_commit=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: threads move <id> <new-path> [--commit [-m msg]]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *)
+        if [[ -z "$ref" ]]; then ref="$1"
+        elif [[ -z "$new_path" ]]; then new_path="$1"
+        fi
+        shift ;;
+    esac
+  done
+
+  [[ -z "$ref" || -z "$new_path" ]] && { echo "Usage: threads move <id> <new-path>" >&2; return 1; }
+
+  # Find source thread
+  local src_file
+  src_file=$(find_thread_by_ref "$ref") || return 1
+
+  # Resolve destination using infer_scope
+  local scope_info
+  scope_info=$(infer_scope "$new_path")
+  if [[ "$scope_info" == "ERROR:"* ]]; then
+    echo "ERROR: Invalid path: $new_path" >&2
+    return 1
+  fi
+
+  local dest_dir level_desc
+  IFS='|' read -r dest_dir _ _ level_desc <<< "$scope_info"
+
+  # Ensure dest .threads/ exists
+  [[ ! -d "$dest_dir" ]] && mkdir -p "$dest_dir"
+
+  # Move file
+  local filename dest_file
+  filename=$(basename "$src_file")
+  dest_file="$dest_dir/$filename"
+
+  if [[ -f "$dest_file" ]]; then
+    echo "ERROR: Thread already exists at destination: $dest_file" >&2
+    return 1
+  fi
+
+  mv "$src_file" "$dest_file"
+  local rel_dest="${dest_file#$WORKSPACE/}"
+  echo "Moved to $level_desc"
+  echo "  → $rel_dest"
+
+  # Commit if requested
+  if [[ "$do_commit" == true ]]; then
+    local rel_src="${src_file#$WORKSPACE/}"
+    local rel_dest="${dest_file#$WORKSPACE/}"
+    git -C "$WORKSPACE" add "$rel_src" "$rel_dest"
+    [[ -z "$message" ]] && message="threads: move $(basename "$src_file" .md) to $level_desc"
+    git -C "$WORKSPACE" commit -m "$message"
+    git -C "$WORKSPACE" pull --rebase && git -C "$WORKSPACE" push
+  else
+    echo "Note: Use --commit to commit this move"
+  fi
+}
+
+cmd_status() {
+  local ref="" new_status="" message="" do_commit=false positional=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> status <new-status> [--commit [-m msg]]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) positional+=("$1"); shift ;;
+    esac
+  done
+
+  # Handle positional args: <ref> <new-status>
+  if [[ ${#positional[@]} -ge 2 ]]; then
+    ref="${positional[0]}"
+    new_status="${positional[1]}"
+  fi
+
+  [[ -z "$ref" || -z "$new_status" ]] && { echo "Usage: thread <id> status <new-status> [--commit [-m msg]]" >&2; return 1; }
+
+  # Find thread by ID or name
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  local old_status
+  old_status=$(get_field "$file" "status")
+
+  # Update status in-place using yq
+  yq -f process -i ".status = \"$new_status\"" "$file"
+
+  echo "Status changed: $old_status → $new_status ($file)"
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$file")
+    auto_commit "$file" "$message"
+  else
+    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+  fi
+}
+
+cmd_update() {
+  local ref="" new_title="" new_desc="" message="" do_commit=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> update [--title=X] [--desc=X] [--commit [-m msg]]"; return 0 ;;
+      --title=*) new_title="${1#--title=}"; shift ;;
+      --desc=*) new_desc="${1#--desc=}"; shift ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) ref="$1"; shift ;;
+    esac
+  done
+
+  [[ -z "$ref" ]] && { echo "Usage: thread <id> update [--title=X] [--desc=X] [--commit [-m msg]]" >&2; return 1; }
+  [[ -z "$new_title" && -z "$new_desc" ]] && { echo "ERROR: Specify --title=X and/or --desc=X" >&2; return 1; }
+
+  # Find thread by ID or name
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  # Update fields in-place using yq (handles special chars properly)
+  if [[ -n "$new_title" ]]; then
+    yq -f process -i ".name = \"$new_title\"" "$file"
+    echo "Title updated: $new_title"
+  fi
+  if [[ -n "$new_desc" ]]; then
+    yq -f process -i ".desc = \"$new_desc\"" "$file"
+    echo "Description updated: $new_desc"
+  fi
+
+  echo "Updated: $file"
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$file")
+    auto_commit "$file" "$message"
+  else
+    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+  fi
+}
+
+cmd_body() {
+  local ref="" mode="set" content="" message="" do_commit=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> body [--set|--append] [--commit [-m msg]] (stdin for content)"; return 0 ;;
+      --set) mode="set"; shift ;;
+      --append) mode="append"; shift ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) ref="$1"; shift ;;
+    esac
+  done
+
+  [[ -z "$ref" ]] && { echo "Usage: thread <id> body [--set|--append] [--commit [-m msg]]" >&2; return 1; }
+
+  # Read content from stdin
+  if [[ ! -t 0 ]]; then
+    content=$(cat)
+  fi
+  [[ -z "$content" ]] && { echo "ERROR: No content provided (use stdin)" >&2; return 1; }
+
+  # Find thread
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  if [[ "$mode" == "set" ]]; then
+    # Replace Body section content (between ## Body and next ## or EOF)
+    # If no ## Body exists, insert it before first ## section
+    export CONTENT="$content"
+    awk '
+      BEGIN { in_body = 0; found_body = 0; inserted = 0 }
+      /^## Body/ {
+        found_body = 1
+        print
+        print ""
+        print ENVIRON["CONTENT"]
+        in_body = 1
+        next
+      }
+      /^## / && in_body {
+        in_body = 0
+        print ""
+        print
+        next
+      }
+      /^## / && !found_body && !inserted {
+        print "## Body"
+        print ""
+        print ENVIRON["CONTENT"]
+        print ""
+        inserted = 1
+      }
+      !in_body { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+    unset CONTENT
+  else
+    # Append to Body section (before next ## or at end of section)
+    export CONTENT="$content"
+    awk '
+      BEGIN { in_body = 0; appended = 0 }
+      /^## Body/ { in_body = 1; print; next }
+      /^## / && in_body && !appended {
+        print ""
+        print ENVIRON["CONTENT"]
+        appended = 1
+        in_body = 0
+        print ""
+        print
+        next
+      }
+      { print }
+      END { if (in_body && !appended) { print ""; print ENVIRON["CONTENT"] } }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+    unset CONTENT
+  fi
+
+  echo "Body ${mode}: $file"
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$file")
+    auto_commit "$file" "$message"
+  else
+    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+  fi
+}
+
+cmd_note() {
+  local ref="" action="" text="" note_ref="" message="" do_commit=false positional=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> note <add|edit|remove> <text|hash> [--commit [-m msg]]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) positional+=("$1"); shift ;;
+    esac
+  done
+
+  # Parse: <ref> <action> [text_or_hash] [new_text]
+  [[ ${#positional[@]} -lt 2 ]] && { echo "Usage: thread <id> note <add|edit|remove> <text|hash> [--commit [-m msg]]" >&2; return 1; }
+
+  ref="${positional[0]}"
+  action="${positional[1]}"
+
+  case "$action" in
+    add)
+      [[ ${#positional[@]} -lt 3 ]] && { echo "ERROR: threads note <id> add \"note text\"" >&2; return 1; }
+      text="${positional[2]}"
+      ;;
+    edit)
+      [[ ${#positional[@]} -lt 4 ]] && { echo "ERROR: threads note <id> edit <hash> \"new text\"" >&2; return 1; }
+      note_ref="${positional[2]}"
+      text="${positional[3]}"
+      ;;
+    remove)
+      [[ ${#positional[@]} -lt 3 ]] && { echo "ERROR: threads note <id> remove <hash>" >&2; return 1; }
+      note_ref="${positional[2]}"
+      ;;
+    *)
+      echo "ERROR: Unknown action '$action'. Use: add, edit, remove" >&2
+      return 1
+      ;;
+  esac
+
+  # Find thread
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  # Ensure Notes section exists (create if missing, between Body/frontmatter and Todo)
+  if ! grep -q "^## Notes" "$file"; then
+    awk '
+      BEGIN { inserted = 0 }
+      /^## Todo/ && !inserted {
+        print "## Notes"
+        print ""
+        print "## Todo"
+        inserted = 1
+        next
+      }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+    tmpfile=$(mktemp)
+  fi
+
+  local today timestamp log_entry
+  today=$(date '+%Y-%m-%d')
+  timestamp=$(date '+%H:%M')
+
+  case "$action" in
+    add)
+      # Generate hash for the note
+      local note_hash
+      note_hash=$(echo -n "$text$(date +%s%N)" | md5sum | cut -c1-4)
+
+      # Add note to Notes section with hash comment
+      TEXT="$text" HASH="$note_hash" awk '
+        BEGIN { in_notes = 0; added = 0 }
+        /^## Notes/ {
+          print
+          print ""
+          print "- " ENVIRON["TEXT"] "  <!-- " ENVIRON["HASH"] " -->"
+          added = 1
+          in_notes = 1
+          next
+        }
+        /^## / && in_notes { in_notes = 0 }
+        { print }
+      ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+
+      # Auto-log
+      log_entry="Added note: $text"
+      echo "Added note: $text (id: $note_hash)"
+      ;;
+
+    edit)
+      # Find note by hash
+      local match_pattern="^- .*<!-- ${note_ref}[^>]* -->"
+      local match_count
+      match_count=$(awk '/^## Notes/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+
+      if [[ "$match_count" -eq 0 ]]; then
+        echo "ERROR: No note with hash '$note_ref' found" >&2
+        return 1
+      elif [[ "$match_count" -gt 1 ]]; then
+        echo "ERROR: Ambiguous hash '$note_ref' matches $match_count notes" >&2
+        return 1
+      fi
+
+      # Replace note content, preserving hash
+      HASH="$note_ref" TEXT="$text" awk '
+        BEGIN { in_notes = 0; edited = 0 }
+        /^## Notes/ { in_notes = 1; print; next }
+        /^## / && in_notes { in_notes = 0; print; next }
+        in_notes && /^- / && match($0, "<!-- " ENVIRON["HASH"]) {
+          if (!edited) {
+            # Extract hash from line
+            match($0, /<!-- ([a-f0-9]+) -->/, arr)
+            hash = arr[1]
+            if (hash == "") {
+              # Fallback: use partial match
+              hash = ENVIRON["HASH"]
+            }
+            print "- " ENVIRON["TEXT"] "  <!-- " hash " -->"
+            edited = 1
+            next
+          }
+        }
+        { print }
+      ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+
+      log_entry="Edited note $note_ref"
+      echo "Edited note $note_ref"
+      ;;
+
+    remove)
+      # Find note by hash
+      local match_pattern="^- .*<!-- ${note_ref}[^>]* -->"
+      local match_count
+      match_count=$(awk '/^## Notes/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+
+      if [[ "$match_count" -eq 0 ]]; then
+        echo "ERROR: No note with hash '$note_ref' found" >&2
+        return 1
+      elif [[ "$match_count" -gt 1 ]]; then
+        echo "ERROR: Ambiguous hash '$note_ref' matches $match_count notes" >&2
+        return 1
+      fi
+
+      # Remove the matching line
+      HASH="$note_ref" awk '
+        BEGIN { in_notes = 0; removed = 0 }
+        /^## Notes/ { in_notes = 1; print; next }
+        /^## / && in_notes { in_notes = 0; print; next }
+        in_notes && /^- / && match($0, "<!-- " ENVIRON["HASH"]) {
+          if (!removed) {
+            removed = 1
+            next  # Skip this line (remove it)
+          }
+        }
+        { print }
+      ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+
+      log_entry="Removed note $note_ref"
+      echo "Removed note $note_ref"
+      ;;
+  esac
+
+  # Auto-add log entry for the note operation
+  tmpfile=$(mktemp)
+  local bullet_entry="- **$timestamp** $log_entry"
+
+  if grep -q "^### $today" "$file"; then
+    TODAY="$today" BULLET="$bullet_entry" awk '
+      BEGIN { inserted = 0 }
+      /^### / && $0 ~ ENVIRON["TODAY"] && !inserted {
+        print $0
+        print ""
+        print ENVIRON["BULLET"]
+        inserted = 1
+        next
+      }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+  elif grep -q "^## Log" "$file"; then
+    HEADING="### $today" BULLET="$bullet_entry" awk '
+      /^## Log/ {
+        print
+        print ""
+        print ENVIRON["HEADING"]
+        print ""
+        print ENVIRON["BULLET"]
+        next
+      }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+  fi
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$file")
+    auto_commit "$file" "$message"
+  else
+    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+  fi
+}
+
+cmd_todo() {
+  local ref="" action="" item="" item_ref="" message="" do_commit=false positional=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> todo <add|check|uncheck|remove> <item|hash> [--commit [-m msg]]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) positional+=("$1"); shift ;;
+    esac
+  done
+
+  # Parse: <ref> <action> [item_or_num]
+  [[ ${#positional[@]} -lt 2 ]] && { echo "Usage: thread <id> todo <add|check|uncheck|remove> <item|hash> [--commit [-m msg]]" >&2; return 1; }
+
+  ref="${positional[0]}"
+  action="${positional[1]}"
+
+  case "$action" in
+    add)
+      [[ ${#positional[@]} -lt 3 ]] && { echo "ERROR: threads todo <id> add \"item text\"" >&2; return 1; }
+      item="${positional[2]}"
+      ;;
+    check|complete|done|uncheck|remove)
+      [[ ${#positional[@]} -lt 3 ]] && { echo "ERROR: threads todo <id> $action <hash>" >&2; return 1; }
+      item_ref="${positional[2]}"
+      ;;
+    *)
+      echo "ERROR: Unknown action '$action'. Use: add, check, uncheck, remove" >&2
+      return 1
+      ;;
+  esac
+
+  # Find thread
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  # Validate Todo section exists
+  if ! grep -q "^## Todo" "$file"; then
+    echo "ERROR: No ## Todo section in thread" >&2
+    return 1
+  fi
+
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  case "$action" in
+    add)
+      # Generate hash for the item
+      local item_hash
+      item_hash=$(echo -n "$item" | md5sum | cut -c1-4)
+
+      # Add item to Todo section with hash comment
+      ITEM="$item" HASH="$item_hash" awk '
+        BEGIN { in_todo = 0; added = 0 }
+        /^## Todo/ {
+          print
+          print ""
+          print "- [ ] " ENVIRON["ITEM"] "  <!-- " ENVIRON["HASH"] " -->"
+          added = 1
+          in_todo = 1
+          next
+        }
+        /^## / && in_todo { in_todo = 0 }
+        { print }
+      ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+      echo "Added to Todo: $item (id: $item_hash)"
+      ;;
+
+    check|complete)
+      # Find unchecked item by hash
+      local match_pattern="^- \\[ \\].*<!-- ${item_ref}[^>]* -->"
+      local match_count
+      match_count=$(awk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+
+      if [[ "$match_count" -eq 0 ]]; then
+        echo "ERROR: No unchecked item with hash '$item_ref' found" >&2
+        return 1
+      elif [[ "$match_count" -gt 1 ]]; then
+        echo "ERROR: Ambiguous hash '$item_ref' matches $match_count items" >&2
+        return 1
+      fi
+
+      # Convert - [ ] to - [x] for the matching item
+      HASH="$item_ref" awk '
+        BEGIN { in_todo = 0; checked = 0 }
+        /^## Todo/ { in_todo = 1; print; next }
+        /^## / && in_todo { in_todo = 0; print; next }
+        in_todo && /^- \[ \]/ && match($0, "<!-- " ENVIRON["HASH"]) {
+          if (!checked) {
+            sub(/^- \[ \]/, "- [x]")
+            checked = 1
+          }
+        }
+        { print }
+      ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+      echo "Checked item $item_ref"
+      ;;
+
+    uncheck)
+      # Find checked item by hash
+      local match_pattern="^- \\[x\\].*<!-- ${item_ref}[^>]* -->"
+      local match_count
+      match_count=$(awk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+
+      if [[ "$match_count" -eq 0 ]]; then
+        echo "ERROR: No checked item with hash '$item_ref' found" >&2
+        return 1
+      elif [[ "$match_count" -gt 1 ]]; then
+        echo "ERROR: Ambiguous hash '$item_ref' matches $match_count items" >&2
+        return 1
+      fi
+
+      # Convert - [x] to - [ ] for the matching item
+      HASH="$item_ref" awk '
+        BEGIN { in_todo = 0; unchecked = 0 }
+        /^## Todo/ { in_todo = 1; print; next }
+        /^## / && in_todo { in_todo = 0; print; next }
+        in_todo && /^- \[x\]/ && match($0, "<!-- " ENVIRON["HASH"]) {
+          if (!unchecked) {
+            sub(/^- \[x\]/, "- [ ]")
+            unchecked = 1
+          }
+        }
+        { print }
+      ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+      echo "Unchecked item $item_ref"
+      ;;
+
+    remove)
+      # Find any item by hash (checked or unchecked)
+      local match_pattern="^- \\[[x ]\\].*<!-- ${item_ref}[^>]* -->"
+      local match_count
+      match_count=$(awk '/^## Todo/{f=1;next} /^## /{f=0} f' "$file" | grep -cE "$match_pattern" || echo 0)
+
+      if [[ "$match_count" -eq 0 ]]; then
+        echo "ERROR: No item with hash '$item_ref' found" >&2
+        return 1
+      elif [[ "$match_count" -gt 1 ]]; then
+        echo "ERROR: Ambiguous hash '$item_ref' matches $match_count items" >&2
+        return 1
+      fi
+
+      # Remove the matching line
+      HASH="$item_ref" awk '
+        BEGIN { in_todo = 0; removed = 0 }
+        /^## Todo/ { in_todo = 1; print; next }
+        /^## / && in_todo { in_todo = 0; print; next }
+        in_todo && /^- \[[x ]\]/ && match($0, "<!-- " ENVIRON["HASH"]) {
+          if (!removed) {
+            removed = 1
+            next  # Skip this line (remove it)
+          }
+        }
+        { print }
+      ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+      echo "Removed item $item_ref"
+      ;;
+  esac
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$file")
+    auto_commit "$file" "$message"
+  else
+    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+  fi
+}
+
+cmd_log() {
+  local ref="" entry="" message="" do_commit=false positional=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> log \"entry\" [--commit [-m msg]]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) positional+=("$1"); shift ;;
+    esac
+  done
+
+  # Handle positional args: <ref> [entry]
+  if [[ ${#positional[@]} -ge 1 ]]; then
+    ref="${positional[0]}"
+  fi
+  if [[ ${#positional[@]} -ge 2 ]]; then
+    entry="${positional[1]}"
+  fi
+
+  [[ -z "$ref" ]] && { echo "Usage: thread <id> log \"entry\" [--commit [-m msg]]" >&2; return 1; }
+
+  # Find thread by ID or name
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  # Read entry from stdin if not provided
+  if [[ -z "$entry" && ! -t 0 ]]; then
+    entry=$(cat)
+  fi
+  [[ -z "$entry" ]] && { echo "ERROR: No log entry provided" >&2; return 1; }
+
+  local today timestamp heading bullet_entry
+  today=$(date '+%Y-%m-%d')
+  timestamp=$(date '+%H:%M')
+  heading="### $today"
+  bullet_entry="- **$timestamp** $entry"
+
+  # Insert log entry into Log section
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  if grep -q "^### $today" "$file"; then
+    # Today's heading exists - insert bullet after heading line
+    TODAY="$today" BULLET="$bullet_entry" awk '
+      BEGIN { inserted = 0 }
+      /^### / && $0 ~ ENVIRON["TODAY"] && !inserted {
+        print $0
+        print ""
+        print ENVIRON["BULLET"]
+        inserted = 1
+        next
+      }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+  elif grep -q "^## Log" "$file"; then
+    # Log section exists but no today heading - insert new heading after ## Log
+    HEADING="$heading" BULLET="$bullet_entry" awk '
+      /^## Log/ {
+        print
+        print ""
+        print ENVIRON["HEADING"]
+        print ""
+        print ENVIRON["BULLET"]
+        next
+      }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+  else
+    # No Log section - append one
+    cat >> "$file" <<EOF
+
+## Log
+
+$heading
+
+$bullet_entry
+EOF
+  fi
+
+  echo "Logged to: $file"
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$file")
+    auto_commit "$file" "$message"
+  else
+    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+  fi
+}
+
+cmd_resolve() {
+  local ref="" message="" do_commit=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> resolve [--commit [-m msg]]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) ref="$1"; shift ;;
+    esac
+  done
+
+  [[ -z "$ref" ]] && { echo "Usage: thread <id> resolve [--commit [-m msg]]" >&2; return 1; }
+
+  # Find thread by ID or name
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  local old_status today timestamp bullet_entry
+  old_status=$(get_field "$file" "status")
+  today=$(date '+%Y-%m-%d')
+  timestamp=$(date '+%H:%M')
+  bullet_entry="- **$timestamp** Resolved."
+
+  # Update status
+  yq -f process -i '.status = "resolved"' "$file"
+
+  # Add log entry
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  if grep -q "^### $today" "$file"; then
+    # Today's heading exists - insert bullet after it
+    TODAY="$today" BULLET="$bullet_entry" awk '
+      BEGIN { inserted = 0 }
+      /^### / && $0 ~ ENVIRON["TODAY"] && !inserted {
+        print $0; print ""; print ENVIRON["BULLET"]; inserted = 1; next
+      }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+  elif grep -q "^## Log" "$file"; then
+    TODAY="$today" BULLET="$bullet_entry" awk '
+      /^## Log/ { print; print ""; print "### " ENVIRON["TODAY"]; print ""; print ENVIRON["BULLET"]; next }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+  else
+    cat >> "$file" <<EOF
+
+## Log
+
+### $today
+
+$bullet_entry
+EOF
+  fi
+
+  echo "Resolved: $old_status → resolved ($file)"
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$file")
+    auto_commit "$file" "$message"
+  else
+    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+  fi
+}
+
+cmd_reopen() {
+  local ref="" message="" do_commit=false new_status="active"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> reopen [--status=X] [--commit [-m msg]]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      --status=*) new_status="${1#--status=}"; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) ref="$1"; shift ;;
+    esac
+  done
+
+  [[ -z "$ref" ]] && { echo "Usage: thread <id> reopen [--status=X] [--commit [-m msg]]" >&2; return 1; }
+
+  # Find thread by ID or name
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  local old_status today timestamp bullet_entry
+  old_status=$(get_field "$file" "status")
+  today=$(date '+%Y-%m-%d')
+  timestamp=$(date '+%H:%M')
+  bullet_entry="- **$timestamp** Reopened."
+
+  # Update status
+  yq -f process -i ".status = \"$new_status\"" "$file"
+
+  # Add log entry
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  if grep -q "^### $today" "$file"; then
+    # Today's heading exists - insert bullet after it
+    TODAY="$today" BULLET="$bullet_entry" awk '
+      BEGIN { inserted = 0 }
+      /^### / && $0 ~ ENVIRON["TODAY"] && !inserted {
+        print $0; print ""; print ENVIRON["BULLET"]; inserted = 1; next
+      }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+  elif grep -q "^## Log" "$file"; then
+    TODAY="$today" BULLET="$bullet_entry" awk '
+      /^## Log/ { print; print ""; print "### " ENVIRON["TODAY"]; print ""; print ENVIRON["BULLET"]; next }
+      { print }
+    ' "$file" > "$tmpfile" && mv "$tmpfile" "$file"
+  else
+    cat >> "$file" <<EOF
+
+## Log
+
+### $today
+
+$bullet_entry
+EOF
+  fi
+
+  echo "Reopened: $old_status → $new_status ($file)"
+
+  # Commit only if --commit specified
+  if [[ "$do_commit" == true ]]; then
+    [[ -z "$message" ]] && message=$(generate_commit_message "$file")
+    auto_commit "$file" "$message"
+  else
+    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+  fi
+}
+
+cmd_remove() {
+  local ref="" message="" do_commit=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> remove [--commit [-m msg]]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --commit) do_commit=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) ref="$1"; shift ;;
+    esac
+  done
+
+  [[ -z "$ref" ]] && { echo "Usage: thread <id> remove [--commit [-m msg]]" >&2; return 1; }
+
+  local file
+  file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
+
+  local name
+  name=$(get_field "$file" "name")
+
+  local rel_file="${file#$WORKSPACE/}"
+  local was_tracked=false
+  git -C "$WORKSPACE" ls-files --error-unmatch "$rel_file" &>/dev/null && was_tracked=true
+
+  rm "$file"
+  echo "Removed: $file"
+
+  if ! $was_tracked; then
+    echo "Note: Thread was never committed to git, no commit needed."
+  elif $do_commit; then
+    [[ -z "$message" ]] && message="threads: remove '$name'"
+    git -C "$WORKSPACE" add "$rel_file"
+    git -C "$WORKSPACE" commit -m "$message"
+    git -C "$WORKSPACE" pull --rebase && git -C "$WORKSPACE" push
+  else
+    echo "Note: To commit this removal, run:"
+    echo "  git -C \"\$WORKSPACE\" add \"$rel_file\" && git -C \"\$WORKSPACE\" commit -m \"threads: remove '$name'\""
+  fi
+}
+
+cmd_commit() {
+  local message="" pending=false auto_msg=false ids=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: thread <id> commit [-m msg]  OR  threads commit --pending [-m msg]"; return 0 ;;
+      -m) message="$2"; shift 2 ;;
+      -m=*) message="${1#-m=}"; shift ;;
+      --pending) pending=true; shift ;;
+      --auto) auto_msg=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) ids+=("$1"); shift ;;
+    esac
+  done
+
+  local files=()
+
+  if [[ "$pending" == true ]]; then
+    # Collect all thread files with uncommitted changes
+    while IFS= read -r file; do
+      [[ -z "$file" ]] && continue
+      local relpath="${file#$WORKSPACE/}"
+      # Check if file has uncommitted changes (staged, unstaged, or untracked)
+      if ! git -C "$WORKSPACE" diff --quiet -- "$relpath" 2>/dev/null || \
+         ! git -C "$WORKSPACE" diff --cached --quiet -- "$relpath" 2>/dev/null || \
+         ! git -C "$WORKSPACE" ls-files --error-unmatch "$relpath" &>/dev/null; then
+        files+=("$file")
+      fi
+    done < <(find_threads)
+  else
+    # Resolve provided IDs to files
+    [[ ${#ids[@]} -eq 0 ]] && { echo "ERROR: Provide thread IDs or use --pending" >&2; return 1; }
+    for id in "${ids[@]}"; do
+      local file
+      file=$(find_thread_by_ref "$id") || { echo "Thread not found: $id" >&2; return 1; }
+      # Check if file actually has changes
+      local relpath="${file#$WORKSPACE/}"
+      if git -C "$WORKSPACE" diff --quiet -- "$relpath" 2>/dev/null && \
+         git -C "$WORKSPACE" diff --cached --quiet -- "$relpath" 2>/dev/null && \
+         git -C "$WORKSPACE" ls-files --error-unmatch "$relpath" &>/dev/null; then
+        echo "No changes in thread: $id"
+        continue
+      fi
+      files+=("$file")
+    done
+  fi
+
+  if [[ ${#files[@]} -eq 0 ]]; then
+    echo "No threads to commit."
+    return 0
+  fi
+
+  # Generate commit message if not provided
+  if [[ -z "$message" ]]; then
+    message=$(generate_commit_message "${files[@]}")
+    echo "Generated message: $message"
+    if [[ "$auto_msg" != true && -t 0 ]]; then
+      read -r -p "Proceed? [Y/n] " confirm
+      [[ "$confirm" =~ ^[Nn] ]] && { echo "Aborted."; return 1; }
+    fi
+  fi
+
+  # Stage all files
+  for file in "${files[@]}"; do
+    git -C "$WORKSPACE" add "$file" || { echo "ERROR: git add failed for $file" >&2; return 1; }
+  done
+
+  # Commit and push
+  git -C "$WORKSPACE" commit -m "$message" || { echo "ERROR: git commit failed" >&2; return 1; }
+  git -C "$WORKSPACE" pull --rebase && git -C "$WORKSPACE" push || { echo "WARNING: git push failed (commit succeeded)" >&2; return 0; }
+
+  echo "Committed ${#files[@]} thread(s)."
+}
+
+cmd_validate() {
+  local check_all=false target=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: threads validate [<path>] [--all]"; return 0 ;;
+      --all) check_all=true; shift ;;
+      *) target="$1"; shift ;;
+    esac
+  done
+
+  local files=()
+  if [[ -n "$target" ]]; then
+    if [[ -f "$target" ]]; then files+=("$target")
+    elif [[ -f "$WORKSPACE/$target" ]]; then files+=("$WORKSPACE/$target")
+    else echo "File not found: $target" >&2; return 1; fi
+  else
+    while IFS= read -r f; do files+=("$f"); done < <(find_threads)
+  fi
+
+  local errors=0
+  for file in "${files[@]}"; do
+    local relpath="${file#$WORKSPACE/}"
+    local name desc status
+    name=$(get_field "$file" "name")
+    [[ -z "$name" ]] && name=$(get_field "$file" "title")
+    desc=$(get_field "$file" "desc")
+    status=$(get_field "$file" "status")
+
+    local issues=()
+    [[ -z "$name" ]] && issues+=("missing name/title field")
+    [[ -z "$status" ]] && issues+=("missing status field")
+
+    if [[ -n "$status" ]]; then
+      local base
+      base=$(base_status "$status")
+      if ! echo "$base" | grep -qE "^($ACTIVE_STATUSES|$TERMINAL_STATUSES)$"; then
+        issues+=("invalid status '$base'")
+      fi
+    fi
+
+    if [[ ${#issues[@]} -gt 0 ]]; then
+      echo "WARN: $relpath: ${issues[*]}"
+      ((errors++)) || true
+    else
+      echo "OK: $relpath"
+    fi
+  done
+
+  [[ $errors -gt 0 ]] && return 1 || return 0
+}
+
+cmd_git() {
+  [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { echo "Usage: threads git"; return 0; }
+  local modified=()
+
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+    local relpath="${file#$WORKSPACE/}"
+    # Check if file has uncommitted changes
+    if ! git -C "$WORKSPACE" diff --quiet -- "$relpath" 2>/dev/null || \
+       ! git -C "$WORKSPACE" diff --cached --quiet -- "$relpath" 2>/dev/null || \
+       ! git -C "$WORKSPACE" ls-files --error-unmatch "$relpath" &>/dev/null; then
+      modified+=("$relpath")
+    fi
+  done < <(find_threads)
+
+  if [[ ${#modified[@]} -eq 0 ]]; then
+    echo "No pending thread changes."
+    return 0
+  fi
+
+  echo "Pending thread changes:"
+  for f in "${modified[@]}"; do
+    echo "  $f"
+  done
+  echo ""
+  echo "Suggested:"
+  echo "  git add ${modified[*]} && git commit -m \"threads: update\" && git push"
+}
+
+cmd_stats() {
+  local path_filter="" category_filter="" project_filter="" recursive=false
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) echo "Usage: threads stats [path] [-r]"; return 0 ;;
+      -r|--recursive) recursive=true; shift ;;
+      -*) echo "Unknown option: $1" >&2; return 1 ;;
+      *) path_filter="$1"; shift ;;
+    esac
+  done
+
+  # Parse path_filter to set category_filter and project_filter
+  if [[ -n "$path_filter" ]]; then
+    if [[ -d "$WORKSPACE/$path_filter" ]]; then
+      local pf_cat pf_proj
+      pf_cat=$(echo "$path_filter" | cut -d'/' -f1)
+      pf_proj=$(echo "$path_filter" | cut -d'/' -f2)
+      [[ -z "$pf_proj" || "$pf_proj" == "$pf_cat" ]] && pf_proj=""
+      category_filter="$pf_cat"
+      [[ -n "$pf_proj" ]] && project_filter="$pf_proj"
+    else
+      echo "Warning: Path '$path_filter' not found" >&2
+    fi
+  fi
+
+  # Determine scope description
+  local scope_desc
+  if [[ -n "$project_filter" && -n "$category_filter" ]]; then
+    scope_desc="project-level ($category_filter/$project_filter)"
+  elif [[ -n "$category_filter" ]]; then
+    scope_desc="category-level ($category_filter)"
+  else
+    scope_desc="workspace-level"
+  fi
+  local recursive_suffix=""
+  [[ "$recursive" == true ]] && recursive_suffix=" (including nested)"
+
+  declare -A counts
+  local total=0
+
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+
+    # Parse thread path for filtering
+    local parsed category project
+    parsed=$(parse_thread_path "$file")
+    IFS='|' read -r category project _ <<< "$parsed"
+
+    # Category filter
+    [[ -n "$category_filter" && "$category" != "$category_filter" ]] && continue
+
+    # Project filter
+    [[ -n "$project_filter" && "$project" != "$project_filter" ]] && continue
+
+    # Non-recursive: only threads at current level
+    if [[ "$recursive" != true ]]; then
+      if [[ -n "$project_filter" ]]; then
+        : # Already at project level
+      elif [[ -n "$category_filter" ]]; then
+        [[ "$project" != "-" ]] && continue
+      else
+        [[ "$category" != "-" ]] && continue
+      fi
+    fi
+
+    local status
+    status=$(get_field "$file" "status")
+    [[ -z "$status" ]] && status="(none)"
+    status=$(base_status "$status")
+    counts["$status"]=$((${counts["$status"]:-0} + 1))
+    total=$((total + 1))
+  done < <(find_threads)
+
+  echo "Stats for $scope_desc threads$recursive_suffix"
+  echo ""
+
+  if [[ $total -eq 0 ]]; then
+    echo "No threads found."
+    [[ "$recursive" != true ]] && echo "Hint: use -r to include nested categories/projects"
+    return 0
+  fi
+
+  # Sort by count descending
+  echo "| Status     | Count |"
+  echo "|------------|-------|"
+  for status in $(for k in "${!counts[@]}"; do echo "${counts[$k]} $k"; done | sort -rn | awk '{print $2}'); do
+    printf "| %-10s | %5d |\n" "$status" "${counts[$status]}"
+  done
+  echo "|------------|-------|"
+  printf "| %-10s | %5d |\n" "Total" "$total"
+}
+
+cmd_migrate() {
+  [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { echo "Usage: threads migrate [--commit]"; return 0; }
+  local do_commit=false
+  [[ "${1:-}" == "--commit" ]] && do_commit=true
+
+  local migrated=0 renamed=0 skipped=0
+
+  while IFS= read -r file; do
+    [[ -z "$file" ]] && continue
+
+    local filename existing_id needs_id=false needs_rename=false
+    filename=$(basename "$file" .md)
+    existing_id=$(get_field "$file" "id")
+
+    # Check if file already has ID-prefixed name
+    if [[ "$filename" =~ ^[0-9a-f]{6}- ]]; then
+      ((skipped++)) || true
+      continue
+    fi
+
+    # Determine what needs to be done
+    if [[ -z "$existing_id" ]]; then
+      needs_id=true
+      existing_id=$(generate_id) || { echo "ERROR: Failed to generate ID for $file" >&2; continue; }
+    fi
+    needs_rename=true
+
+    # Add id: field to frontmatter if needed
+    if $needs_id; then
+      yq -f process -i ".id = \"$existing_id\"" "$file"
+    fi
+
+    # Rename file to ID-prefixed format
+    local slug="$filename"
+    local new_filename="${existing_id}-${slug}.md"
+    local new_path="$(dirname "$file")/$new_filename"
+    mv "$file" "$new_path"
+
+    if $needs_id; then
+      echo "Migrated: $new_path (new id: $existing_id)"
+      ((migrated++)) || true
+    else
+      echo "Renamed: $new_path (existing id: $existing_id)"
+      ((renamed++)) || true
+    fi
+  done < <(find_threads)
+
+  echo ""
+  echo "Migrated (new id + rename): $migrated, Renamed (existing id): $renamed, Skipped (already done): $skipped"
+
+  if [[ $((migrated + renamed)) -gt 0 ]]; then
+    if $do_commit; then
+      git -C "$WORKSPACE" add -A "$WORKSPACE/.threads" "$WORKSPACE"/*/.threads "$WORKSPACE"/*/*/.threads 2>/dev/null || true
+      git -C "$WORKSPACE" commit -m "threads: migrate $((migrated + renamed)) threads to ID-prefixed filenames"
+      git -C "$WORKSPACE" pull --rebase && git -C "$WORKSPACE" push
+    else
+      echo "Note: Changes are uncommitted. Run 'threads migrate --commit' or commit manually."
+    fi
+  fi
+}
+
+# ============ MAIN ============
+
+[[ $# -eq 0 ]] && { usage; exit 1; }
+[[ "$1" == "-h" || "$1" == "--help" || "$1" == "help" ]] && { usage; exit 0; }
+
+cmd="$1"
+shift
+
+# Commands that don't need an id (workspace operations)
+case "$cmd" in
+  list) cmd_list "$@"; exit $? ;;
+  new) cmd_new "$@"; exit $? ;;
+  move) cmd_move "$@"; exit $? ;;
+  validate) cmd_validate "$@"; exit $? ;;
+  git) cmd_git "$@"; exit $? ;;
+  stats) cmd_stats "$@"; exit $? ;;
+  migrate) cmd_migrate "$@"; exit $? ;;
+esac
+
+# Commands that need an id (single-thread operations)
+# commit can work with or without id (--pending)
+if [[ "$cmd" == "commit" ]]; then
+  # Check if first arg looks like --pending or similar flag
+  if [[ "$1" == "--pending" || "$1" == "-h" || "$1" == "--help" || -z "$1" ]]; then
+    cmd_commit "$@"
+    exit $?
+  fi
+fi
+
+[[ $# -lt 1 ]] && { echo "Usage: threads <command> <id> [args]" >&2; echo "Run 'threads --help' for full usage." >&2; exit 1; }
+ref="$1"
+shift
+
+case "$cmd" in
+  read) cmd_read "$ref" "$@" ;;
+  status) cmd_status "$ref" "$@" ;;
+  update) cmd_update "$ref" "$@" ;;
+  body) cmd_body "$ref" "$@" ;;
+  note) cmd_note "$ref" "$@" ;;
+  todo) cmd_todo "$ref" "$@" ;;
+  log) cmd_log "$ref" "$@" ;;
+  resolve) cmd_resolve "$ref" "$@" ;;
+  reopen) cmd_reopen "$ref" "$@" ;;
+  remove|rm) cmd_remove "$ref" "$@" ;;
+  commit) cmd_commit "$ref" "$@" ;;
+  -h|--help|help) usage ;;
+  *) echo "Unknown command: $cmd" >&2; usage; exit 1 ;;
+esac
