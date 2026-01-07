@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "threads"
+version = "0.1.0"
+description = "Thread management CLI for LLM workflows"
+requires-python = ">=3.11"
+dependencies = [
+    "python-frontmatter>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.1",
+]
+
+# No entry point - use `python -m threads` to avoid shadowing bash version
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/threads"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
