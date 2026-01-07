@@ -785,7 +785,9 @@ cmd_update() {
     case "$1" in
       -h|--help) echo "Usage: thread <id> update [--title=X] [--desc=X] [--commit [-m msg]]"; return 0 ;;
       --title=*) new_title="${1#--title=}"; shift ;;
+      --title) new_title="$2"; shift 2 ;;
       --desc=*) new_desc="${1#--desc=}"; shift ;;
+      --desc) new_desc="$2"; shift 2 ;;
       -m) message="$2"; shift 2 ;;
       -m=*) message="${1#-m=}"; shift ;;
       --commit) do_commit=true; shift ;;
@@ -1463,6 +1465,7 @@ cmd_reopen() {
       -m=*) message="${1#-m=}"; shift ;;
       --commit) do_commit=true; shift ;;
       --status=*) new_status="${1#--status=}"; shift ;;
+      --status) new_status="$2"; shift 2 ;;
       -*) echo "Unknown option: $1" >&2; return 1 ;;
       *) ref="$1"; shift ;;
     esac
