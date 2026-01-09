@@ -1,7 +1,7 @@
 # threads CLI - Multi-language comparison study
 # Run tests and benchmarks across all implementations
 
-.PHONY: help test test-shell test-go test-python test-perl test-all test-validate benchmark clean
+.PHONY: help test test-shell test-go test-python test-perl test-all test-validate benchmark benchmark-quick benchmark-full clean
 
 # Default target
 help:
@@ -17,7 +17,9 @@ help:
 	@echo "  make test-validate - Verify tests pass individually (isolation check)"
 	@echo ""
 	@echo "Benchmarking:"
-	@echo "  make benchmark     - Run benchmarks across all implementations"
+	@echo "  make benchmark       - Run default benchmarks"
+	@echo "  make benchmark-quick - Quick benchmarks (~5 min)"
+	@echo "  make benchmark-full  - Full benchmark suite (~30 min)"
 	@echo ""
 	@echo "Building:"
 	@echo "  make build-go      - Build Go implementation"
@@ -84,6 +86,12 @@ test-validate-all: build-go
 benchmark: build-go
 	./test/benchmark.sh
 
+benchmark-quick: build-go
+	./test/benchmark.sh --quick
+
+benchmark-full: build-go
+	./test/benchmark.sh --full
+
 # Build targets
 build-go:
 	@if [ ! -f ./go/threads ] || [ ./go/threads -ot ./go/cmd/threads/main.go ]; then \
@@ -98,5 +106,6 @@ build-all: build-go
 clean:
 	$(MAKE) -C go clean 2>/dev/null || true
 	rm -rf ./python/.venv 2>/dev/null || true
+	rm -rf ./test/results/* 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
 	find . -name "__pycache__" -type d -delete 2>/dev/null || true

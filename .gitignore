@@ -1,0 +1,14 @@
+# Benchmark results (regenerated each run)
+test/results/
+
+# Go build artifacts
+go/threads
+
+# Python
+python/.venv/
+python/.uenv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
