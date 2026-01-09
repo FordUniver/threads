@@ -148,18 +148,22 @@ test_read_empty_body() {
 # Error Handling
 #
 
-# Test: arbitrary status value (implementations accept any string)
-test_arbitrary_status() {
-    begin_test "arbitrary status value is accepted"
+# Test: invalid status value is rejected
+test_invalid_status_rejected() {
+    begin_test "invalid status value is rejected"
     setup_test_workspace
 
     create_thread "abc123" "Test Thread" "active"
 
-    $THREADS_BIN status abc123 custom_status >/dev/null 2>&1
+    # Attempt to set invalid status - should fail
+    local exit_code
+    exit_code=$(get_exit_code $THREADS_BIN status abc123 custom_status)
+    assert_eq "1" "$exit_code" "should reject invalid status"
 
+    # Status should remain unchanged
     local status
     status=$(get_thread_field "abc123" "status")
-    assert_eq "custom_status" "$status" "should accept custom status"
+    assert_eq "active" "$status" "status should remain unchanged"
 
     teardown_test_workspace
     end_test
@@ -298,7 +302,7 @@ test_unicode_in_name
 test_long_thread_name
 test_empty_description
 test_read_empty_body
-test_arbitrary_status
+test_invalid_status_rejected
 test_missing_required_arg
 test_read_nonexistent
 test_status_with_reason

@@ -25,6 +25,13 @@ pub struct ReopenArgs {
 }
 
 pub fn run(args: ReopenArgs, ws: &Path) -> Result<(), String> {
+    if !thread::is_valid_status(&args.status) {
+        return Err(format!(
+            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred",
+            args.status
+        ));
+    }
+
     let file = workspace::find_by_ref(ws, &args.id)?;
 
     let mut t = Thread::parse(&file)?;

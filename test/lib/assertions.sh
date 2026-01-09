@@ -16,10 +16,12 @@ fi
 _TEST_PASSED=0
 _TEST_FAILED=0
 _TEST_CURRENT=""
+_CURRENT_TEST_FAILED=""
 
 # Start a test (call before assertions)
 begin_test() {
     _TEST_CURRENT="$1"
+    _CURRENT_TEST_FAILED=""
 }
 
 # Record pass
@@ -31,6 +33,7 @@ _pass() {
 # Record failure with details
 _fail() {
     local msg="$1"
+    _CURRENT_TEST_FAILED=1
     ((_TEST_FAILED++))
     local total=$((_TEST_PASSED + _TEST_FAILED))
     echo -e "${RED}not ok${NC} $total - $_TEST_CURRENT"
@@ -222,10 +225,13 @@ assert_gt() {
 
 # End test and record result
 end_test() {
-    if [[ $_TEST_FAILED -eq 0 ]] || [[ -z "$_TEST_CURRENT" ]]; then
+    # Only call _pass if this specific test didn't fail
+    # (_fail already printed the failure, so we don't print anything on failure)
+    if [[ -z "$_CURRENT_TEST_FAILED" ]] && [[ -n "$_TEST_CURRENT" ]]; then
         _pass
     fi
     _TEST_CURRENT=""
+    _CURRENT_TEST_FAILED=""
 }
 
 # Print summary and return appropriate exit code
@@ -247,6 +253,7 @@ reset_counters() {
     _TEST_PASSED=0
     _TEST_FAILED=0
     _TEST_CURRENT=""
+    _CURRENT_TEST_FAILED=""
 
     # Reset setup/teardown state for clean slate between test files
     if [[ -n "$TEST_WS" && -d "$TEST_WS" ]]; then

@@ -32,6 +32,10 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	ref := args[0]
 	newStatus := args[1]
 
+	if !thread.IsValidStatus(newStatus) {
+		return fmt.Errorf("invalid status '%s'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred", newStatus)
+	}
+
 	file, err := workspace.FindByRef(ws, ref)
 	if err != nil {
 		return err

@@ -314,6 +314,11 @@ sub cmd_new {
 
     my ($threads_dir, $cat, $proj, $level) = infer_scope($path);
 
+    # Validate status
+    unless (Threads::Thread::is_valid_status($opts{status})) {
+        die "Invalid status '$opts{status}'. Must be one of: " . join(', ', @Threads::Thread::ALL_STATUSES) . "\n";
+    }
+
     # Create thread
     my $thread = Threads::Thread->new(
         name   => $title,
@@ -568,6 +573,11 @@ sub cmd_status {
     my $id = shift @ARGV or die "Usage: threads status <id> <new-status>\n";
     my $new_status = shift @ARGV or die "Missing new status\n";
 
+    # Validate status
+    unless (Threads::Thread::is_valid_status($new_status)) {
+        die "Invalid status '$new_status'. Must be one of: " . join(', ', @Threads::Thread::ALL_STATUSES) . "\n";
+    }
+
     my $path = find_thread($id);
     my $thread = Threads::Thread->new_from_file($path);
 
@@ -637,6 +647,11 @@ sub cmd_reopen {
     ) or return 1;
 
     my $id = shift @ARGV or die "Usage: threads reopen <id> [--status=...]\n";
+
+    # Validate status
+    unless (Threads::Thread::is_valid_status($opts{status})) {
+        die "Invalid status '$opts{status}'. Must be one of: " . join(', ', @Threads::Thread::ALL_STATUSES) . "\n";
+    }
 
     my $path = find_thread($id);
     my $thread = Threads::Thread->new_from_file($path);

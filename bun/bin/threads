@@ -3,7 +3,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { Thread, extractIDFromPath, extractNameFromPath, baseStatus, isTerminal, isValidStatus } from '../src/thread';
+import { Thread, extractIDFromPath, extractNameFromPath, baseStatus, isTerminal, isValidStatus, ALL_STATUSES } from '../src/thread';
 import { findWorkspace, findAllThreads, inferScope, parseThreadPath, generateID, slugify, findByRef } from '../src/workspace';
 import { insertLogEntry, addNote, removeByHash, editByHash, addTodoItem, setTodoChecked, countMatchingItems, replaceSection, appendToSection } from '../src/section';
 import { formatDate, formatTime, getErrorMessage } from '../src/utils';
@@ -291,6 +291,12 @@ async function cmdNew(args: string[]): Promise<void> {
   const newDesc = (flags.desc || '') as string;
   let newBody = (flags.body || '') as string;
 
+  // Validate status if provided via --status
+  if (flags.status && !isValidStatus(newStatus)) {
+    console.error(`Error: Invalid status '${newStatus}'. Must be one of: ${ALL_STATUSES.join(', ')}`);
+    process.exit(1);
+  }
+
   // Warn if no description provided
   if (!newDesc) {
     console.error('Warning: No --desc provided. Add one with: threads update <id> --desc "..."');
@@ -418,6 +424,12 @@ async function cmdStatus(args: string[]): Promise<void> {
 
   const ref = positional[0];
   const newStatus = positional[1];
+
+  // Validate status before applying
+  if (!isValidStatus(newStatus)) {
+    console.error(`Error: Invalid status '${newStatus}'. Must be one of: ${ALL_STATUSES.join(', ')}`);
+    process.exit(1);
+  }
 
   let file: string;
   try {
@@ -932,6 +944,12 @@ async function cmdReopen(args: string[]): Promise<void> {
 
   const ref = positional[0];
   const reopenStatus = (flags.status || 'active') as string;
+
+  // Validate status if provided via --status
+  if (flags.status && !isValidStatus(reopenStatus)) {
+    console.error(`Error: Invalid status '${reopenStatus}'. Must be one of: ${ALL_STATUSES.join(', ')}`);
+    process.exit(1);
+  }
 
   let file: string;
   try {

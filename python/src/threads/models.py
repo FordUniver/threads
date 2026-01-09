@@ -9,6 +9,22 @@ TERMINAL_STATUSES = frozenset({"resolved", "superseded", "deferred"})
 ALL_STATUSES = ACTIVE_STATUSES | TERMINAL_STATUSES
 
 
+def base_status(status: str) -> str:
+    """Extract base status from a status string that may have a parenthetical suffix."""
+    return status.split(" (")[0]
+
+
+def validate_status(status: str) -> None:
+    """Validate that a status string has a valid base status.
+
+    Raises:
+        ValueError: If the base status is not in ALL_STATUSES.
+    """
+    base = base_status(status)
+    if base not in ALL_STATUSES:
+        raise ValueError(f"Invalid status '{status}'. Must be one of: {', '.join(sorted(ALL_STATUSES))}")
+
+
 @dataclass
 class Note:
     """A note entry with hash identifier."""

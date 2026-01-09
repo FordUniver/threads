@@ -5,7 +5,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from ..models import LogEntry, Thread
+from ..models import LogEntry, Thread, validate_status
 from ..storage import find_threads, save_thread, load_thread
 from ..workspace import find_thread_by_ref, get_workspace, infer_scope
 
@@ -53,6 +53,9 @@ def cmd_new(
     Returns:
         The generated thread ID.
     """
+    # Validate status before proceeding
+    validate_status(status)
+
     workspace = get_workspace()
 
     # Warn if no description

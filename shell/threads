@@ -21,6 +21,22 @@ WORKSPACE="$(get_workspace)"
 TERMINAL_STATUSES="resolved|superseded|deferred"
 ACTIVE_STATUSES="idea|planning|active|blocked|paused"
 
+# Exit with error message
+die() {
+  echo "ERROR: $1" >&2
+  exit 1
+}
+
+# Validate status value (base status must be valid)
+validate_status() {
+  local status="$1"
+  local base
+  base=$(base_status "$status")
+  if ! echo "$base" | grep -qE "^($ACTIVE_STATUSES|$TERMINAL_STATUSES)$"; then
+    die "Invalid status '$status'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred"
+  fi
+}
+
 # Cache for find_threads results (cleared on mutations)
 _THREADS_CACHE=""
 _THREADS_CACHE_VALID=false
@@ -633,6 +649,9 @@ cmd_new() {
 
   [[ -z "$title" ]] && { echo "Usage: threads new [path] <title> [--status=X] [--desc=X] [--body=X] [--commit [-m msg]]" >&2; return 1; }
 
+  # Validate status if provided
+  validate_status "$status"
+
   # Warn if no description provided
   if [[ -z "$desc" ]]; then
     echo "Warning: No --desc provided. Add one with: thread <id> update --desc \"...\"" >&2
@@ -812,6 +831,9 @@ cmd_status() {
   fi
 
   [[ -z "$ref" || -z "$new_status" ]] && { echo "Usage: thread <id> status <new-status> [--commit [-m msg]]" >&2; return 1; }
+
+  # Validate status before applying
+  validate_status "$new_status"
 
   # Find thread by ID or name
   local file
@@ -1533,6 +1555,9 @@ cmd_reopen() {
   done
 
   [[ -z "$ref" ]] && { echo "Usage: thread <id> reopen [--status=X] [--commit [-m msg]]" >&2; return 1; }
+
+  # Validate status before applying
+  validate_status "$new_status"
 
   # Find thread by ID or name
   local file

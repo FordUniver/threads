@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..git import git_add, git_commit, git_pull_rebase, git_push, is_modified, is_tracked, get_file_status
-from ..models import LogEntry, Thread
+from ..models import LogEntry, Thread, validate_status
 from ..storage import find_threads, load_thread, save_thread
 from ..workspace import find_thread_by_ref, get_workspace, infer_scope, parse_thread_path
 
@@ -95,6 +95,9 @@ def cmd_status(
     message: str | None = None,
 ) -> None:
     """Change thread status."""
+    # Validate status before proceeding
+    validate_status(new_status)
+
     workspace = get_workspace()
     file_path = find_thread_by_ref(ref, workspace)
     thread = load_thread(file_path)
@@ -142,6 +145,9 @@ def cmd_reopen(
     message: str | None = None,
 ) -> None:
     """Reopen a resolved thread."""
+    # Validate status before proceeding
+    validate_status(new_status)
+
     workspace = get_workspace()
     file_path = find_thread_by_ref(ref, workspace)
     thread = load_thread(file_path)

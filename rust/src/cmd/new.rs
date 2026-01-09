@@ -6,6 +6,7 @@ use chrono::Local;
 use clap::Args;
 
 use crate::git;
+use crate::thread;
 use crate::workspace;
 
 #[derive(Args)]
@@ -38,6 +39,14 @@ pub struct NewArgs {
 }
 
 pub fn run(args: NewArgs, ws: &Path) -> Result<(), String> {
+    // Validate status early
+    if !thread::is_valid_status(&args.status) {
+        return Err(format!(
+            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred",
+            args.status
+        ));
+    }
+
     // Parse positional args: either [title] or [path, title]
     let (path, title) = if args.args.len() == 2 {
         (args.args[0].clone(), args.args[1].clone())

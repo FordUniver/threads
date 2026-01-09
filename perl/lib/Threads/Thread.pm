@@ -89,9 +89,10 @@ sub status { $_[0]->{status} }
 sub path   { $_[0]->{path} }
 
 # Status without reason (e.g., "resolved (duplicate)" -> "resolved")
+# Can be called as method ($thread->base_status) or function (base_status($str))
 sub base_status {
-    my ($self) = @_;
-    my $s = $self->{status};
+    my ($arg) = @_;
+    my $s = ref($arg) ? $arg->{status} : $arg;
     $s =~ s/\s.*//;
     return $s;
 }
@@ -100,6 +101,14 @@ sub is_terminal {
     my ($self) = @_;
     my $base = $self->base_status;
     return grep { $_ eq $base } @TERMINAL_STATUSES;
+}
+
+# Validate status string (can be called as function or method)
+# Accepts full status with parenthetical suffix like "blocked (waiting on review)"
+sub is_valid_status {
+    my ($status) = @_;
+    my $base = base_status($status);
+    return grep { $_ eq $base } @ALL_STATUSES;
 }
 
 # Setters

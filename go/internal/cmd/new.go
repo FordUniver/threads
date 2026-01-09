@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"git.zib.de/cspiegel/threads/internal/git"
+	"git.zib.de/cspiegel/threads/internal/thread"
 	"git.zib.de/cspiegel/threads/internal/workspace"
 )
 
@@ -60,6 +61,10 @@ func runNew(cmd *cobra.Command, args []string) error {
 
 	if title == "" {
 		return fmt.Errorf("title is required")
+	}
+
+	if !thread.IsValidStatus(newStatus) {
+		return fmt.Errorf("invalid status '%s'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred", newStatus)
 	}
 
 	// Warn if no description provided
