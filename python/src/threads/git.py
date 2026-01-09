@@ -63,7 +63,7 @@ def get_all_git_status(workspace: Path, refresh: bool = False) -> dict[Path, str
     if not refresh and workspace_resolved in _status_cache:
         return _status_cache[workspace_resolved]
 
-    result = run_git(["status", "--porcelain"], workspace, check=False)
+    result = run_git(["status", "--porcelain", "--untracked-files=all"], workspace, check=False)
     if result.returncode != 0:
         return {}
 

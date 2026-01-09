@@ -93,7 +93,8 @@ find_threads() {
     for f in "$WORKSPACE"/.threads/*.md \
              "$WORKSPACE"/*/.threads/*.md \
              "$WORKSPACE"/*/*/.threads/*.md; do
-      [[ -f "$f" && "$f" != *"/archive/"* ]] && echo "$f"
+      # Use if-then to avoid set -e failure when glob doesn't match
+      if [[ -f "$f" && "$f" != *"/archive/"* ]]; then echo "$f"; fi
     done | sort
   )
 
