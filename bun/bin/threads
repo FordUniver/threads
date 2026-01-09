@@ -6,6 +6,7 @@ import * as path from 'path';
 import { Thread, extractIDFromPath, extractNameFromPath, baseStatus, isTerminal, isValidStatus } from '../src/thread';
 import { findWorkspace, findAllThreads, inferScope, parseThreadPath, generateID, slugify, findByRef } from '../src/workspace';
 import { insertLogEntry, addNote, removeByHash, editByHash, addTodoItem, setTodoChecked, countMatchingItems, replaceSection, appendToSection } from '../src/section';
+import { formatDate, formatTime, getErrorMessage } from '../src/utils';
 import * as git from '../src/git';
 
 // Parse command line arguments
@@ -19,8 +20,8 @@ function getWorkspace(): string {
   if (!ws) {
     try {
       ws = findWorkspace();
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   }
@@ -73,21 +74,6 @@ async function readStdin(): Promise<string> {
     chunks.push(Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString('utf-8');
-}
-
-// Format date as YYYY-MM-DD
-function formatDate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-// Format time as HH:MM
-function formatTime(date: Date): string {
-  const h = String(date.getHours()).padStart(2, '0');
-  const m = String(date.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
 }
 
 // Truncate string for display
@@ -326,8 +312,8 @@ async function cmdNew(args: string[]): Promise<void> {
   let scope;
   try {
     scope = inferScope(ws, targetPath);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -387,8 +373,8 @@ async function cmdNew(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [threadPath])) as string;
     try {
       git.autoCommit(ws, threadPath, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -411,8 +397,8 @@ async function cmdRead(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -436,8 +422,8 @@ async function cmdStatus(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -453,8 +439,8 @@ async function cmdStatus(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
     try {
       git.autoCommit(ws, file, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -484,8 +470,8 @@ async function cmdUpdate(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -508,8 +494,8 @@ async function cmdUpdate(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
     try {
       git.autoCommit(ws, file, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -548,8 +534,8 @@ async function cmdBody(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -570,8 +556,8 @@ async function cmdBody(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
     try {
       git.autoCommit(ws, file, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -595,8 +581,8 @@ async function cmdNote(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -679,8 +665,8 @@ async function cmdNote(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
     try {
       git.autoCommit(ws, file, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -704,8 +690,8 @@ async function cmdTodo(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -833,8 +819,8 @@ async function cmdTodo(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
     try {
       git.autoCommit(ws, file, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -868,8 +854,8 @@ async function cmdLog(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -883,8 +869,8 @@ async function cmdLog(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
     try {
       git.autoCommit(ws, file, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -907,8 +893,8 @@ async function cmdResolve(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -925,8 +911,8 @@ async function cmdResolve(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
     try {
       git.autoCommit(ws, file, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -950,8 +936,8 @@ async function cmdReopen(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -968,8 +954,8 @@ async function cmdReopen(args: string[]): Promise<void> {
     const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
     try {
       git.autoCommit(ws, file, msg);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
   } else {
@@ -992,8 +978,8 @@ async function cmdRemove(args: string[]): Promise<void> {
   let file: string;
   try {
     file = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
@@ -1019,8 +1005,8 @@ async function cmdRemove(args: string[]): Promise<void> {
       git.add(ws, relPath);
       git.commit(ws, [relPath], msg);
       git.push(ws);
-    } catch (e: any) {
-      console.log(`WARNING: ${e.message}`);
+    } catch (e: unknown) {
+      console.log(`WARNING: ${getErrorMessage(e)}`);
     }
   } else {
     console.log('Note: To commit this removal, run:');
@@ -1044,15 +1030,15 @@ async function cmdMove(args: string[]): Promise<void> {
   let srcFile: string;
   try {
     srcFile = findByRef(ws, ref);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
   let scope;
   try {
     scope = inferScope(ws, newPath);
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error(`Error: invalid path: ${newPath}`);
     process.exit(1);
   }
@@ -1082,8 +1068,8 @@ async function cmdMove(args: string[]): Promise<void> {
       const msg = (flags.m || `threads: move ${path.basename(srcFile)} to ${scope.levelDesc}`) as string;
       git.commit(ws, [relSrc, relDest], msg);
       git.push(ws);
-    } catch (e: any) {
-      console.log(`WARNING: ${e.message}`);
+    } catch (e: unknown) {
+      console.log(`WARNING: ${getErrorMessage(e)}`);
     }
   } else {
     console.log('Note: Use --commit to commit this move');
@@ -1121,8 +1107,8 @@ async function cmdCommit(args: string[]): Promise<void> {
       let file: string;
       try {
         file = findByRef(ws, id);
-      } catch (e: any) {
-        console.error(`Error: ${e.message}`);
+      } catch (e: unknown) {
+        console.error(`Error: ${getErrorMessage(e)}`);
         process.exit(1);
       }
       const relPath = path.relative(ws, file);
@@ -1172,15 +1158,15 @@ async function cmdCommit(args: string[]): Promise<void> {
 
   try {
     git.commit(ws, relPaths, msg);
-  } catch (e: any) {
-    console.error(`Error: ${e.message}`);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
   }
 
   try {
     git.push(ws);
-  } catch (e: any) {
-    console.log(`WARNING: git push failed (commit succeeded): ${e.message}`);
+  } catch (e: unknown) {
+    console.log(`WARNING: git push failed (commit succeeded): ${getErrorMessage(e)}`);
   }
 
   console.log(`Committed ${files.length} thread(s).`);
@@ -1220,8 +1206,8 @@ async function cmdValidate(args: string[]): Promise<void> {
       } else if (!isValidStatus(t.status)) {
         issues.push(`invalid status '${baseStatus(t.status)}'`);
       }
-    } catch (e: any) {
-      issues.push(`parse error: ${e.message}`);
+    } catch (e: unknown) {
+      issues.push(`parse error: ${getErrorMessage(e)}`);
     }
 
     if (issues.length > 0) {

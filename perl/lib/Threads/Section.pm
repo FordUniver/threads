@@ -12,12 +12,29 @@ our @EXPORT_OK = qw(
     has_section
 );
 
+# Precompiled pattern generators for section operations
+sub _section_header_re {
+    my ($section) = @_;
+    return qr/^##\s*\Q$section\E\s*$/m;
+}
+
+sub _section_content_re {
+    my ($section) = @_;
+    return qr/^##\s*\Q$section\E\s*\n(.*?)(?=^##\s|\z)/ms;
+}
+
+sub _section_replace_re {
+    my ($section) = @_;
+    return qr/(^##\s*\Q$section\E\s*\n).*?(?=^##\s|\z)/ms;
+}
+
 # Get content of a markdown section (## Name)
 sub get_section {
     my ($content, $section) = @_;
+    my $re = _section_content_re($section);
 
     # Match section header and capture until next section or end
-    if ($content =~ /^##\s*\Q$section\E\s*\n(.*?)(?=^##\s|\z)/ms) {
+    if ($content =~ $re) {
         return $1;
     }
     return '';
@@ -26,7 +43,8 @@ sub get_section {
 # Check if a section exists
 sub has_section {
     my ($content, $section) = @_;
-    return $content =~ /^##\s*\Q$section\E\s*$/m;
+    my $re = _section_header_re($section);
+    return $content =~ $re;
 }
 
 # Set content of a markdown section (replaces existing or creates new)
@@ -38,7 +56,8 @@ sub set_section {
 
     if (has_section($content, $section)) {
         # Replace existing section content (header + content until next section or EOF)
-        $content =~ s/(^##\s*\Q$section\E\s*\n).*?(?=^##\s|\z)/$1$new_text/ms;
+        my $re = _section_replace_re($section);
+        $content =~ s/$re/$1$new_text/;
     } else {
         # Append new section at end
         $content =~ s/\n*$/\n/;  # Ensure single trailing newline

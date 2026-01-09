@@ -15,7 +15,10 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "Yams", package: "Yams"),
             ],
-            path: "Sources/threads"
+            path: "Sources/threads",
+            swiftSettings: [
+                .unsafeFlags(["-Osize", "-whole-module-optimization"], .when(configuration: .release))
+            ]
         ),
     ]
 )

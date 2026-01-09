@@ -13,6 +13,22 @@ import (
 	"git.zib.de/cspiegel/threads/internal/thread"
 )
 
+// Pre-compiled regexes for Slugify
+var (
+	nonAlphanumRe = regexp.MustCompile(`[^a-z0-9]+`)
+	multiHyphenRe = regexp.MustCompile(`-+`)
+	hexIDRe       = regexp.MustCompile(`^[0-9a-f]{6}$`)
+)
+
+// isUnderWorkspace checks if path is contained within workspace using proper path comparison
+func isUnderWorkspace(path, workspace string) bool {
+	rel, err := filepath.Rel(workspace, path)
+	if err != nil {
+		return false
+	}
+	return !strings.HasPrefix(rel, "..")
+}
+
 // Find returns the workspace root from $WORKSPACE
 func Find() (string, error) {
 	ws := os.Getenv("WORKSPACE")
@@ -88,7 +104,7 @@ func InferScope(ws, path string) (*Scope, error) {
 	}
 
 	// Must be within workspace
-	if !strings.HasPrefix(absPath, ws) {
+	if !isUnderWorkspace(absPath, ws) {
 		return &Scope{
 			ThreadsDir: filepath.Join(ws, ".threads"),
 			Category:   "-",
@@ -203,12 +219,10 @@ func Slugify(title string) string {
 	s := strings.ToLower(title)
 
 	// Replace non-alphanumeric with hyphens
-	re := regexp.MustCompile(`[^a-z0-9]+`)
-	s = re.ReplaceAllString(s, "-")
+	s = nonAlphanumRe.ReplaceAllString(s, "-")
 
 	// Clean up multiple hyphens
-	re = regexp.MustCompile(`-+`)
-	s = re.ReplaceAllString(s, "-")
+	s = multiHyphenRe.ReplaceAllString(s, "-")
 
 	// Trim leading/trailing hyphens
 	s = strings.Trim(s, "-")
@@ -224,8 +238,7 @@ func FindByRef(ws, ref string) (string, error) {
 	}
 
 	// Fast path: exact ID match
-	idRe := regexp.MustCompile(`^[0-9a-f]{6}$`)
-	if idRe.MatchString(ref) {
+	if hexIDRe.MatchString(ref) {
 		for _, t := range threads {
 			if thread.ExtractIDFromPath(t) == ref {
 				return t, nil

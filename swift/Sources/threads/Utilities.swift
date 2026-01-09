@@ -1,5 +1,35 @@
 import Foundation
 
+// MARK: - Cached Regex Patterns
+
+/// Container for pre-compiled regex patterns used across the codebase
+enum CachedRegex {
+    /// Matches 6-char hex ID prefix in filenames (e.g., "abc123-slug")
+    static let idPrefixCapture: NSRegularExpression = {
+        try! NSRegularExpression(pattern: #"^([0-9a-f]{6})-"#)
+    }()
+
+    /// Matches 6-char hex ID prefix (non-capturing)
+    static let idPrefix: NSRegularExpression = {
+        try! NSRegularExpression(pattern: #"^[0-9a-f]{6}-"#)
+    }()
+
+    /// Matches exact 6-char hex ID
+    static let exactId: NSRegularExpression = {
+        try! NSRegularExpression(pattern: #"^[0-9a-f]{6}$"#)
+    }()
+
+    /// Matches hash comments like <!-- abc1 -->
+    static let hashComment: NSRegularExpression = {
+        try! NSRegularExpression(pattern: #"<!--\s*([a-f0-9]{4})\s*-->"#)
+    }()
+
+    /// Matches ## Log section header
+    static let logSection: NSRegularExpression = {
+        try! NSRegularExpression(pattern: "(?m)^## Log")
+    }()
+}
+
 // Helper to get workspace with error handling
 func getWorkspace() throws -> String {
     try findWorkspace()
@@ -58,5 +88,17 @@ extension String {
             return self
         }
         return self + String(repeating: pad, count: length - self.count)
+    }
+
+    // Compute relative path from a base path
+    func relativePath(from base: String) -> String? {
+        let basePath = (base as NSString).standardizingPath
+        let selfPath = (self as NSString).standardizingPath
+        guard selfPath.hasPrefix(basePath) else { return nil }
+        var rel = String(selfPath.dropFirst(basePath.count))
+        if rel.hasPrefix("/") {
+            rel = String(rel.dropFirst())
+        }
+        return rel
     }
 }

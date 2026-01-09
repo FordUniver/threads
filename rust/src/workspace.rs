@@ -2,11 +2,24 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-use rand::Rng;
 use regex::Regex;
 
 use crate::thread;
+
+// Cached regexes for workspace operations
+static ID_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^[0-9a-f]{6}$").unwrap()
+});
+
+static SLUGIFY_NON_ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"[^a-z0-9]+").unwrap()
+});
+
+static SLUGIFY_MULTI_DASH_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"-+").unwrap()
+});
 
 /// Find the workspace root from $WORKSPACE
 pub fn find() -> Result<PathBuf, String> {
@@ -25,12 +38,6 @@ pub fn find() -> Result<PathBuf, String> {
 /// Find all thread file paths in the workspace
 pub fn find_all_threads(ws: &Path) -> Result<Vec<PathBuf>, String> {
     let mut threads = Vec::new();
-
-    // Patterns: workspace level, category level, project level
-    let _patterns = [
-        ws.join(".threads"),
-        ws.to_path_buf(), // Will check */threads below
-    ];
 
     // Workspace level
     if let Ok(entries) = fs::read_dir(ws.join(".threads")) {
@@ -258,9 +265,9 @@ pub fn generate_id(ws: &Path) -> Result<String, String> {
         }
     }
 
-    let mut rng = rand::thread_rng();
     for _ in 0..10 {
-        let bytes: [u8; 3] = rng.gen();
+        let mut bytes = [0u8; 3];
+        getrandom::getrandom(&mut bytes).map_err(|e| format!("random generation failed: {}", e))?;
         let id = hex::encode(bytes);
         if !existing.contains(&id) {
             return Ok(id);
@@ -273,10 +280,8 @@ pub fn generate_id(ws: &Path) -> Result<String, String> {
 /// Convert a title to kebab-case filename
 pub fn slugify(title: &str) -> String {
     let s = title.to_lowercase();
-    let re = Regex::new(r"[^a-z0-9]+").unwrap();
-    let s = re.replace_all(&s, "-");
-    let re = Regex::new(r"-+").unwrap();
-    let s = re.replace_all(&s, "-");
+    let s = SLUGIFY_NON_ALNUM_RE.replace_all(&s, "-");
+    let s = SLUGIFY_MULTI_DASH_RE.replace_all(&s, "-");
     s.trim_matches('-').to_string()
 }
 
@@ -285,8 +290,7 @@ pub fn find_by_ref(ws: &Path, ref_str: &str) -> Result<PathBuf, String> {
     let threads = find_all_threads(ws)?;
 
     // Fast path: exact ID match
-    let id_re = Regex::new(r"^[0-9a-f]{6}$").unwrap();
-    if id_re.is_match(ref_str) {
+    if ID_ONLY_RE.is_match(ref_str) {
         for t in &threads {
             if thread::extract_id_from_path(t).as_deref() == Some(ref_str) {
                 return Ok(t.clone());

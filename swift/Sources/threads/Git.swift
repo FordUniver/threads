@@ -1,45 +1,70 @@
 import Foundation
 
+// MARK: - Batched Git Status
+
+/// Cached result of git status --porcelain for a workspace
+private var cachedGitStatus: (ws: String, files: Set<String>)?
+
+/// gitStatusBatch runs `git status --porcelain` once and returns set of files with changes.
+/// Results are cached per workspace for the duration of the process.
+func gitStatusBatch(_ ws: String) -> Set<String> {
+    // Return cached result if same workspace
+    if let cached = cachedGitStatus, cached.ws == ws {
+        return cached.files
+    }
+
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", ws, "status", "--porcelain", "-uall"]
+
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return []
+    }
+
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    guard let output = String(data: data, encoding: .utf8) else {
+        return []
+    }
+
+    // Parse porcelain output: "XY filename" or "XY filename -> newname"
+    var files = Set<String>()
+    for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+        // Skip the status indicator (first 3 chars: "XY ")
+        guard line.count > 3 else { continue }
+        let idx = line.index(line.startIndex, offsetBy: 3)
+        var path = String(line[idx...])
+
+        // Handle renames: "R  old -> new"
+        if let arrowRange = path.range(of: " -> ") {
+            // Both old and new paths have changes
+            files.insert(String(path[..<arrowRange.lowerBound]))
+            path = String(path[arrowRange.upperBound...])
+        }
+
+        files.insert(path)
+    }
+
+    cachedGitStatus = (ws, files)
+    return files
+}
+
+/// Clears the cached git status (call when files are modified)
+func gitStatusClearCache() {
+    cachedGitStatus = nil
+}
+
 // hasChanges checks if a file has uncommitted changes (staged, unstaged, or untracked)
+// Uses batched git status for efficiency when checking multiple files.
 func gitHasChanges(_ ws: String, _ relPath: String) -> Bool {
-    // Check unstaged changes
-    let process1 = Process()
-    process1.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    process1.arguments = ["-C", ws, "diff", "--quiet", "--", relPath]
-    process1.standardOutput = FileHandle.nullDevice
-    process1.standardError = FileHandle.nullDevice
-    do {
-        try process1.run()
-        process1.waitUntilExit()
-        if process1.terminationStatus != 0 {
-            return true
-        }
-    } catch {
-        return true
-    }
-
-    // Check staged changes
-    let process2 = Process()
-    process2.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    process2.arguments = ["-C", ws, "diff", "--cached", "--quiet", "--", relPath]
-    process2.standardOutput = FileHandle.nullDevice
-    process2.standardError = FileHandle.nullDevice
-    do {
-        try process2.run()
-        process2.waitUntilExit()
-        if process2.terminationStatus != 0 {
-            return true
-        }
-    } catch {
-        return true
-    }
-
-    // Check if untracked
-    if !gitIsTracked(ws, relPath) {
-        return true
-    }
-
-    return false
+    let changedFiles = gitStatusBatch(ws)
+    return changedFiles.contains(relPath)
 }
 
 // isTracked checks if a file is tracked by git
@@ -112,6 +137,9 @@ func gitCommit(_ ws: String, _ files: [String], _ message: String) throws {
     try process.run()
     process.waitUntilExit()
 
+    // Clear status cache since files were committed
+    gitStatusClearCache()
+
     if process.terminationStatus != 0 {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(data: data, encoding: .utf8) ?? ""
@@ -160,13 +188,7 @@ func gitPush(_ ws: String) throws {
 
 // gitAutoCommit stages, commits, and pushes a file
 func gitAutoCommit(_ ws: String, _ file: String, _ message: String) throws {
-    var relPath = file
-    if file.hasPrefix(ws) {
-        relPath = String(file.dropFirst(ws.count))
-        if relPath.hasPrefix("/") {
-            relPath = String(relPath.dropFirst())
-        }
-    }
+    let relPath = file.relativePath(from: ws) ?? file
 
     try gitCommit(ws, [relPath], message)
 
@@ -185,16 +207,10 @@ func generateCommitMessage(_ ws: String, _ files: [String]) -> String {
     var deleted: [String] = []
 
     for file in files {
-        var relPath = file
-        if file.hasPrefix(ws) {
-            relPath = String(file.dropFirst(ws.count))
-            if relPath.hasPrefix("/") {
-                relPath = String(relPath.dropFirst())
-            }
-        }
+        let relPath = file.relativePath(from: ws) ?? file
 
         let filename = (file as NSString).lastPathComponent
-        var name = (filename as NSString).deletingPathExtension
+        let name = (filename as NSString).deletingPathExtension
 
         if gitExistsInHEAD(ws, relPath) {
             // File exists in HEAD

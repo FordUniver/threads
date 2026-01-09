@@ -6,7 +6,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
 build:
-	go build $(LDFLAGS) -o $(BINARY) ./cmd/threads
+	go build $(LDFLAGS) -trimpath -o $(BINARY) ./cmd/threads
 
 install:
 	go install $(LDFLAGS) ./cmd/threads

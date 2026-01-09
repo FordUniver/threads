@@ -1,5 +1,4 @@
 import Foundation
-import CommonCrypto
 
 // extractSection returns the content of a section (between ## Name and next ## or EOF)
 func extractSection(_ content: String, _ name: String) -> String {
@@ -61,15 +60,16 @@ func ensureSection(_ content: String, _ name: String, _ before: String) -> Strin
     return content + "\n## \(name)\n\n"
 }
 
-// generateHash creates a 4-character hash for an item
+// generateHash creates a 4-character hash for an item using FNV-1a
 func generateHash(_ text: String) -> String {
     let data = "\(text)\(Date().timeIntervalSince1970)"
-    let bytes = Array(data.utf8)
-    var digest = [UInt8](repeating: 0, count: Int(CC_MD5_DIGEST_LENGTH))
-    _ = bytes.withUnsafeBufferPointer { ptr in
-        CC_MD5(ptr.baseAddress, CC_LONG(bytes.count), &digest)
+    var hash: UInt64 = 14695981039346656037  // FNV offset basis
+    for byte in data.utf8 {
+        hash ^= UInt64(byte)
+        hash &*= 1099511628211  // FNV prime
     }
-    return digest.prefix(2).map { String(format: "%02x", $0) }.joined()
+    // Extract 2 bytes (4 hex chars)
+    return String(format: "%04x", hash & 0xFFFF)
 }
 
 // insertLogEntry adds a timestamped entry to the Log section
@@ -100,11 +100,9 @@ func insertLogEntry(_ content: String, _ entry: String) -> String {
     }
 
     // Check if Log section exists
-    let logPattern = "(?m)^## Log"
-    if let logRegex = try? NSRegularExpression(pattern: logPattern),
-       logRegex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)) != nil {
+    if CachedRegex.logSection.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)) != nil {
         // Insert new heading after ## Log
-        return logRegex.stringByReplacingMatches(
+        return CachedRegex.logSection.stringByReplacingMatches(
             in: content,
             range: NSRange(content.startIndex..., in: content),
             withTemplate: "## Log\n\n\(heading)\n\n\(bulletEntry)"
@@ -173,8 +171,6 @@ func editByHash(_ content: String, _ section: String, _ hash: String, _ newText:
     var found = false
 
     var result: [String] = []
-    let hashCommentPattern = #"<!--\s*([a-f0-9]{4})\s*-->"#
-    let hashRegex = try? NSRegularExpression(pattern: hashCommentPattern)
 
     for line in lines {
         if line.hasPrefix("## \(section)") {
@@ -186,8 +182,7 @@ func editByHash(_ content: String, _ section: String, _ hash: String, _ newText:
         if inSection && line.contains(hashPattern) && !found {
             found = true
             // Extract hash from line and rebuild
-            if let hashRegex = hashRegex,
-               let match = hashRegex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+            if let match = CachedRegex.hashComment.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
                let range = Range(match.range(at: 1), in: line) {
                 let extractedHash = String(line[range])
                 result.append("- \(newText)  <!-- \(extractedHash) -->")

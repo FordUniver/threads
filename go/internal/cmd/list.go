@@ -89,6 +89,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	for _, path := range threads {
 		t, err := thread.Parse(path)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to parse %s: %v\n", path, err)
 			continue
 		}
 

@@ -16,6 +16,9 @@ our @EXPORT_OK = qw(
     slugify
 );
 
+# Precompiled pattern for terminal status detection (quick check)
+our $TERMINAL_STATUS_RE = qr/^status:\s*(resolved|superseded|deferred)/m;
+
 # Get workspace root from WORKSPACE environment variable
 sub workspace_root {
     my $ws = $ENV{WORKSPACE} // '';
@@ -192,10 +195,7 @@ sub _is_terminal_status {
     read $fh, $content, 500;
     close $fh;
 
-    if ($content =~ /^status:\s*(resolved|superseded|deferred)/m) {
-        return 1;
-    }
-    return 0;
+    return $content =~ $TERMINAL_STATUS_RE ? 1 : 0;
 }
 
 # Convert title to filename slug

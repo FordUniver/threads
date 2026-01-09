@@ -12,7 +12,7 @@ use File::Spec;
 
 use Threads::Workspace qw(workspace_root infer_scope find_thread find_all_threads slugify);
 use Threads::Thread;
-use Threads::Git qw(git_commit git_commit_pending);
+use Threads::Git qw(git_commit git_commit_pending git_cmd git_capture);
 
 # Main entry point
 sub run {
@@ -729,13 +729,12 @@ sub cmd_remove {
     say "Removed: $path";
 
     if ($opts{commit}) {
-        my $ws = workspace_root();
-        my $rel = File::Spec->abs2rel($path, $ws);
-        system('git', '-C', $ws, 'add', $rel);
+        my $rel = File::Spec->abs2rel($path, workspace_root());
+        git_cmd('add', $rel);
         my $msg = $opts{message} // "threads: remove " . $thread->id;
-        system('git', '-C', $ws, 'commit', '-m', $msg);
-        system('git', '-C', $ws, 'pull', '--rebase');
-        system('git', '-C', $ws, 'push');
+        git_cmd('commit', '-m', $msg);
+        git_cmd('pull', '--rebase');
+        git_cmd('push');
     }
 
     return 0;
@@ -792,14 +791,13 @@ sub cmd_move {
     say "Moved: $old_path -> $new_path";
 
     if ($opts{commit}) {
-        my $ws = workspace_root();
-        my $old_rel = File::Spec->abs2rel($old_path, $ws);
-        my $new_rel = File::Spec->abs2rel($new_path, $ws);
-        system('git', '-C', $ws, 'add', $old_rel, $new_rel);
+        my $old_rel = File::Spec->abs2rel($old_path, workspace_root());
+        my $new_rel = File::Spec->abs2rel($new_path, workspace_root());
+        git_cmd('add', $old_rel, $new_rel);
         my $msg = $opts{message} // "threads: move " . $thread->id . " to $level";
-        system('git', '-C', $ws, 'commit', '-m', $msg);
-        system('git', '-C', $ws, 'pull', '--rebase');
-        system('git', '-C', $ws, 'push');
+        git_cmd('commit', '-m', $msg);
+        git_cmd('pull', '--rebase');
+        git_cmd('push');
     }
 
     _print_uncommitted_note($thread->id, $opts{commit});
@@ -819,8 +817,8 @@ sub cmd_git {
     for my $file (find_all_threads(recursive => 1, include_terminal => 1)) {
         my $rel = File::Spec->abs2rel($file, $ws);
 
-        # Check if file has uncommitted changes
-        my $status = `git -C "$ws" status --porcelain -- "$rel" 2>/dev/null`;
+        # Check if file has uncommitted changes (using safe capture)
+        my ($status) = git_capture('status', '--porcelain', '--', $rel);
         push @modified, $rel if $status;
     }
 

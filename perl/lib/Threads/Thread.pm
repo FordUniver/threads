@@ -12,6 +12,37 @@ our @ACTIVE_STATUSES = qw(idea planning active blocked paused);
 our @TERMINAL_STATUSES = qw(resolved superseded deferred);
 our @ALL_STATUSES = (@ACTIVE_STATUSES, @TERMINAL_STATUSES);
 
+# Precompiled regex patterns for notes/todos with hash markers
+# Pattern: "- content  <!-- hash -->" for notes
+# Pattern: "- [ ] content  <!-- hash -->" or "- [x] content  <!-- hash -->" for todos
+sub _note_edit_re {
+    my ($hash) = @_;
+    return qr/^(- ).*?(  <!-- $hash -->)$/m;
+}
+
+sub _note_remove_re {
+    my ($hash) = @_;
+    return qr/^- .*?  <!-- $hash -->\n/m;
+}
+
+sub _todo_check_re {
+    my ($hash) = @_;
+    return qr/^(- )\[ \](.*<!-- $hash -->)/m;
+}
+
+sub _todo_uncheck_re {
+    my ($hash) = @_;
+    return qr/^(- )\[x\](.*<!-- $hash -->)/m;
+}
+
+sub _todo_remove_re {
+    my ($hash) = @_;
+    return qr/^- \[[ x]\] .*?  <!-- $hash -->\n/m;
+}
+
+# Precompiled patterns for log date handling
+our $LOG_DATE_RE = qr/^### (\d{4}-\d{2}-\d{2})$/m;
+
 # Create new thread object from file
 sub new_from_file {
     my ($class, $path) = @_;
@@ -109,13 +140,15 @@ sub add_note {
 
 sub edit_note {
     my ($self, $hash, $new_text) = @_;
-    $self->{_body} =~ s/^(- ).*?(  <!-- $hash -->)$/$1$new_text$2/m
+    my $re = _note_edit_re($hash);
+    $self->{_body} =~ s/$re/$1$new_text$2/
         or die "Note $hash not found\n";
 }
 
 sub remove_note {
     my ($self, $hash) = @_;
-    $self->{_body} =~ s/^- .*?  <!-- $hash -->\n//m
+    my $re = _note_remove_re($hash);
+    $self->{_body} =~ s/$re//
         or die "Note $hash not found\n";
 }
 
@@ -130,19 +163,22 @@ sub add_todo {
 
 sub check_todo {
     my ($self, $hash) = @_;
-    $self->{_body} =~ s/^(- )\[ \](.*<!-- $hash -->)/$1\[x\]$2/m
+    my $re = _todo_check_re($hash);
+    $self->{_body} =~ s/$re/$1\[x\]$2/
         or die "Todo $hash not found or already checked\n";
 }
 
 sub uncheck_todo {
     my ($self, $hash) = @_;
-    $self->{_body} =~ s/^(- )\[x\](.*<!-- $hash -->)/$1\[ \]$2/m
+    my $re = _todo_uncheck_re($hash);
+    $self->{_body} =~ s/$re/$1\[ \]$2/
         or die "Todo $hash not found or already unchecked\n";
 }
 
 sub remove_todo {
     my ($self, $hash) = @_;
-    $self->{_body} =~ s/^- \[[ x]\] .*?  <!-- $hash -->\n//m
+    my $re = _todo_remove_re($hash);
+    $self->{_body} =~ s/$re//
         or die "Todo $hash not found\n";
 }
 

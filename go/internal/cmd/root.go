@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/spf13/cobra"
 
@@ -61,10 +60,4 @@ func init() {
 // getWorkspace returns the cached workspace path
 func getWorkspace() string {
 	return ws
-}
-
-// fatal prints an error and exits
-func fatal(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	os.Exit(1)
 }

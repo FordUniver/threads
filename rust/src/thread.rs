@@ -1,10 +1,32 @@
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 
 use chrono::Local;
 use md5::{Digest, Md5};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+
+// Cached regexes for hot paths
+static ID_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^([0-9a-f]{6})-").unwrap()
+});
+
+static HASH_COMMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"<!--\s*([a-f0-9]{4})\s*-->").unwrap()
+});
+
+static LOG_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^## Log").unwrap()
+});
+
+static NOTES_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)(^## Notes)\n").unwrap()
+});
+
+static TODO_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)(^## Todo)\n").unwrap()
+});
 
 /// Terminal statuses
 pub const TERMINAL_STATUSES: &[&str] = &["resolved", "superseded", "deferred"];
@@ -159,8 +181,7 @@ pub fn extract_id_from_path(path: &Path) -> Option<String> {
     let filename = path.file_name()?.to_string_lossy();
     let filename = filename.trim_end_matches(".md");
 
-    let re = Regex::new(r"^([0-9a-f]{6})-").ok()?;
-    re.captures(filename).map(|c| c[1].to_string())
+    ID_PREFIX_RE.captures(filename).map(|c| c[1].to_string())
 }
 
 /// Extract name from filename (after ID prefix)
@@ -171,8 +192,7 @@ pub fn extract_name_from_path(path: &Path) -> String {
         .unwrap_or_default();
     let filename = filename.trim_end_matches(".md");
 
-    let re = Regex::new(r"^[0-9a-f]{6}-").unwrap();
-    if re.is_match(filename) && filename.len() > 7 {
+    if ID_PREFIX_RE.is_match(filename) && filename.len() > 7 {
         filename[7..].to_string()
     } else {
         filename.to_string()
@@ -232,10 +252,9 @@ pub fn insert_log_entry(content: &str, entry: &str) -> String {
     }
 
     // Check if Log section exists
-    let log_re = Regex::new(r"(?m)^## Log").unwrap();
-    if log_re.is_match(content) {
+    if LOG_SECTION_RE.is_match(content) {
         // Insert new heading after ## Log
-        return log_re
+        return LOG_SECTION_RE
             .replace(content, format!("## Log\n\n{}\n\n{}", heading, bullet_entry))
             .to_string();
     }
@@ -311,8 +330,7 @@ pub fn add_note(content: &str, text: &str) -> (String, String) {
     let note_entry = format!("- {}  <!-- {} -->", text, hash);
 
     // Insert at top of Notes section
-    let re = Regex::new(r"(?m)(^## Notes)\n").unwrap();
-    let new_content = re
+    let new_content = NOTES_SECTION_RE
         .replace(&content, format!("$1\n\n{}\n", note_entry))
         .to_string();
 
@@ -325,8 +343,7 @@ pub fn add_todo_item(content: &str, text: &str) -> (String, String) {
     let todo_entry = format!("- [ ] {}  <!-- {} -->", text, hash);
 
     // Insert at top of Todo section
-    let re = Regex::new(r"(?m)(^## Todo)\n").unwrap();
-    let new_content = re
+    let new_content = TODO_SECTION_RE
         .replace(content, format!("$1\n\n{}\n", todo_entry))
         .to_string();
 
@@ -370,8 +387,6 @@ pub fn edit_by_hash(content: &str, section: &str, hash: &str, new_text: &str) ->
     let hash_pattern = format!("<!-- {}", hash);
     let mut found = false;
 
-    let hash_re = Regex::new(r"<!--\s*([a-f0-9]{4})\s*-->").unwrap();
-
     for line in lines {
         if line.starts_with(&format!("## {}", section)) {
             in_section = true;
@@ -382,7 +397,7 @@ pub fn edit_by_hash(content: &str, section: &str, hash: &str, new_text: &str) ->
         if in_section && line.contains(&hash_pattern) && !found {
             found = true;
             // Extract hash and rebuild
-            if let Some(caps) = hash_re.captures(line) {
+            if let Some(caps) = HASH_COMMENT_RE.captures(line) {
                 let h = &caps[1];
                 result.push(format!("- {}  <!-- {} -->", new_text, h));
                 continue;

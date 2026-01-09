@@ -181,14 +181,7 @@ class Thread {
 
     // relPath returns the path relative to workspace
     func relPath(_ ws: String) -> String {
-        if path.hasPrefix(ws) {
-            var rel = String(path.dropFirst(ws.count))
-            if rel.hasPrefix("/") {
-                rel = String(rel.dropFirst())
-            }
-            return rel
-        }
-        return path
+        return path.relativePath(from: ws) ?? path
     }
 }
 
@@ -198,9 +191,7 @@ func extractIDFromPath(_ path: String) -> String {
     let base = (filename as NSString).deletingPathExtension
 
     // Check for ID prefix pattern: abc123-slug
-    let pattern = #"^([0-9a-f]{6})-"#
-    if let regex = try? NSRegularExpression(pattern: pattern),
-       let match = regex.firstMatch(in: base, range: NSRange(base.startIndex..., in: base)),
+    if let match = CachedRegex.idPrefixCapture.firstMatch(in: base, range: NSRange(base.startIndex..., in: base)),
        let range = Range(match.range(at: 1), in: base) {
         return String(base[range])
     }
@@ -213,9 +204,7 @@ func extractNameFromPath(_ path: String) -> String {
     let base = (filename as NSString).deletingPathExtension
 
     // Check for ID prefix pattern: abc123-slug
-    let pattern = #"^[0-9a-f]{6}-"#
-    if let regex = try? NSRegularExpression(pattern: pattern),
-       regex.firstMatch(in: base, range: NSRange(base.startIndex..., in: base)) != nil {
+    if CachedRegex.idPrefix.firstMatch(in: base, range: NSRange(base.startIndex..., in: base)) != nil {
         // Skip the ID prefix (7 chars: 6 hex + dash)
         return String(base.dropFirst(7))
     }

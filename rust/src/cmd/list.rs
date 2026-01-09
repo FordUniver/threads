@@ -258,10 +258,12 @@ fn output_table(
     Ok(())
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+fn truncate(s: &str, max_chars: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count <= max_chars {
         s.to_string()
     } else {
-        format!("{}…", &s[..max - 1])
+        let truncated: String = s.chars().take(max_chars - 1).collect();
+        format!("{}…", truncated)
     }
 }

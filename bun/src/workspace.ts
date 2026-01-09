@@ -2,6 +2,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { extractIDFromPath, extractNameFromPath, Thread } from './thread';
 
+// Secure path containment check (prevents path traversal attacks)
+function isUnderWorkspace(filePath: string, workspace: string): boolean {
+  const relative = path.relative(workspace, filePath);
+  return !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 // Find workspace root from $WORKSPACE environment variable
 export function findWorkspace(): string {
   const ws = process.env.WORKSPACE || '';
@@ -105,8 +111,8 @@ export function inferScope(ws: string, targetPath: string): Scope {
     }
   }
 
-  // Must be within workspace
-  if (!absPath.startsWith(ws)) {
+  // Must be within workspace (use relative path check for security)
+  if (!isUnderWorkspace(absPath, ws)) {
     return {
       threadsDir: path.join(ws, '.threads'),
       category: '-',

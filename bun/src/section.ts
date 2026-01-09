@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import { formatDate, formatTime } from './utils';
 
 // Extract content of a section (between ## Name and next ## or EOF)
 export function extractSection(content: string, name: string): string {
@@ -61,21 +62,6 @@ export function generateHash(text: string): string {
   const data = `${text}${Date.now()}${Math.random()}`;
   const hash = crypto.createHash('md5').update(data).digest('hex');
   return hash.substring(0, 4);
-}
-
-// Format date as YYYY-MM-DD
-function formatDate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-// Format time as HH:MM
-function formatTime(date: Date): string {
-  const h = String(date.getHours()).padStart(2, '0');
-  const m = String(date.getMinutes()).padStart(2, '0');
-  return `${h}:${m}`;
 }
 
 // Insert a timestamped entry to the Log section

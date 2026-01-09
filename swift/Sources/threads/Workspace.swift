@@ -155,10 +155,7 @@ func inferScope(_ ws: String, _ path: String) throws -> Scope {
         )
     }
 
-    var rel = String(absPath.dropFirst(ws.count))
-    if rel.hasPrefix("/") {
-        rel = String(rel.dropFirst())
-    }
+    let rel = absPath.relativePath(from: ws) ?? ""
 
     if rel.isEmpty {
         return Scope(
@@ -196,13 +193,7 @@ func inferScope(_ ws: String, _ path: String) throws -> Scope {
 
 // parseThreadPath extracts category, project, and name from a thread file path
 func parseThreadPath(_ ws: String, _ path: String) -> (category: String, project: String, name: String) {
-    var rel = path
-    if path.hasPrefix(ws) {
-        rel = String(path.dropFirst(ws.count))
-        if rel.hasPrefix("/") {
-            rel = String(rel.dropFirst())
-        }
-    }
+    let rel = path.relativePath(from: ws) ?? path
 
     let filename = (path as NSString).lastPathComponent
     let base = (filename as NSString).deletingPathExtension
@@ -287,9 +278,7 @@ func findByRef(_ ws: String, _ ref: String) throws -> String {
     let threads = try findAllThreads(ws)
 
     // Fast path: exact ID match (6 hex chars)
-    let idPattern = #"^[0-9a-f]{6}$"#
-    if let regex = try? NSRegularExpression(pattern: idPattern),
-       regex.firstMatch(in: ref, range: NSRange(ref.startIndex..., in: ref)) != nil {
+    if CachedRegex.exactId.firstMatch(in: ref, range: NSRange(ref.startIndex..., in: ref)) != nil {
         for t in threads {
             if extractIDFromPath(t) == ref {
                 return t

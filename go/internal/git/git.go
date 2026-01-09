@@ -2,6 +2,7 @@ package git
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -182,6 +183,6 @@ func isHex(s string) bool {
 }
 
 func fileExists(path string) bool {
-	_, err := exec.Command("test", "-f", path).Output()
+	_, err := os.Stat(path)
 	return err == nil
 }

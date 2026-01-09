@@ -73,6 +73,6 @@ fn read_stdin_if_available() -> String {
 }
 
 fn is_stdin_piped() -> bool {
-    use std::os::unix::io::AsRawFd;
-    unsafe { libc::isatty(io::stdin().as_raw_fd()) == 0 }
+    use std::io::IsTerminal;
+    !io::stdin().is_terminal()
 }

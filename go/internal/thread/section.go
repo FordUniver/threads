@@ -9,14 +9,26 @@ import (
 	"time"
 )
 
-// sectionRe matches section headers like "## Body", "## Notes", etc.
-var sectionRe = regexp.MustCompile(`(?m)^## (\w+)`)
+// Pre-compiled regexes for section operations
+var (
+	// sectionRe matches section headers like "## Body", "## Notes", etc.
+	sectionRe = regexp.MustCompile(`(?m)^## (\w+)`)
 
-// hashCommentRe matches hash comments like "<!-- abc1 -->"
-var hashCommentRe = regexp.MustCompile(`<!--\s*([a-f0-9]{4})\s*-->`)
+	// hashCommentRe matches hash comments like "<!-- abc1 -->"
+	hashCommentRe = regexp.MustCompile(`<!--\s*([a-f0-9]{4})\s*-->`)
 
-// todoItemRe matches todo items like "- [ ] item" or "- [x] item"
-var todoItemRe = regexp.MustCompile(`^- \[([ x])\] (.+?)\s*(<!--\s*[a-f0-9]{4}\s*-->)?$`)
+	// todoItemRe matches todo items like "- [ ] item" or "- [x] item"
+	todoItemRe = regexp.MustCompile(`^- \[([ x])\] (.+?)\s*(<!--\s*[a-f0-9]{4}\s*-->)?$`)
+
+	// logSectionRe matches the Log section header
+	logSectionRe = regexp.MustCompile(`(?m)^## Log`)
+
+	// notesSectionRe matches Notes section header for insertion
+	notesSectionRe = regexp.MustCompile(`(?m)(^## Notes\n)`)
+
+	// todoSectionRe matches Todo section header for insertion
+	todoSectionRe = regexp.MustCompile(`(?m)(^## Todo\n)`)
+)
 
 // ExtractSection returns the content of a section (between ## Name and next ## or EOF)
 func ExtractSection(content, name string) string {
@@ -95,10 +107,9 @@ func InsertLogEntry(content, entry string) string {
 	}
 
 	// Check if Log section exists
-	logPattern := regexp.MustCompile(`(?m)^## Log`)
-	if logPattern.MatchString(content) {
+	if logSectionRe.MatchString(content) {
 		// Insert new heading after ## Log
-		return logPattern.ReplaceAllString(content, fmt.Sprintf("## Log\n\n%s\n\n%s", heading, bulletEntry))
+		return logSectionRe.ReplaceAllString(content, fmt.Sprintf("## Log\n\n%s\n\n%s", heading, bulletEntry))
 	}
 
 	// No Log section - append one
@@ -114,8 +125,7 @@ func AddNote(content, text string) (string, string) {
 	noteEntry := fmt.Sprintf("- %s  <!-- %s -->", text, hash)
 
 	// Insert at top of Notes section
-	pattern := regexp.MustCompile(`(?m)(^## Notes\n)`)
-	newContent := pattern.ReplaceAllString(content, fmt.Sprintf("${1}\n%s\n", noteEntry))
+	newContent := notesSectionRe.ReplaceAllString(content, fmt.Sprintf("${1}\n%s\n", noteEntry))
 
 	return newContent, hash
 }
@@ -189,8 +199,7 @@ func AddTodoItem(content, text string) (string, string) {
 	todoEntry := fmt.Sprintf("- [ ] %s  <!-- %s -->", text, hash)
 
 	// Insert at top of Todo section
-	pattern := regexp.MustCompile(`(?m)(^## Todo\n)`)
-	newContent := pattern.ReplaceAllString(content, fmt.Sprintf("${1}\n%s\n", todoEntry))
+	newContent := todoSectionRe.ReplaceAllString(content, fmt.Sprintf("${1}\n%s\n", todoEntry))
 
 	return newContent, hash
 }
