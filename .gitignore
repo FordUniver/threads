@@ -1,6 +1,11 @@
 # Benchmark results (regenerated each run)
 test/results/
 
+# Build output directories (except python wrapper)
+go/bin/
+rust/bin/
+swift/bin/
+
 # Go build artifacts
 go/threads
 
