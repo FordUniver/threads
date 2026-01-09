@@ -116,8 +116,13 @@ parse_thread_path() {
     dir_part="${dir_part%/}"
     local category project
     category=$(echo "$dir_part" | cut -d'/' -f1)
-    project=$(echo "$dir_part" | cut -d'/' -f2-)
-    [[ -z "$project" ]] && project="-"
+    # Only extract project if there's a slash (otherwise cut returns whole string)
+    if [[ "$dir_part" == */* ]]; then
+      project=$(echo "$dir_part" | cut -d'/' -f2-)
+    else
+      project="-"
+    fi
+    [[ -z "$project" || "$project" == "$category" ]] && project="-"
     echo "$category|$project|$thread_name"
   fi
 }
@@ -428,7 +433,9 @@ cmd_list() {
     if [[ "$filename" =~ ^[0-9a-f]{6}- ]]; then
       tid="${filename:0:6}"
     else
-      tid="????"
+      # Fallback to frontmatter ID for non-standard filenames
+      tid=$(get_field "$file" "id")
+      [[ -z "$tid" ]] && tid="????"
     fi
 
     # Category filter (exact match)
@@ -635,10 +642,14 @@ cmd_new() {
   today=$(date '+%Y-%m-%d')
   timestamp=$(date '+%H:%M')
 
+  # Escape double quotes for yq filter expression
+  local title_escaped="${title//\"/\\\"}"
+  local desc_escaped="${desc//\"/\\\"}"
+
   # Write the file using yq for proper YAML escaping
   {
     echo '---'
-    yq -n ".id = \"$tid\" | .name = \"$title\" | .desc = \"$desc\" | .status = \"$status\""
+    yq -n ".id = \"$tid\" | .name = \"$title_escaped\" | .desc = \"$desc_escaped\" | .status = \"$status\""
     echo '---'
     echo ""
     [[ -n "$body" ]] && echo "$body" && echo ""
@@ -764,8 +775,11 @@ cmd_status() {
   local old_status
   old_status=$(get_field "$file" "status")
 
+  # Escape double quotes for yq filter expression
+  local new_status_escaped="${new_status//\"/\\\"}"
+
   # Update status in-place using yq
-  yq -f process -i ".status = \"$new_status\"" "$file"
+  yq -f process -i ".status = \"$new_status_escaped\"" "$file"
 
   echo "Status changed: $old_status → $new_status ($file)"
 
@@ -803,13 +817,15 @@ cmd_update() {
   local file
   file=$(find_thread_by_ref "$ref") || { echo "Thread not found: $ref" >&2; return 1; }
 
-  # Update fields in-place using yq (handles special chars properly)
+  # Update fields in-place using yq (escape quotes for filter expression)
   if [[ -n "$new_title" ]]; then
-    yq -f process -i ".name = \"$new_title\"" "$file"
+    local new_title_escaped="${new_title//\"/\\\"}"
+    yq -f process -i ".name = \"$new_title_escaped\"" "$file"
     echo "Title updated: $new_title"
   fi
   if [[ -n "$new_desc" ]]; then
-    yq -f process -i ".desc = \"$new_desc\"" "$file"
+    local new_desc_escaped="${new_desc//\"/\\\"}"
+    yq -f process -i ".desc = \"$new_desc_escaped\"" "$file"
     echo "Description updated: $new_desc"
   fi
 

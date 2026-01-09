@@ -91,3 +91,16 @@ skip_test() {
     echo "# SKIP: $reason"
     return 0
 }
+
+# Create test workspace with git repo initialized
+# Usage: setup_git_workspace
+# Sets up workspace and initializes git with test user config
+setup_git_workspace() {
+    setup_test_workspace
+    git -C "$TEST_WS" init -q
+    git -C "$TEST_WS" config user.email "test@threads.test"
+    git -C "$TEST_WS" config user.name "Test User"
+    # Initial commit so we have a valid HEAD
+    git -C "$TEST_WS" add .
+    git -C "$TEST_WS" commit -q -m "Initial test workspace" --allow-empty
+}

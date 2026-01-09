@@ -275,7 +275,7 @@ def cmd_git() -> None:
     print(f'  git add {files_str} && git commit -m "threads: update" && git push')
 
 
-def cmd_validate(path: str | None = None) -> bool:
+def cmd_validate(path: str | None = None, recursive: bool = False) -> bool:
     """Validate thread files. Returns True if all valid."""
     from ..models import ALL_STATUSES
 
@@ -283,14 +283,22 @@ def cmd_validate(path: str | None = None) -> bool:
     errors = 0
 
     if path:
-        if Path(path).is_file():
-            files = [Path(path)]
-        elif (workspace / path).is_file():
-            files = [workspace / path]
+        p = Path(path) if Path(path).is_absolute() else workspace / path
+        if p.is_file():
+            files = [p]
+        elif p.is_dir():
+            # Validate threads in this directory
+            if recursive:
+                files = list(p.glob("**/.threads/*.md"))
+            else:
+                files = list(p.glob(".threads/*.md"))
         else:
             raise ValueError(f"File not found: {path}")
     else:
-        files = find_threads(workspace)
+        if recursive:
+            files = find_threads(workspace)
+        else:
+            files = list(workspace.glob(".threads/*.md"))
 
     for file in files:
         rel_path = file.relative_to(workspace)

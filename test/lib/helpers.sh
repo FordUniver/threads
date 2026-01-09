@@ -186,3 +186,82 @@ wait_for_file() {
 
     [[ -f "$path" ]]
 }
+
+# Create a malformed thread file for validation testing
+# Usage: create_malformed_thread "abc123" "no_frontmatter|invalid_yaml|missing_id|missing_name|missing_status"
+create_malformed_thread() {
+    local id="$1"
+    local type="$2"
+    local path="${3:-$TEST_WS}"
+    local threads_dir="$path/.threads"
+    local filename="${id}-malformed.md"
+
+    mkdir -p "$threads_dir"
+
+    case "$type" in
+        no_frontmatter)
+            cat > "$threads_dir/$filename" << 'EOF'
+# No frontmatter here
+Just some content without YAML frontmatter.
+EOF
+            ;;
+        invalid_yaml)
+            cat > "$threads_dir/$filename" << 'EOF'
+---
+id: abc123
+name: [unclosed bracket
+status: active
+---
+
+## Body
+EOF
+            ;;
+        missing_id)
+            cat > "$threads_dir/$filename" << 'EOF'
+---
+name: Thread without ID
+status: active
+---
+
+## Body
+EOF
+            ;;
+        missing_name)
+            cat > "$threads_dir/$filename" << EOF
+---
+id: $id
+status: active
+---
+
+## Body
+EOF
+            ;;
+        missing_status)
+            cat > "$threads_dir/$filename" << EOF
+---
+id: $id
+name: Thread without status
+---
+
+## Body
+EOF
+            ;;
+        unclosed_frontmatter)
+            cat > "$threads_dir/$filename" << EOF
+---
+id: $id
+name: Unclosed frontmatter
+status: active
+
+## Body
+Content without closing delimiter
+EOF
+            ;;
+        *)
+            echo "Unknown malformed type: $type" >&2
+            return 1
+            ;;
+    esac
+
+    echo "$threads_dir/$filename"
+}

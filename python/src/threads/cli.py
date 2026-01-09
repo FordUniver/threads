@@ -179,6 +179,7 @@ def build_parser() -> argparse.ArgumentParser:
     # validate
     p_validate = subparsers.add_parser("validate", help="Validate thread files")
     p_validate.add_argument("path", nargs="?", help="Specific file or directory")
+    p_validate.add_argument("-r", "--recursive", action="store_true", help="Validate recursively")
 
     return parser
 
@@ -343,7 +344,7 @@ def main() -> int:
 
         elif args.command == "validate":
             from .commands.lifecycle import cmd_validate
-            if not cmd_validate(args.path):
+            if not cmd_validate(args.path, recursive=args.recursive):
                 return 1
 
         else:
