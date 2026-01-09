@@ -31,7 +31,14 @@ sub run {
     $method =~ s/-/_/g;
 
     if (__PACKAGE__->can($method)) {
-        return __PACKAGE__->$method(@argv);
+        my $result = eval { __PACKAGE__->$method(@argv) };
+        if ($@) {
+            my $msg = $@;
+            chomp $msg;
+            warn "$msg\n" if $msg && $msg !~ /^\s*$/;
+            return 1;
+        }
+        return $result // 0;
     } else {
         warn "Unknown command: $cmd\n";
         return 1;
@@ -156,6 +163,7 @@ sub cmd_list {
         }} @threads;
         say JSON::PP::encode_json(\@data);
     } else {
+        printf "Showing %d threads\n\n", scalar @threads;
         return 0 unless @threads;
         printf "%-8s %-10s %-12s %-12s %s\n", qw(ID STATUS CATEGORY PROJECT NAME);
         for my $item (@threads) {
@@ -715,16 +723,6 @@ sub cmd_remove {
 
     my $path = find_thread($id);
     my $thread = Threads::Thread->new_from_file($path);
-
-    unless ($opts{force}) {
-        print "Remove thread '" . $thread->name . "' ($id)? [y/N] ";
-        my $answer = <STDIN>;
-        chomp $answer;
-        unless ($answer =~ /^y(es)?$/i) {
-            say "Cancelled.";
-            return 0;
-        }
-    }
 
     unlink $path or die "Failed to remove: $!\n";
     say "Removed: $path";

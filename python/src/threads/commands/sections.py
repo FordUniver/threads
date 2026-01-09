@@ -47,6 +47,11 @@ def cmd_body(
     if sys.stdin.isatty():
         raise ValueError("No content provided (use stdin)")
 
+    import select
+    # Check if stdin has data available (non-blocking)
+    if not select.select([sys.stdin], [], [], 0.0)[0]:
+        raise ValueError("No content provided (stdin empty)")
+
     content = sys.stdin.read()
     if not content:
         raise ValueError("No content provided (use stdin)")
@@ -218,7 +223,10 @@ def cmd_log(
 
     # Read entry from stdin if not provided
     if entry is None and not sys.stdin.isatty():
-        entry = sys.stdin.read().strip()
+        import select
+        # Only read if stdin has data available (non-blocking check)
+        if select.select([sys.stdin], [], [], 0.0)[0]:
+            entry = sys.stdin.read().strip()
 
     if not entry:
         raise ValueError("No log entry provided")

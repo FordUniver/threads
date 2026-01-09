@@ -51,7 +51,9 @@ sub infer_scope {
     # Verify path is within workspace
     my $rel = File::Spec->abs2rel($abs_path, $ws_real);
     if ($rel =~ /^\.\./) {
-        die "Path is outside workspace: $path\n";
+        # Default to workspace level when path is outside (matches shell behavior)
+        warn "Warning: cwd outside workspace, defaulting to workspace level\n";
+        return ("$ws/.threads", '-', '-', 'workspace');
     }
 
     # Split relative path into components (max 2 levels: category/project)
@@ -91,17 +93,6 @@ sub find_thread {
         return $matches[0] if @matches == 1;
         if (@matches > 1) {
             die "Ambiguous thread ID '$id_or_name': multiple matches\n";
-        }
-    }
-
-    # Try partial ID match
-    if ($id_or_name =~ /^[0-9a-f]+$/i && length($id_or_name) >= 3) {
-        my @matches = _glob_all_levels($ws, "$id_or_name*.md");
-        return $matches[0] if @matches == 1;
-        if (@matches > 1) {
-            my @info = map { _thread_id_name($_) } @matches;
-            die "Ambiguous partial ID '$id_or_name'. Candidates:\n" .
-                join('', map { "  $_->[0]  $_->[1]\n" } @info);
         }
     }
 

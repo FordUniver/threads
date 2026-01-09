@@ -182,11 +182,11 @@ def find_thread_by_ref(ref: str, workspace: Path | None = None) -> Path:
     if re.match(r"^[0-9a-f]{6}$", ref):
         matches = []
         for pattern in [
-            workspace / ".threads" / f"{ref}-*.md",
-            workspace / "*" / ".threads" / f"{ref}-*.md",
-            workspace / "*" / "*" / ".threads" / f"{ref}-*.md",
+            f".threads/{ref}-*.md",
+            f"*/.threads/{ref}-*.md",
+            f"*/*/.threads/{ref}-*.md",
         ]:
-            matches.extend(pattern.parent.glob(pattern.name) if pattern.parent.exists() else [])
+            matches.extend(workspace.glob(pattern))
 
         if len(matches) == 1:
             return matches[0]

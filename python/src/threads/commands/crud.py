@@ -77,7 +77,10 @@ def cmd_new(
 
     # Read body from stdin if not provided and stdin has data
     if body is None and not sys.stdin.isatty():
-        body = sys.stdin.read()
+        import select
+        # Only read if stdin has data available (non-blocking check)
+        if select.select([sys.stdin], [], [], 0.0)[0]:
+            body = sys.stdin.read()
 
     # Create thread
     now = datetime.now()

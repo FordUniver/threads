@@ -205,14 +205,14 @@ def save_thread(thread: Thread) -> None:
 def find_threads(workspace: Path) -> list[Path]:
     """Find all thread files in workspace."""
     threads = []
-    # Check workspace, category, and project levels
+    # Check workspace, category, and project levels using glob patterns
     patterns = [
-        workspace / ".threads" / "*.md",
-        workspace / "*" / ".threads" / "*.md",
-        workspace / "*" / "*" / ".threads" / "*.md",
+        ".threads/*.md",
+        "*/.threads/*.md",
+        "*/*/.threads/*.md",
     ]
     for pattern in patterns:
-        threads.extend(pattern.parent.glob(pattern.name) if pattern.parent.exists() else [])
+        threads.extend(workspace.glob(pattern))
 
     # Filter out archive directories
     threads = [t for t in threads if "/archive/" not in str(t)]
