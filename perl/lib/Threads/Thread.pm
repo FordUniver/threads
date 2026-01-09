@@ -190,11 +190,30 @@ sub _parse_frontmatter {
     return (undef, $content) unless $content =~ /\A---\n(.+?)\n---\n(.*)/s;
     my ($yaml_str, $body) = ($1, $2);
 
+    # Pre-check for common malformed YAML that YAML::Tiny is lenient about
+    # Detect unclosed brackets/braces in values
+    for my $line (split /\n/, $yaml_str) {
+        if ($line =~ /:\s*\[[^\]]*$/ || $line =~ /:\s*\{[^\}]*$/) {
+            # Value starts with [ or { but doesn't close on same line
+            return (undef, $content);
+        }
+    }
+
     # YAML::Tiny expects document start marker
     my $yaml = YAML::Tiny->read_string("---\n$yaml_str\n");
-    return (undef, $content) unless $yaml && $yaml->[0];
 
-    return ($yaml->[0], $body);
+    # Check for parse errors (note: errstr is deprecated but still works)
+    if (!$yaml || !$yaml->[0]) {
+        return (undef, $content);
+    }
+
+    # Verify we got a hash (not an array or scalar from malformed YAML)
+    my $data = $yaml->[0];
+    unless (ref($data) eq 'HASH') {
+        return (undef, $content);
+    }
+
+    return ($data, $body);
 }
 
 sub _to_frontmatter {

@@ -4,6 +4,7 @@ use warnings;
 use v5.16;
 
 use open ':std', ':encoding(UTF-8)';
+use Cwd qw(abs_path);
 use Getopt::Long qw(:config pass_through no_auto_abbrev);
 use File::Basename qw(basename dirname);
 use File::Path qw(make_path);
@@ -238,9 +239,9 @@ sub cmd_stats {
 sub cmd_validate {
     my ($class, @args) = @_;
 
-    my $all = 0;
+    my %opts = (recursive => 0);
     local @ARGV = @args;
-    GetOptions('all' => \$all);
+    GetOptions('r|recursive' => \$opts{recursive});
 
     my $path = shift @ARGV // '.';
     my ($threads_dir, $cat, $proj, $level) = infer_scope($path);
@@ -248,7 +249,7 @@ sub cmd_validate {
     my @files = find_all_threads(
         category         => $cat,
         project          => $proj,
-        recursive        => 1,
+        recursive        => $opts{recursive},
         include_terminal => 1,
     );
 
@@ -760,8 +761,25 @@ sub cmd_move {
     my $old_path = find_thread($id);
     my $thread = Threads::Thread->new_from_file($old_path);
 
+    # Validate destination is within workspace
+    my $ws = workspace_root();
+    if (File::Spec->file_name_is_absolute($dest_path)) {
+        my $ws_real = abs_path($ws) // $ws;
+        my $dest_real = abs_path($dest_path);
+        unless ($dest_real && $dest_real =~ /^\Q$ws_real\E/) {
+            die "Invalid destination path: $dest_path\n";
+        }
+    }
+
     my ($threads_dir, $cat, $proj, $level) = infer_scope($dest_path);
-    make_path($threads_dir) unless -d $threads_dir;
+
+    # Verify we can create the destination directory
+    unless (-d $threads_dir) {
+        eval { make_path($threads_dir) };
+        if ($@ || !-d $threads_dir) {
+            die "Cannot create destination: $threads_dir\n";
+        }
+    }
 
     my $filename = basename($old_path);
     my $new_path = "$threads_dir/$filename";
@@ -785,6 +803,34 @@ sub cmd_move {
     }
 
     _print_uncommitted_note($thread->id, $opts{commit});
+    return 0;
+}
+
+# ============================================================================
+# Git command
+# ============================================================================
+
+sub cmd_git {
+    my ($class, @args) = @_;
+
+    my @modified;
+    my $ws = workspace_root();
+
+    for my $file (find_all_threads(recursive => 1, include_terminal => 1)) {
+        my $rel = File::Spec->abs2rel($file, $ws);
+
+        # Check if file has uncommitted changes
+        my $status = `git -C "$ws" status --porcelain -- "$rel" 2>/dev/null`;
+        push @modified, $rel if $status;
+    }
+
+    if (@modified) {
+        say "Pending thread changes:";
+        say "  $_" for @modified;
+    } else {
+        say "No pending thread changes.";
+    }
+
     return 0;
 }
 

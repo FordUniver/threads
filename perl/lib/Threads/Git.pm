@@ -48,14 +48,26 @@ sub git_commit_pending {
     my ($message) = @_;
     my $ws = workspace_root();
 
-    # Find modified .threads files
-    my @status = `git -C "$ws" status --porcelain`;
-    my @thread_files = grep { m{\.threads/.*\.md} } @status;
+    # Find all thread files on disk and check for uncommitted changes
+    my @thread_files;
+    my @candidates = (
+        glob("$ws/.threads/*.md"),
+        glob("$ws/*/.threads/*.md"),
+        glob("$ws/*/*/.threads/*.md"),
+    );
+
+    for my $file (@candidates) {
+        my $rel = File::Spec->abs2rel($file, $ws);
+        my $status = `git -C "$ws" status --porcelain -- "$rel" 2>/dev/null`;
+        push @thread_files, $rel if $status;
+    }
 
     return 0 unless @thread_files;
 
-    # Stage all threads
-    _workspace_git('add', '-A');
+    # Stage thread files
+    for my $file (@thread_files) {
+        _workspace_git('add', $file);
+    }
 
     # Commit
     $message //= 'threads: update pending';
