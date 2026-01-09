@@ -1,0 +1,19 @@
+{
+  "name": "threads",
+  "version": "1.0.0",
+  "description": "Thread management CLI for LLM workflows",
+  "type": "module",
+  "bin": {
+    "threads": "./bin/threads"
+  },
+  "scripts": {
+    "test": "cd .. && ./test/run_tests.sh ./bun/bin/threads"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.0",
+    "@types/js-yaml": "^4.0.9"
+  }
+}

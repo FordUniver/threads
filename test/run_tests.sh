@@ -143,7 +143,11 @@ for test_file in "${TEST_FILES[@]}"; do
         export REPO_DIR="'"$REPO_DIR"'"
 
         # Run the test file
-        source "'"$test_file"'" || true
+        if ! source "'"$test_file"'"; then
+            echo "Error: Failed to source test file: '"$test_file"'" >&2
+            echo "___RESULTS___:0:1"
+            exit 1
+        fi
 
         # Output results in parseable format (last line)
         echo "___RESULTS___:${_TEST_PASSED}:${_TEST_FAILED}"

@@ -1,0 +1,1479 @@
+#!/usr/bin/env bun
+// threads CLI - Thread management for LLM workflows
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { Thread, extractIDFromPath, extractNameFromPath, baseStatus, isTerminal, isValidStatus } from '../src/thread';
+import { findWorkspace, findAllThreads, inferScope, parseThreadPath, generateID, slugify, findByRef } from '../src/workspace';
+import { insertLogEntry, addNote, removeByHash, editByHash, addTodoItem, setTodoChecked, countMatchingItems, replaceSection, appendToSection } from '../src/section';
+import * as git from '../src/git';
+
+// Parse command line arguments
+const args = Bun.argv.slice(2);
+
+// Global workspace variable
+let ws: string;
+
+// Helper to get workspace (with error handling)
+function getWorkspace(): string {
+  if (!ws) {
+    try {
+      ws = findWorkspace();
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  }
+  return ws;
+}
+
+// Parse flags from args
+function parseFlags(args: string[]): { flags: Record<string, string | boolean>; positional: string[] } {
+  const flags: Record<string, string | boolean> = {};
+  const positional: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.startsWith('--')) {
+      const eqIdx = arg.indexOf('=');
+      if (eqIdx !== -1) {
+        flags[arg.substring(2, eqIdx)] = arg.substring(eqIdx + 1);
+      } else {
+        flags[arg.substring(2)] = true;
+      }
+    } else if (arg.startsWith('-') && arg.length === 2) {
+      // Short flag like -r, -m
+      const key = arg.substring(1);
+      // Check if next arg is the value
+      if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
+        flags[key] = args[++i];
+      } else {
+        flags[key] = true;
+      }
+    } else {
+      positional.push(arg);
+    }
+  }
+
+  return { flags, positional };
+}
+
+// Check if stdin has data available
+function stdinHasData(): boolean {
+  return !process.stdin.isTTY;
+}
+
+// Read all stdin
+async function readStdin(): Promise<string> {
+  if (!stdinHasData()) {
+    return '';
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of Bun.stdin.stream()) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString('utf-8');
+}
+
+// Format date as YYYY-MM-DD
+function formatDate(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+// Format time as HH:MM
+function formatTime(date: Date): string {
+  const h = String(date.getHours()).padStart(2, '0');
+  const m = String(date.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+// Truncate string for display
+function truncate(s: string, max: number): string {
+  if (s.length <= max) {
+    return s;
+  }
+  return s.substring(0, max - 1) + '…';
+}
+
+// ============== Commands ==============
+
+// list command
+async function cmdList(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  let pathFilter = positional[0] || '';
+  let listCategory = '';
+  let listProject = '';
+  let listSearch = (flags.search || flags.s || '') as string;
+  const listStatus = (flags.status || '') as string;
+  const listRecursive = !!flags.r || !!flags.recursive;
+  const listAll = !!flags.all;
+  const listJSON = !!flags.json;
+
+  // If path filter provided, extract category/project from it
+  if (pathFilter) {
+    const fullPath = path.join(ws, pathFilter);
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()) {
+      const parts = pathFilter.split('/').slice(0, 2);
+      listCategory = parts[0];
+      if (parts.length > 1) {
+        listProject = parts[1];
+      }
+    } else {
+      // Treat as search filter
+      listSearch = pathFilter;
+    }
+  }
+
+  // Find all threads
+  const threads = findAllThreads(ws);
+
+  interface ThreadInfo {
+    id: string;
+    status: string;
+    category: string;
+    project: string;
+    name: string;
+    title: string;
+    desc: string;
+  }
+
+  const results: ThreadInfo[] = [];
+
+  for (const threadPath of threads) {
+    let t: Thread;
+    try {
+      t = Thread.parse(threadPath);
+    } catch {
+      continue;
+    }
+
+    const { category, project, name } = parseThreadPath(ws, threadPath);
+    const status = t.status;
+    const base = baseStatus(status);
+
+    // Category filter
+    if (listCategory && category !== listCategory) {
+      continue;
+    }
+
+    // Project filter
+    if (listProject && project !== listProject) {
+      continue;
+    }
+
+    // Non-recursive: only threads at current hierarchy level
+    if (!listRecursive) {
+      if (listProject) {
+        // At project level, show all threads here
+      } else if (listCategory) {
+        // At category level: only show category-level threads
+        if (project !== '-') {
+          continue;
+        }
+      } else {
+        // At workspace level: only show workspace-level threads
+        if (category !== '-') {
+          continue;
+        }
+      }
+    }
+
+    // Status filter
+    if (listStatus) {
+      if (!listStatus.split(',').includes(base)) {
+        continue;
+      }
+    } else if (!listAll && isTerminal(status)) {
+      continue;
+    }
+
+    // Search filter
+    if (listSearch) {
+      const searchLower = listSearch.toLowerCase();
+      const nameLower = name.toLowerCase();
+      const titleLower = t.name.toLowerCase();
+      const descLower = t.frontmatter.desc.toLowerCase();
+
+      if (!nameLower.includes(searchLower) &&
+          !titleLower.includes(searchLower) &&
+          !descLower.includes(searchLower)) {
+        continue;
+      }
+    }
+
+    // Use title if available, else humanize name
+    let title = t.name;
+    if (!title) {
+      title = name.replace(/-/g, ' ');
+    }
+
+    results.push({
+      id: t.id,
+      status: base,
+      category,
+      project,
+      name,
+      title,
+      desc: t.frontmatter.desc,
+    });
+  }
+
+  if (listJSON) {
+    console.log(JSON.stringify(results, null, 2));
+    return;
+  }
+
+  // Build header description
+  let levelDesc: string;
+  let pathSuffix = '';
+
+  if (listProject && listCategory) {
+    levelDesc = 'project-level';
+    pathSuffix = ` (${listCategory}/${listProject})`;
+  } else if (listCategory) {
+    levelDesc = 'category-level';
+    pathSuffix = ` (${listCategory})`;
+  } else {
+    levelDesc = 'workspace-level';
+  }
+
+  let statusDesc = 'active';
+  if (listStatus) {
+    statusDesc = listStatus;
+  } else if (listAll) {
+    statusDesc = '';
+  }
+
+  const recursiveSuffix = listRecursive ? ' (including nested)' : '';
+
+  if (statusDesc) {
+    console.log(`Showing ${results.length} ${statusDesc} ${levelDesc} threads${pathSuffix}${recursiveSuffix}`);
+  } else {
+    console.log(`Showing ${results.length} ${levelDesc} threads${pathSuffix} (all statuses)${recursiveSuffix}`);
+  }
+  console.log();
+
+  if (results.length === 0) {
+    if (!listRecursive) {
+      console.log('Hint: use -r to include nested categories/projects');
+    }
+    return;
+  }
+
+  // Print table header
+  console.log(`${'ID'.padEnd(6)} ${'STATUS'.padEnd(10)} ${'CATEGORY'.padEnd(18)} ${'PROJECT'.padEnd(22)} NAME`);
+  console.log(`${'--'.padEnd(6)} ${'------'.padEnd(10)} ${'--------'.padEnd(18)} ${'-------'.padEnd(22)} ----`);
+
+  for (const t of results) {
+    const category = truncate(t.category, 16);
+    const project = truncate(t.project, 20);
+    // Use String() to guard against non-string values from malformed thread files
+    console.log(`${String(t.id || '').padEnd(6)} ${String(t.status || '').padEnd(10)} ${category.padEnd(18)} ${project.padEnd(22)} ${t.title || ''}`);
+  }
+}
+
+// new command
+async function cmdNew(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  let targetPath: string;
+  let title: string;
+
+  if (positional.length === 2) {
+    targetPath = positional[0];
+    title = positional[1];
+  } else if (positional.length === 1) {
+    title = positional[0];
+    targetPath = process.cwd();
+  } else {
+    console.error('Usage: threads new [path] <title>');
+    process.exit(1);
+  }
+
+  if (!title) {
+    console.error('Error: title is required');
+    process.exit(1);
+  }
+
+  const newStatus = (flags.status || 'idea') as string;
+  const newDesc = (flags.desc || '') as string;
+  let newBody = (flags.body || '') as string;
+
+  // Warn if no description provided
+  if (!newDesc) {
+    console.error('Warning: No --desc provided. Add one with: threads update <id> --desc "..."');
+  }
+
+  // Slugify title
+  const slug = slugify(title);
+  if (!slug) {
+    console.error('Error: title produces empty slug');
+    process.exit(1);
+  }
+
+  // Read body from stdin if available and not provided via flag
+  if (!newBody && stdinHasData()) {
+    newBody = await readStdin();
+  }
+
+  // Determine scope
+  let scope;
+  try {
+    scope = inferScope(ws, targetPath);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  // Generate ID
+  const id = generateID(ws);
+
+  // Ensure threads directory exists
+  fs.mkdirSync(scope.threadsDir, { recursive: true });
+
+  // Build file path
+  const filename = `${id}-${slug}.md`;
+  const threadPath = path.join(scope.threadsDir, filename);
+
+  // Check if file already exists
+  if (fs.existsSync(threadPath)) {
+    console.error(`Error: thread already exists: ${threadPath}`);
+    process.exit(1);
+  }
+
+  // Generate content
+  const today = formatDate(new Date());
+  const timestamp = formatTime(new Date());
+
+  let content = '---\n';
+  content += `id: ${id}\n`;
+  content += `name: ${title}\n`;
+  content += `desc: ${newDesc}\n`;
+  content += `status: ${newStatus}\n`;
+  content += '---\n\n';
+
+  if (newBody) {
+    content += newBody;
+    if (!newBody.endsWith('\n')) {
+      content += '\n';
+    }
+    content += '\n';
+  }
+
+  content += '## Todo\n\n';
+  content += '## Log\n\n';
+  content += `### ${today}\n\n`;
+  content += `- **${timestamp}** Created thread.\n`;
+
+  // Write file
+  fs.writeFileSync(threadPath, content);
+
+  const relPath = path.relative(ws, threadPath);
+  console.log(`Created ${scope.levelDesc}: ${id}`);
+  console.log(`  → ${relPath}`);
+
+  if (!newBody) {
+    console.error(`Hint: Add body with: echo "content" | threads body ${id} --set`);
+  }
+
+  // Commit if requested
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [threadPath])) as string;
+    try {
+      git.autoCommit(ws, threadPath, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${id} has uncommitted changes. Use 'threads commit ${id}' when ready.`);
+  }
+}
+
+// read command
+async function cmdRead(args: string[]): Promise<void> {
+  const { positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 1) {
+    console.error('Usage: threads read <id>');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const content = fs.readFileSync(file, 'utf-8');
+  process.stdout.write(content);
+}
+
+// status command
+async function cmdStatus(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 2) {
+    console.error('Usage: threads status <id> <new-status>');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+  const newStatus = positional[1];
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+  const oldStatus = t.status;
+
+  t.setFrontmatterField('status', newStatus);
+  t.write();
+
+  console.log(`Status changed: ${oldStatus} → ${newStatus} (${file})`);
+
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
+    try {
+      git.autoCommit(ws, file, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${ref} has uncommitted changes. Use 'threads commit ${ref}' when ready.`);
+  }
+}
+
+// update command
+async function cmdUpdate(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 1) {
+    console.error('Usage: threads update <id> [--title=X] [--desc=X]');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+  const updateTitle = flags.title as string | undefined;
+  const updateDesc = flags.desc as string | undefined;
+
+  if (!updateTitle && updateDesc === undefined) {
+    console.error('Error: specify --title and/or --desc');
+    process.exit(1);
+  }
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+
+  if (updateTitle) {
+    t.setFrontmatterField('name', updateTitle);
+    console.log(`Title updated: ${updateTitle}`);
+  }
+
+  if (updateDesc !== undefined) {
+    t.setFrontmatterField('desc', updateDesc);
+    console.log(`Description updated: ${updateDesc}`);
+  }
+
+  t.write();
+  console.log(`Updated: ${file}`);
+
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
+    try {
+      git.autoCommit(ws, file, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${ref} has uncommitted changes. Use 'threads commit ${ref}' when ready.`);
+  }
+}
+
+// body command
+async function cmdBody(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 1) {
+    console.error('Usage: threads body <id> [--set|--append]');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+  const bodySet = !!flags.set;
+  const bodyAppend = !!flags.append;
+
+  // Default to set mode
+  const useSet = bodySet || !bodyAppend;
+
+  // Read content from stdin
+  let content = '';
+  if (stdinHasData()) {
+    content = await readStdin();
+  }
+
+  if (!content) {
+    console.error('Error: no content provided (use stdin)');
+    process.exit(1);
+  }
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+
+  if (useSet) {
+    t.content = replaceSection(t.content, 'Body', content);
+  } else {
+    t.content = appendToSection(t.content, 'Body', content);
+  }
+
+  t.write();
+
+  const mode = useSet ? 'set' : 'append';
+  console.log(`Body ${mode}: ${file}`);
+
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
+    try {
+      git.autoCommit(ws, file, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${ref} has uncommitted changes. Use 'threads commit ${ref}' when ready.`);
+  }
+}
+
+// note command
+async function cmdNote(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 2) {
+    console.error('Usage: threads note <id> <action> [text|hash] [new-text]');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+  const action = positional[1];
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+
+  switch (action) {
+    case 'add': {
+      if (positional.length < 3) {
+        console.error('Usage: threads note <id> add "text"');
+        process.exit(1);
+      }
+      const text = positional[2];
+
+      const result = addNote(t.content, text);
+      t.content = result.content;
+
+      // Add log entry
+      t.content = insertLogEntry(t.content, `Added note: ${text}`);
+
+      console.log(`Added note: ${text} (id: ${result.hash})`);
+      break;
+    }
+    case 'edit': {
+      if (positional.length < 4) {
+        console.error('Usage: threads note <id> edit <hash> "new text"');
+        process.exit(1);
+      }
+      const hash = positional[2];
+      const newText = positional[3];
+
+      // Check for ambiguous hash
+      const count = countMatchingItems(t.content, 'Notes', hash);
+      if (count === 0) {
+        console.error(`Error: no note with hash '${hash}' found`);
+        process.exit(1);
+      }
+      if (count > 1) {
+        console.error(`Error: ambiguous hash '${hash}' matches ${count} notes`);
+        process.exit(2);
+      }
+
+      t.content = editByHash(t.content, 'Notes', hash, newText);
+      t.content = insertLogEntry(t.content, `Edited note ${hash}`);
+
+      console.log(`Edited note ${hash}`);
+      break;
+    }
+    case 'remove': {
+      if (positional.length < 3) {
+        console.error('Usage: threads note <id> remove <hash>');
+        process.exit(1);
+      }
+      const hash = positional[2];
+
+      // Check for ambiguous hash
+      const count = countMatchingItems(t.content, 'Notes', hash);
+      if (count === 0) {
+        console.error(`Error: no note with hash '${hash}' found`);
+        process.exit(1);
+      }
+      if (count > 1) {
+        console.error(`Error: ambiguous hash '${hash}' matches ${count} notes`);
+        process.exit(2);
+      }
+
+      t.content = removeByHash(t.content, 'Notes', hash);
+      t.content = insertLogEntry(t.content, `Removed note ${hash}`);
+
+      console.log(`Removed note ${hash}`);
+      break;
+    }
+    default:
+      console.error(`Error: unknown action '${action}'. Use: add, edit, remove`);
+      process.exit(1);
+  }
+
+  t.write();
+
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
+    try {
+      git.autoCommit(ws, file, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${ref} has uncommitted changes. Use 'threads commit ${ref}' when ready.`);
+  }
+}
+
+// todo command
+async function cmdTodo(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 2) {
+    console.error('Usage: threads todo <id> <action> [item|hash]');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+  const action = positional[1];
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+
+  switch (action) {
+    case 'add': {
+      if (positional.length < 3) {
+        console.error('Usage: threads todo <id> add "item text"');
+        process.exit(1);
+      }
+      const text = positional[2];
+
+      const result = addTodoItem(t.content, text);
+      t.content = result.content;
+
+      console.log(`Added to Todo: ${text} (id: ${result.hash})`);
+      break;
+    }
+    case 'check':
+    case 'complete':
+    case 'done': {
+      if (positional.length < 3) {
+        console.error('Usage: threads todo <id> check <hash>');
+        process.exit(1);
+      }
+      const hash = positional[2];
+
+      const count = countMatchingItems(t.content, 'Todo', hash);
+      if (count === 0) {
+        console.error(`Error: no unchecked item with hash '${hash}' found`);
+        process.exit(1);
+      }
+      if (count > 1) {
+        console.error(`Error: ambiguous hash '${hash}' matches ${count} items`);
+        process.exit(2);
+      }
+
+      t.content = setTodoChecked(t.content, hash, true);
+      console.log(`Checked item ${hash}`);
+      break;
+    }
+    case 'uncheck': {
+      if (positional.length < 3) {
+        console.error('Usage: threads todo <id> uncheck <hash>');
+        process.exit(1);
+      }
+      const hash = positional[2];
+
+      const count = countMatchingItems(t.content, 'Todo', hash);
+      if (count === 0) {
+        console.error(`Error: no checked item with hash '${hash}' found`);
+        process.exit(1);
+      }
+      if (count > 1) {
+        console.error(`Error: ambiguous hash '${hash}' matches ${count} items`);
+        process.exit(2);
+      }
+
+      t.content = setTodoChecked(t.content, hash, false);
+      console.log(`Unchecked item ${hash}`);
+      break;
+    }
+    case 'remove': {
+      if (positional.length < 3) {
+        console.error('Usage: threads todo <id> remove <hash>');
+        process.exit(1);
+      }
+      const hash = positional[2];
+
+      const count = countMatchingItems(t.content, 'Todo', hash);
+      if (count === 0) {
+        console.error(`Error: no item with hash '${hash}' found`);
+        process.exit(1);
+      }
+      if (count > 1) {
+        console.error(`Error: ambiguous hash '${hash}' matches ${count} items`);
+        process.exit(2);
+      }
+
+      t.content = removeByHash(t.content, 'Todo', hash);
+      console.log(`Removed item ${hash}`);
+      break;
+    }
+    case 'toggle': {
+      // Support toggle as well
+      if (positional.length < 3) {
+        console.error('Usage: threads todo <id> toggle <hash>');
+        process.exit(1);
+      }
+      const hash = positional[2];
+
+      const count = countMatchingItems(t.content, 'Todo', hash);
+      if (count === 0) {
+        console.error(`Error: no item with hash '${hash}' found`);
+        process.exit(1);
+      }
+      if (count > 1) {
+        console.error(`Error: ambiguous hash '${hash}' matches ${count} items`);
+        process.exit(2);
+      }
+
+      // Check if currently checked or not by looking at the content
+      const lines = t.content.split('\n');
+      let isChecked = false;
+      for (const line of lines) {
+        if (line.includes(`<!-- ${hash}`) && line.includes('[x]')) {
+          isChecked = true;
+          break;
+        }
+      }
+
+      t.content = setTodoChecked(t.content, hash, !isChecked);
+      console.log(isChecked ? `Unchecked item ${hash}` : `Checked item ${hash}`);
+      break;
+    }
+    default:
+      console.error(`Error: unknown action '${action}'. Use: add, check, uncheck, remove`);
+      process.exit(1);
+  }
+
+  t.write();
+
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
+    try {
+      git.autoCommit(ws, file, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${ref} has uncommitted changes. Use 'threads commit ${ref}' when ready.`);
+  }
+}
+
+// log command
+async function cmdLog(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 1) {
+    console.error('Usage: threads log <id> [entry]');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+  let entry = positional[1] || '';
+
+  // Read entry from stdin if not provided
+  if (!entry && stdinHasData()) {
+    entry = (await readStdin()).trim();
+  }
+
+  if (!entry) {
+    console.error('Error: no log entry provided');
+    process.exit(1);
+  }
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+  t.content = insertLogEntry(t.content, entry);
+  t.write();
+
+  console.log(`Logged to: ${file}`);
+
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
+    try {
+      git.autoCommit(ws, file, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${ref} has uncommitted changes. Use 'threads commit ${ref}' when ready.`);
+  }
+}
+
+// resolve command
+async function cmdResolve(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 1) {
+    console.error('Usage: threads resolve <id>');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+  const oldStatus = t.status;
+
+  t.setFrontmatterField('status', 'resolved');
+  t.content = insertLogEntry(t.content, 'Resolved.');
+  t.write();
+
+  console.log(`Resolved: ${oldStatus} → resolved (${file})`);
+
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
+    try {
+      git.autoCommit(ws, file, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${ref} has uncommitted changes. Use 'threads commit ${ref}' when ready.`);
+  }
+}
+
+// reopen command
+async function cmdReopen(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 1) {
+    console.error('Usage: threads reopen <id> [--status=X]');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+  const reopenStatus = (flags.status || 'active') as string;
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+  const oldStatus = t.status;
+
+  t.setFrontmatterField('status', reopenStatus);
+  t.content = insertLogEntry(t.content, 'Reopened.');
+  t.write();
+
+  console.log(`Reopened: ${oldStatus} → ${reopenStatus} (${file})`);
+
+  if (flags.commit) {
+    const msg = (flags.m || git.generateCommitMessage(ws, [file])) as string;
+    try {
+      git.autoCommit(ws, file, msg);
+    } catch (e: any) {
+      console.error(`Error: ${e.message}`);
+      process.exit(1);
+    }
+  } else {
+    console.log(`Note: Thread ${ref} has uncommitted changes. Use 'threads commit ${ref}' when ready.`);
+  }
+}
+
+// remove command
+async function cmdRemove(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 1) {
+    console.error('Usage: threads remove <id>');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  const t = Thread.parse(file);
+  const name = t.name;
+  const relPath = path.relative(ws, file);
+
+  // Check if file is tracked
+  const wasTracked = git.isTracked(ws, relPath);
+
+  // Remove file
+  fs.unlinkSync(file);
+  console.log(`Removed: ${file}`);
+
+  if (!wasTracked) {
+    console.log('Note: Thread was never committed to git, no commit needed.');
+    return;
+  }
+
+  if (flags.commit) {
+    const msg = (flags.m || `threads: remove '${name}'`) as string;
+    try {
+      git.add(ws, relPath);
+      git.commit(ws, [relPath], msg);
+      git.push(ws);
+    } catch (e: any) {
+      console.log(`WARNING: ${e.message}`);
+    }
+  } else {
+    console.log('Note: To commit this removal, run:');
+    console.log(`  git -C "$WORKSPACE" add "${relPath}" && git -C "$WORKSPACE" commit -m "threads: remove '${name}'"`);
+  }
+}
+
+// move command
+async function cmdMove(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 2) {
+    console.error('Usage: threads move <id> <new-path>');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+  const newPath = positional[1];
+
+  let srcFile: string;
+  try {
+    srcFile = findByRef(ws, ref);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  let scope;
+  try {
+    scope = inferScope(ws, newPath);
+  } catch (e: any) {
+    console.error(`Error: invalid path: ${newPath}`);
+    process.exit(1);
+  }
+
+  // Ensure dest .threads/ exists
+  fs.mkdirSync(scope.threadsDir, { recursive: true });
+
+  // Move file
+  const filename = path.basename(srcFile);
+  const destFile = path.join(scope.threadsDir, filename);
+
+  if (fs.existsSync(destFile)) {
+    console.error(`Error: thread already exists at destination: ${destFile}`);
+    process.exit(1);
+  }
+
+  fs.renameSync(srcFile, destFile);
+
+  const relDest = path.relative(ws, destFile);
+  console.log(`Moved to ${scope.levelDesc}`);
+  console.log(`  → ${relDest}`);
+
+  if (flags.commit) {
+    const relSrc = path.relative(ws, srcFile);
+    try {
+      git.add(ws, relSrc, relDest);
+      const msg = (flags.m || `threads: move ${path.basename(srcFile)} to ${scope.levelDesc}`) as string;
+      git.commit(ws, [relSrc, relDest], msg);
+      git.push(ws);
+    } catch (e: any) {
+      console.log(`WARNING: ${e.message}`);
+    }
+  } else {
+    console.log('Note: Use --commit to commit this move');
+  }
+}
+
+// commit command
+async function cmdCommit(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  const commitPending = !!flags.pending;
+  const commitMsg = (flags.m || '') as string;
+  const commitAuto = !!flags.auto;
+
+  let files: string[] = [];
+
+  if (commitPending) {
+    // Collect all thread files with uncommitted changes
+    const threads = findAllThreads(ws);
+    for (const t of threads) {
+      const relPath = path.relative(ws, t);
+      if (git.hasChanges(ws, relPath)) {
+        files.push(t);
+      }
+    }
+  } else {
+    // Resolve provided IDs to files
+    if (positional.length === 0) {
+      console.error('Error: provide thread IDs or use --pending');
+      process.exit(1);
+    }
+
+    for (const id of positional) {
+      let file: string;
+      try {
+        file = findByRef(ws, id);
+      } catch (e: any) {
+        console.error(`Error: ${e.message}`);
+        process.exit(1);
+      }
+      const relPath = path.relative(ws, file);
+      if (!git.hasChanges(ws, relPath)) {
+        console.log(`No changes in thread: ${id}`);
+        continue;
+      }
+      files.push(file);
+    }
+  }
+
+  if (files.length === 0) {
+    console.log('No threads to commit.');
+    return;
+  }
+
+  // Generate commit message if not provided
+  let msg = commitMsg;
+  if (!msg) {
+    msg = git.generateCommitMessage(ws, files);
+    console.log(`Generated message: ${msg}`);
+
+    if (!commitAuto && process.stdin.isTTY) {
+      // Read confirmation from user
+      process.stdout.write('Proceed? [Y/n] ');
+      const response = await new Promise<string>((resolve) => {
+        const readline = require('readline');
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        });
+        rl.question('', (answer: string) => {
+          rl.close();
+          resolve(answer);
+        });
+      });
+
+      if (response.toLowerCase() === 'n' || response.toLowerCase() === 'no') {
+        console.log('Aborted.');
+        return;
+      }
+    }
+  }
+
+  // Stage and commit
+  const relPaths = files.map(f => path.relative(ws, f));
+
+  try {
+    git.commit(ws, relPaths, msg);
+  } catch (e: any) {
+    console.error(`Error: ${e.message}`);
+    process.exit(1);
+  }
+
+  try {
+    git.push(ws);
+  } catch (e: any) {
+    console.log(`WARNING: git push failed (commit succeeded): ${e.message}`);
+  }
+
+  console.log(`Committed ${files.length} thread(s).`);
+}
+
+// validate command
+async function cmdValidate(args: string[]): Promise<void> {
+  const { positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  let files: string[];
+
+  if (positional.length > 0) {
+    const target = positional[0];
+    let absPath = target;
+    if (!path.isAbsolute(target)) {
+      absPath = path.join(ws, target);
+    }
+    files = [absPath];
+  } else {
+    files = findAllThreads(ws);
+  }
+
+  let errors = 0;
+  for (const file of files) {
+    const relPath = path.relative(ws, file);
+    const issues: string[] = [];
+
+    try {
+      const t = Thread.parse(file);
+
+      if (!t.name) {
+        issues.push('missing name/title field');
+      }
+      if (!t.status) {
+        issues.push('missing status field');
+      } else if (!isValidStatus(t.status)) {
+        issues.push(`invalid status '${baseStatus(t.status)}'`);
+      }
+    } catch (e: any) {
+      issues.push(`parse error: ${e.message}`);
+    }
+
+    if (issues.length > 0) {
+      console.log(`WARN: ${relPath}: ${issues.join(', ')}`);
+      errors++;
+    } else {
+      console.log(`OK: ${relPath}`);
+    }
+  }
+
+  if (errors > 0) {
+    console.error(`${errors} validation error(s)`);
+    process.exit(1);
+  }
+}
+
+// git command
+async function cmdGit(args: string[]): Promise<void> {
+  const ws = getWorkspace();
+
+  const threads = findAllThreads(ws);
+  const modified: string[] = [];
+
+  for (const t of threads) {
+    const relPath = path.relative(ws, t);
+    if (git.hasChanges(ws, relPath)) {
+      modified.push(relPath);
+    }
+  }
+
+  if (modified.length === 0) {
+    console.log('No pending thread changes.');
+    return;
+  }
+
+  console.log('Pending thread changes:');
+  for (const f of modified) {
+    console.log(`  ${f}`);
+  }
+  console.log();
+  console.log('Suggested:');
+  console.log(`  git add ${modified.join(' ')} && git commit -m "threads: update" && git push`);
+}
+
+// stats command
+async function cmdStats(args: string[]): Promise<void> {
+  const { flags, positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  const statsRecursive = !!flags.r || !!flags.recursive;
+
+  // Parse path filter
+  let categoryFilter = '';
+  let projectFilter = '';
+  if (positional.length > 0) {
+    const pathFilter = positional[0];
+    const fullPath = path.join(ws, pathFilter);
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()) {
+      const parts = pathFilter.split('/').slice(0, 2);
+      categoryFilter = parts[0];
+      if (parts.length > 1) {
+        projectFilter = parts[1];
+      }
+    }
+  }
+
+  // Find all threads
+  const threads = findAllThreads(ws);
+  const counts: Record<string, number> = {};
+  let total = 0;
+
+  for (const threadPath of threads) {
+    const { category, project } = parseThreadPath(ws, threadPath);
+
+    // Category filter
+    if (categoryFilter && category !== categoryFilter) {
+      continue;
+    }
+
+    // Project filter
+    if (projectFilter && project !== projectFilter) {
+      continue;
+    }
+
+    // Non-recursive: only threads at current hierarchy level
+    if (!statsRecursive) {
+      if (projectFilter) {
+        // At project level, count all
+      } else if (categoryFilter) {
+        if (project !== '-') {
+          continue;
+        }
+      } else {
+        if (category !== '-') {
+          continue;
+        }
+      }
+    }
+
+    let t: Thread;
+    try {
+      t = Thread.parse(threadPath);
+    } catch {
+      continue;
+    }
+
+    let status = t.baseStatus();
+    if (!status) {
+      status = '(none)';
+    }
+    counts[status] = (counts[status] || 0) + 1;
+    total++;
+  }
+
+  // Build scope description
+  let levelDesc: string;
+  let pathSuffix = '';
+  if (projectFilter && categoryFilter) {
+    levelDesc = 'project-level';
+    pathSuffix = ` (${categoryFilter}/${projectFilter})`;
+  } else if (categoryFilter) {
+    levelDesc = 'category-level';
+    pathSuffix = ` (${categoryFilter})`;
+  } else {
+    levelDesc = 'workspace-level';
+  }
+
+  const recursiveSuffix = statsRecursive ? ' (including nested)' : '';
+
+  console.log(`Stats for ${levelDesc} threads${pathSuffix}${recursiveSuffix}`);
+  console.log();
+
+  if (total === 0) {
+    console.log('No threads found.');
+    if (!statsRecursive) {
+      console.log('Hint: use -r to include nested categories/projects');
+    }
+    return;
+  }
+
+  // Sort by count descending
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  console.log('| Status     | Count |');
+  console.log('|------------|-------|');
+  for (const [status, count] of sorted) {
+    console.log(`| ${status.padEnd(10)} | ${String(count).padStart(5)} |`);
+  }
+  console.log('|------------|-------|');
+  console.log(`| ${'Total'.padEnd(10)} | ${String(total).padStart(5)} |`);
+}
+
+// Print help message
+function printHelp(): void {
+  console.log('threads - Thread management for LLM workflows');
+  console.log('');
+  console.log('Usage: threads <command> [options]');
+  console.log('');
+  console.log('Commands:');
+  console.log('  list [path]           List threads');
+  console.log('  new [path] <title>    Create a new thread');
+  console.log('  read <id>             Read thread content');
+  console.log('  status <id> <status>  Change thread status');
+  console.log('  update <id>           Update thread title/desc');
+  console.log('  body <id>             Edit Body section');
+  console.log('  note <id> <action>    Manage notes');
+  console.log('  todo <id> <action>    Manage todo items');
+  console.log('  log <id> [entry]      Add log entry');
+  console.log('  resolve <id>          Mark thread resolved');
+  console.log('  reopen <id>           Reopen resolved thread');
+  console.log('  remove <id>           Remove thread');
+  console.log('  move <id> <path>      Move thread');
+  console.log('  commit [ids]          Commit thread changes');
+  console.log('  validate [path]       Validate thread files');
+  console.log('  git                   Show pending changes');
+  console.log('  stats [path]          Show thread stats');
+  console.log('');
+  console.log('Options:');
+  console.log('  --help, -h            Show this help message');
+}
+
+// Main command dispatcher
+async function main(): Promise<void> {
+  // Handle help flag anywhere
+  if (args.includes('--help') || args.includes('-h') || args.length === 0) {
+    printHelp();
+    return;
+  }
+
+  const command = args[0];
+  const cmdArgs = args.slice(1);
+
+  switch (command) {
+    case 'list':
+      await cmdList(cmdArgs);
+      break;
+    case 'new':
+      await cmdNew(cmdArgs);
+      break;
+    case 'read':
+      await cmdRead(cmdArgs);
+      break;
+    case 'status':
+      await cmdStatus(cmdArgs);
+      break;
+    case 'update':
+      await cmdUpdate(cmdArgs);
+      break;
+    case 'body':
+      await cmdBody(cmdArgs);
+      break;
+    case 'note':
+      await cmdNote(cmdArgs);
+      break;
+    case 'todo':
+      await cmdTodo(cmdArgs);
+      break;
+    case 'log':
+      await cmdLog(cmdArgs);
+      break;
+    case 'resolve':
+      await cmdResolve(cmdArgs);
+      break;
+    case 'reopen':
+      await cmdReopen(cmdArgs);
+      break;
+    case 'remove':
+    case 'rm':
+      await cmdRemove(cmdArgs);
+      break;
+    case 'move':
+      await cmdMove(cmdArgs);
+      break;
+    case 'commit':
+      await cmdCommit(cmdArgs);
+      break;
+    case 'validate':
+      await cmdValidate(cmdArgs);
+      break;
+    case 'git':
+      await cmdGit(cmdArgs);
+      break;
+    case 'stats':
+      await cmdStats(cmdArgs);
+      break;
+    default:
+      console.error(`Unknown command: ${command}`);
+      process.exit(1);
+  }
+}
+
+main().catch(e => {
+  console.error(`Error: ${e.message}`);
+  process.exit(1);
+});

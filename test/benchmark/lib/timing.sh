@@ -1,10 +1,30 @@
 #!/usr/bin/env bash
 # Timing utilities for benchmark suite
 # Supports hyperfine (preferred) with fallback to manual timing
+#
+# Dependencies:
+# - gdate (GNU coreutils) or date with nanosecond support for timing
+# - bc (basic calculator) for stddev calculation - without bc, stddev defaults to 0
+# - jq for parsing hyperfine JSON output (optional, for hyperfine mode)
+# - hyperfine (optional, falls back to manual timing)
 
 # Check if hyperfine is available
 has_hyperfine() {
     command -v hyperfine &>/dev/null
+}
+
+# Check if bc is available (used for stddev)
+has_bc() {
+    command -v bc &>/dev/null
+}
+
+# Warn about missing bc once
+_BC_WARNING_SHOWN=""
+warn_missing_bc() {
+    if [[ -z "$_BC_WARNING_SHOWN" ]] && ! has_bc; then
+        echo "Warning: bc not available, stddev will be reported as 0" >&2
+        _BC_WARNING_SHOWN=1
+    fi
 }
 
 # Get current time in nanoseconds (cross-platform)
@@ -78,7 +98,8 @@ bench_manual() {
         sum_sq=$((sum_sq + diff * diff))
     done
     local variance=$((sum_sq / iterations))
-    # Integer sqrt approximation
+    # Integer sqrt approximation (requires bc)
+    warn_missing_bc
     local stddev_ns
     stddev_ns=$(echo "sqrt($variance)" | bc 2>/dev/null || echo "0")
     local stddev_ms=$((stddev_ns / 1000000))

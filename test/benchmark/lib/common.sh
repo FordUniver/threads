@@ -27,8 +27,24 @@ IMPL_CMDS["python"]="uv run --quiet --directory $REPO_DIR/python python -m threa
 IMPL_PATHS["perl"]="$REPO_DIR/perl/bin/threads"
 IMPL_CMDS["perl"]="perl -I$REPO_DIR/perl/lib $REPO_DIR/perl/bin/threads"
 
+# Rust (compiled)
+IMPL_PATHS["rust"]="$REPO_DIR/rust/target/release/threads"
+IMPL_CMDS["rust"]="$REPO_DIR/rust/target/release/threads"
+
+# Swift (compiled)
+IMPL_PATHS["swift"]="$REPO_DIR/swift/.build/arm64-apple-macosx/release/threads"
+IMPL_CMDS["swift"]="$REPO_DIR/swift/.build/arm64-apple-macosx/release/threads"
+
+# Ruby (interpreted)
+IMPL_PATHS["ruby"]="$REPO_DIR/ruby/bin/threads"
+IMPL_CMDS["ruby"]="$REPO_DIR/ruby/bin/threads"
+
+# Bun (TypeScript)
+IMPL_PATHS["bun"]="$REPO_DIR/bun/bin/threads"
+IMPL_CMDS["bun"]="$REPO_DIR/bun/bin/threads"
+
 # Default implementations to test
-DEFAULT_IMPLS="shell go python perl"
+DEFAULT_IMPLS="shell go python perl rust swift ruby bun"
 
 # Verify implementations exist and work
 # Args: impl names (space-separated) or empty for all
@@ -51,9 +67,11 @@ verify_impls() {
             continue
         fi
 
-        # Verify command works
-        if ! $cmd --help >/dev/null 2>&1; then
-            echo "Warning: $name failed --help test" >&2
+        # Verify command works (check for output, not exit code - some frameworks exit 1 on help)
+        local help_output
+        help_output=$($cmd --help 2>&1 || true)
+        if [[ -z "$help_output" ]]; then
+            echo "Warning: $name failed --help test (no output)" >&2
             continue
         fi
 

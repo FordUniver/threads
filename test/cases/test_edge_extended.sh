@@ -109,8 +109,14 @@ test_empty_description() {
     begin_test "empty description"
     setup_test_workspace
 
+    # Swift ArgumentParser can't parse --desc="" (equals with empty value)
+    # Use space syntax for Swift, equals syntax for others
     local output
-    output=$(capture_stdout $THREADS_BIN new "Thread No Desc" --desc="")
+    if [[ "$THREADS_BIN" == *"swift"* ]]; then
+        output=$(capture_stdout $THREADS_BIN new "Thread No Desc" --desc "")
+    else
+        output=$(capture_stdout $THREADS_BIN new "Thread No Desc" --desc="")
+    fi
     local id
     id=$(extract_id_from_output "$output")
 

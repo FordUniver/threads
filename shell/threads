@@ -3,7 +3,19 @@
 # Usage: threads <command> [args]
 set -euo pipefail
 
-WORKSPACE="${WORKSPACE:-$(cd "$(dirname "$0")/../../../../" && pwd)}"
+# Require WORKSPACE env var to be set
+get_workspace() {
+  if [[ -z "${WORKSPACE:-}" ]]; then
+    echo "Error: WORKSPACE environment variable not set" >&2
+    exit 1
+  fi
+  if [[ ! -d "$WORKSPACE" ]]; then
+    echo "Error: WORKSPACE directory does not exist: $WORKSPACE" >&2
+    exit 1
+  fi
+  echo "$WORKSPACE"
+}
+WORKSPACE="$(get_workspace)"
 
 # Terminal statuses (filtered by default in list)
 TERMINAL_STATUSES="resolved|superseded|deferred"

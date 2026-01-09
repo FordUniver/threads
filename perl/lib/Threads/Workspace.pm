@@ -6,7 +6,7 @@ use v5.16;
 use Exporter 'import';
 use Cwd qw(abs_path getcwd);
 use File::Spec;
-use File::Basename qw(basename dirname);
+use File::Basename qw(basename);
 
 our @EXPORT_OK = qw(
     workspace_root
@@ -16,9 +16,9 @@ our @EXPORT_OK = qw(
     slugify
 );
 
-# Get workspace root from environment
+# Get workspace root from WORKSPACE environment variable
 sub workspace_root {
-    my $ws = $ENV{WORKSPACE};
+    my $ws = $ENV{WORKSPACE} // '';
     die "WORKSPACE environment variable not set\n" unless $ws;
     die "WORKSPACE directory does not exist: $ws\n" unless -d $ws;
     return $ws;

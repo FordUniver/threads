@@ -19,19 +19,14 @@ class Scope:
 
 
 def get_workspace() -> Path:
-    """Get workspace path from WORKSPACE env or walk up to find it."""
-    # Check environment variable first
-    ws = os.environ.get("WORKSPACE")
-    if ws:
-        return Path(ws)
-
-    # Walk up from cwd looking for .threads/ at root
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        if (parent / ".threads").is_dir():
-            return parent
-
-    raise RuntimeError("Could not determine WORKSPACE: set WORKSPACE env or run from within workspace")
+    """Get workspace path from WORKSPACE environment variable."""
+    ws = os.environ.get("WORKSPACE", "")
+    if not ws:
+        raise RuntimeError("WORKSPACE environment variable not set")
+    path = Path(ws)
+    if not path.is_dir():
+        raise RuntimeError(f"WORKSPACE directory does not exist: {ws}")
+    return path
 
 
 def infer_scope(path: str | None, workspace: Path | None = None) -> Scope:

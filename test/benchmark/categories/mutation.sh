@@ -179,7 +179,7 @@ run_mutation_benchmarks() {
             "${BENCH_MIN_MS:-0}" "${BENCH_MAX_MS:-0}"
 
         # Reset thread
-        reset_thread "$first_id"
+        reset_thread "$first_id" "$ws"
         echo ""
     done
 
@@ -200,7 +200,7 @@ run_mutation_benchmarks() {
             "${BENCH_MIN_MS:-0}" "${BENCH_MAX_MS:-0}"
 
         # Reset thread
-        reset_thread "$first_id"
+        reset_thread "$first_id" "$ws"
         echo ""
     done
 }

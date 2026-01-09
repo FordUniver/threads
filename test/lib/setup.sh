@@ -7,6 +7,7 @@ _ORIGINAL_PWD=""
 
 # Create isolated test workspace
 # Sets TEST_WS and creates .threads/ directory
+# Automatically registers EXIT trap for cleanup
 setup_test_workspace() {
     _ORIGINAL_PWD="$PWD"
     TEST_WS=$(mktemp -d "${TMPDIR:-/tmp}/threads-test.XXXXXX")
@@ -14,6 +15,9 @@ setup_test_workspace() {
     export TEST_WS
     export WORKSPACE="$TEST_WS"
     cd "$TEST_WS" || exit 1
+
+    # Auto-register cleanup trap (idempotent - safe to call multiple times)
+    trap teardown_test_workspace EXIT
 
     if [[ -n "${DEBUG:-}" ]]; then
         echo "# DEBUG: Created test workspace at $TEST_WS" >&2
@@ -79,8 +83,8 @@ get_exit_code() {
     echo $?
 }
 
-# Register cleanup trap
-# Call this at the start of each test file
+# Register cleanup trap (now called automatically by setup_test_workspace)
+# Kept for backwards compatibility - safe to call multiple times
 register_cleanup() {
     trap teardown_test_workspace EXIT
 }

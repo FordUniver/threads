@@ -13,47 +13,17 @@ import (
 	"git.zib.de/cspiegel/threads/internal/thread"
 )
 
-// Find returns the workspace root from $WORKSPACE or by walking up
+// Find returns the workspace root from $WORKSPACE
 func Find() (string, error) {
-	if ws := os.Getenv("WORKSPACE"); ws != "" {
-		// Clean path to handle double slashes, trailing slashes, etc.
-		ws = filepath.Clean(ws)
-		if _, err := os.Stat(ws); err == nil {
-			return ws, nil
-		}
+	ws := os.Getenv("WORKSPACE")
+	if ws == "" {
+		return "", fmt.Errorf("WORKSPACE environment variable not set")
 	}
-
-	// Walk up looking for .threads/ directory at workspace level
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
+	ws = filepath.Clean(ws)
+	if _, err := os.Stat(ws); os.IsNotExist(err) {
+		return "", fmt.Errorf("WORKSPACE directory does not exist: %s", ws)
 	}
-
-	dir := cwd
-	for {
-		if _, err := os.Stat(filepath.Join(dir, ".threads")); err == nil {
-			// Check if this looks like workspace root (has categories)
-			entries, _ := os.ReadDir(dir)
-			for _, e := range entries {
-				if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
-					subThreads := filepath.Join(dir, e.Name(), ".threads")
-					if _, err := os.Stat(subThreads); err == nil {
-						return dir, nil
-					}
-				}
-			}
-			// If .threads exists at this level, might be workspace
-			return dir, nil
-		}
-
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-
-	return "", fmt.Errorf("not in a workspace (no .threads/ found)")
+	return ws, nil
 }
 
 // FindAllThreads returns all thread file paths in the workspace

@@ -1,7 +1,7 @@
 # threads CLI - Multi-language comparison study
 # Run tests and benchmarks across all implementations
 
-.PHONY: help test test-shell test-go test-python test-perl test-all test-validate benchmark benchmark-quick benchmark-full clean
+.PHONY: help test test-shell test-go test-python test-perl test-rust test-swift test-ruby test-bun test-all test-validate benchmark benchmark-quick benchmark-full clean
 
 # Default target
 help:
@@ -13,7 +13,11 @@ help:
 	@echo "  make test-go       - Test Go implementation"
 	@echo "  make test-python   - Test Python implementation"
 	@echo "  make test-perl     - Test Perl implementation"
-	@echo "  make test-all      - Test ALL implementations"
+	@echo "  make test-rust     - Test Rust implementation"
+	@echo "  make test-swift    - Test Swift implementation"
+	@echo "  make test-ruby     - Test Ruby implementation"
+	@echo "  make test-bun      - Test Bun/TypeScript implementation"
+	@echo "  make test-all      - Test ALL 8 implementations"
 	@echo "  make test-validate - Verify tests pass individually (isolation check)"
 	@echo ""
 	@echo "Benchmarking:"
@@ -23,7 +27,9 @@ help:
 	@echo ""
 	@echo "Building:"
 	@echo "  make build-go      - Build Go implementation"
-	@echo "  make build-all     - Build all implementations"
+	@echo "  make build-rust    - Build Rust implementation"
+	@echo "  make build-swift   - Build Swift implementation"
+	@echo "  make build-all     - Build all compiled implementations"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make clean         - Clean build artifacts"
@@ -47,11 +53,27 @@ test-perl:
 	@echo "=== Testing Perl ==="
 	./test/run_tests.sh "perl -I./perl/lib ./perl/bin/threads"
 
+test-rust: build-rust
+	@echo "=== Testing Rust ==="
+	./test/run_tests.sh ./rust/target/release/threads
+
+test-swift: build-swift
+	@echo "=== Testing Swift ==="
+	./test/run_tests.sh ./swift/.build/release/threads
+
+test-ruby:
+	@echo "=== Testing Ruby ==="
+	./test/run_tests.sh ./ruby/bin/threads
+
+test-bun:
+	@echo "=== Testing Bun ==="
+	./test/run_tests.sh ./bun/bin/threads
+
 # Test all implementations
-test-all: build-go
+test-all: build-all
 	@echo ""
 	@echo "=========================================="
-	@echo "Testing ALL implementations"
+	@echo "Testing ALL 8 implementations"
 	@echo "=========================================="
 	@echo ""
 	@echo "=== Shell ===" && ./test/run_tests.sh ./shell/threads && \
@@ -62,8 +84,16 @@ test-all: build-go
 	echo "" && \
 	echo "=== Perl ===" && ./test/run_tests.sh "perl -I./perl/lib ./perl/bin/threads" && \
 	echo "" && \
+	echo "=== Rust ===" && ./test/run_tests.sh ./rust/target/release/threads && \
+	echo "" && \
+	echo "=== Swift ===" && ./test/run_tests.sh ./swift/.build/release/threads && \
+	echo "" && \
+	echo "=== Ruby ===" && ./test/run_tests.sh ./ruby/bin/threads && \
+	echo "" && \
+	echo "=== Bun ===" && ./test/run_tests.sh ./bun/bin/threads && \
+	echo "" && \
 	echo "========================================" && \
-	echo "All implementations passed!" && \
+	echo "All 8 implementations passed!" && \
 	echo "========================================"
 
 # Validate test isolation
@@ -83,13 +113,13 @@ test-validate-all: build-go
 	echo "=== Perl ===" && ./test/run_tests.sh --validate "perl -I./perl/lib ./perl/bin/threads"
 
 # Benchmark all implementations
-benchmark: build-go
+benchmark: build-all
 	./test/benchmark.sh
 
-benchmark-quick: build-go
+benchmark-quick: build-all
 	./test/benchmark.sh --quick
 
-benchmark-full: build-go
+benchmark-full: build-all
 	./test/benchmark.sh --full
 
 # Build targets
@@ -99,12 +129,26 @@ build-go:
 		$(MAKE) -C go build; \
 	fi
 
-build-all: build-go
-	@echo "All implementations built"
+build-rust:
+	@if [ ! -f ./rust/target/release/threads ] || [ ./rust/src/main.rs -nt ./rust/target/release/threads ]; then \
+		echo "Building Rust implementation..."; \
+		cd rust && cargo build --release; \
+	fi
+
+build-swift:
+	@if [ ! -f ./swift/.build/release/threads ] || [ ./swift/Sources/threads/Threads.swift -nt ./swift/.build/release/threads ]; then \
+		echo "Building Swift implementation..."; \
+		cd swift && swift build -c release; \
+	fi
+
+build-all: build-go build-rust build-swift
+	@echo "All compiled implementations built"
 
 # Clean
 clean:
 	$(MAKE) -C go clean 2>/dev/null || true
+	cd rust && cargo clean 2>/dev/null || true
+	rm -rf ./swift/.build 2>/dev/null || true
 	rm -rf ./python/.venv 2>/dev/null || true
 	rm -rf ./test/results/* 2>/dev/null || true
 	find . -name "*.pyc" -delete 2>/dev/null || true
