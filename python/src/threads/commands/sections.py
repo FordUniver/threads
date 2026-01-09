@@ -5,7 +5,7 @@ import sys
 import time
 from datetime import datetime
 
-from ..models import LogEntry, Note, Todo
+from ..models import LogEntry, Note, Thread, Todo
 from ..storage import load_thread, save_thread
 from ..workspace import find_thread_by_ref, get_workspace
 
@@ -13,10 +13,10 @@ from ..workspace import find_thread_by_ref, get_workspace
 def generate_hash(text: str) -> str:
     """Generate 4-char hash for item identification."""
     data = f"{text}{time.time_ns()}"
-    return hashlib.md5(data.encode()).hexdigest()[:4]
+    return hashlib.sha256(data.encode()).hexdigest()[:4]
 
 
-def add_log_entry(thread, entry_text: str) -> None:
+def add_log_entry(thread: Thread, entry_text: str) -> None:
     """Add a timestamped log entry to thread."""
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")

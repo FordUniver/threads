@@ -14,7 +14,7 @@ class Note:
     """A note entry with hash identifier."""
 
     text: str
-    hash: str  # 4-char md5 prefix
+    hash: str  # 4-char sha256 prefix
 
 
 @dataclass
@@ -22,7 +22,7 @@ class Todo:
     """A todo item with hash identifier."""
 
     text: str
-    hash: str  # 4-char md5 prefix
+    hash: str  # 4-char sha256 prefix
     checked: bool = False
 
 

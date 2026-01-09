@@ -1,6 +1,8 @@
 """File I/O and section parsing for threads."""
 
+import os
 import re
+import tempfile
 from pathlib import Path
 
 import frontmatter
@@ -194,12 +196,25 @@ def serialize_thread(thread: Thread) -> str:
 
 
 def save_thread(thread: Thread) -> None:
-    """Save thread to its file path."""
+    """Save thread to its file path atomically.
+
+    Uses write-to-temp-then-rename pattern to ensure the file is never
+    left in a partially-written state.
+    """
     if thread.file_path is None:
         raise ValueError("Thread has no file_path set")
 
     content = serialize_thread(thread)
-    thread.file_path.write_text(content)
+    dir_path = thread.file_path.parent
+
+    # Write to temp file in same directory, then atomic rename
+    with tempfile.NamedTemporaryFile(
+        mode="w", dir=dir_path, delete=False, suffix=".tmp"
+    ) as f:
+        f.write(content)
+        temp_path = f.name
+
+    os.rename(temp_path, thread.file_path)  # Atomic on POSIX
 
 
 def find_threads(workspace: Path) -> list[Path]:

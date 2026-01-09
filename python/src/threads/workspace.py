@@ -54,9 +54,10 @@ def infer_scope(path: str | None, workspace: Path | None = None) -> Scope:
 
     # Handle None - infer from cwd
     if path is None:
-        cwd = Path.cwd()
+        cwd = Path.cwd().resolve()
+        workspace_resolved = workspace.resolve()
         try:
-            rel = cwd.relative_to(workspace)
+            rel = cwd.relative_to(workspace_resolved)
         except ValueError:
             # cwd outside workspace
             return Scope(
@@ -90,18 +91,19 @@ def infer_scope(path: str | None, workspace: Path | None = None) -> Scope:
             )
 
     # Handle explicit path
-    # Try as absolute path first
+    # Try as absolute path first, always resolve for symlink safety
     if Path(path).is_absolute():
-        abs_path = Path(path)
+        abs_path = Path(path).resolve()
     elif (workspace / path).is_dir():
-        abs_path = workspace / path
+        abs_path = (workspace / path).resolve()
     elif Path(path).is_dir():
         abs_path = Path(path).resolve()
     else:
         raise ValueError(f"Path not found: {path}")
 
+    workspace_resolved = workspace.resolve()
     try:
-        rel = abs_path.relative_to(workspace)
+        rel = abs_path.relative_to(workspace_resolved)
     except ValueError:
         raise ValueError(f"Path must be within workspace: {path}")
 
@@ -136,7 +138,7 @@ def parse_thread_path(file_path: Path, workspace: Path) -> tuple[str | None, str
         (category, project) where None means workspace/category level respectively.
     """
     try:
-        rel = file_path.relative_to(workspace)
+        rel = file_path.resolve().relative_to(workspace.resolve())
     except ValueError:
         return None, None
 

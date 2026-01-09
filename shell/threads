@@ -21,6 +21,16 @@ WORKSPACE="$(get_workspace)"
 TERMINAL_STATUSES="resolved|superseded|deferred"
 ACTIVE_STATUSES="idea|planning|active|blocked|paused"
 
+# Cache for find_threads results (cleared on mutations)
+_THREADS_CACHE=""
+_THREADS_CACHE_VALID=false
+
+# Invalidate threads cache (call after any mutation: new, move, remove, migrate)
+invalidate_threads_cache() {
+  _THREADS_CACHE=""
+  _THREADS_CACHE_VALID=false
+}
+
 usage() {
   cat <<'EOF'
 Usage: threads <command> [options]
@@ -69,14 +79,29 @@ Status values:
 EOF
 }
 
-# Find all thread files
+# Find all thread files (cached for performance)
 find_threads() {
-  # Use shell glob on known directory patterns (faster than find)
-  for f in "$WORKSPACE"/.threads/*.md \
-           "$WORKSPACE"/*/.threads/*.md \
-           "$WORKSPACE"/*/*/.threads/*.md; do
-    [[ -f "$f" && "$f" != *"/archive/"* ]] && echo "$f"
-  done | sort
+  # Return cached results if valid
+  if [[ "$_THREADS_CACHE_VALID" == true && -n "$_THREADS_CACHE" ]]; then
+    echo "$_THREADS_CACHE"
+    return
+  fi
+
+  # Build fresh cache using shell glob on known directory patterns (faster than find)
+  local results
+  results=$(
+    for f in "$WORKSPACE"/.threads/*.md \
+             "$WORKSPACE"/*/.threads/*.md \
+             "$WORKSPACE"/*/*/.threads/*.md; do
+      [[ -f "$f" && "$f" != *"/archive/"* ]] && echo "$f"
+    done | sort
+  )
+
+  # Store in cache
+  _THREADS_CACHE="$results"
+  _THREADS_CACHE_VALID=true
+
+  echo "$results"
 }
 
 # Extract frontmatter field using yq (handles quotes and special chars properly)
@@ -107,7 +132,7 @@ is_terminal() {
 # Parse path into category, project, name
 parse_thread_path() {
   local file="$1"
-  local relpath="${file#$WORKSPACE/}"
+  local relpath="${file#"$WORKSPACE/"}"
 
   # Extract thread filename (without .md), strip ID prefix if present
   local filename thread_name
@@ -170,7 +195,7 @@ infer_scope() {
     return
   fi
 
-  local rel="${abs_path#$WORKSPACE}"
+  local rel="${abs_path#"$WORKSPACE"}"
   rel="${rel#/}"
 
   if [[ -z "$rel" ]]; then
@@ -568,11 +593,11 @@ cmd_read() {
 
   # Try to find by ID/name first, then fall back to path
   local file
-  file=$(find_thread_by_ref "$ref") && { cat "$file"; return 0; }
+  file=$(find_thread_by_ref "$ref") && { cat -- "$file"; return 0; }
 
   # find_thread_by_ref already printed an error; check if it's a direct path as fallback
-  [[ -f "$ref" ]] && { cat "$ref"; return 0; }
-  [[ -f "$WORKSPACE/$ref" ]] && { cat "$WORKSPACE/$ref"; return 0; }
+  [[ -f "$ref" ]] && { cat -- "$ref"; return 0; }
+  [[ -f "$WORKSPACE/$ref" ]] && { cat -- "$WORKSPACE/$ref"; return 0; }
 
   return 1
 }
@@ -676,7 +701,10 @@ cmd_new() {
 BODY
   } > "$filepath"
 
-  local rel_filepath="${filepath#$WORKSPACE/}"
+  # Invalidate cache after creating new thread
+  invalidate_threads_cache
+
+  local rel_filepath="${filepath#"$WORKSPACE/"}"
   echo "Created $level_desc: $tid"
   echo "  → $rel_filepath"
   if [[ -z "$body" ]]; then
@@ -741,14 +769,18 @@ cmd_move() {
   fi
 
   mv "$src_file" "$dest_file"
-  local rel_dest="${dest_file#$WORKSPACE/}"
+
+  # Invalidate cache after moving thread
+  invalidate_threads_cache
+
+  local rel_dest="${dest_file#"$WORKSPACE/"}"
   echo "Moved to $level_desc"
   echo "  → $rel_dest"
 
   # Commit if requested
   if [[ "$do_commit" == true ]]; then
-    local rel_src="${src_file#$WORKSPACE/}"
-    local rel_dest="${dest_file#$WORKSPACE/}"
+    local rel_src="${src_file#"$WORKSPACE/"}"
+    local rel_dest="${dest_file#"$WORKSPACE/"}"
     git -C "$WORKSPACE" add "$rel_src" "$rel_dest"
     [[ -z "$message" ]] && message="threads: move $(basename "$src_file" .md) to $level_desc"
     git -C "$WORKSPACE" commit -m "$message"
@@ -1576,11 +1608,15 @@ cmd_remove() {
   local name
   name=$(get_field "$file" "name")
 
-  local rel_file="${file#$WORKSPACE/}"
+  local rel_file="${file#"$WORKSPACE/"}"
   local was_tracked=false
   git -C "$WORKSPACE" ls-files --error-unmatch "$rel_file" &>/dev/null && was_tracked=true
 
   rm "$file"
+
+  # Invalidate cache after removing thread
+  invalidate_threads_cache
+
   echo "Removed: $file"
 
   if ! $was_tracked; then
@@ -1617,7 +1653,7 @@ cmd_commit() {
     # Collect all thread files with uncommitted changes
     while IFS= read -r file; do
       [[ -z "$file" ]] && continue
-      local relpath="${file#$WORKSPACE/}"
+      local relpath="${file#"$WORKSPACE/"}"
       # Check if file has uncommitted changes (staged, unstaged, or untracked)
       if ! git -C "$WORKSPACE" diff --quiet -- "$relpath" 2>/dev/null || \
          ! git -C "$WORKSPACE" diff --cached --quiet -- "$relpath" 2>/dev/null || \
@@ -1632,7 +1668,7 @@ cmd_commit() {
       local file
       file=$(find_thread_by_ref "$id") || { echo "Thread not found: $id" >&2; return 1; }
       # Check if file actually has changes
-      local relpath="${file#$WORKSPACE/}"
+      local relpath="${file#"$WORKSPACE/"}"
       if git -C "$WORKSPACE" diff --quiet -- "$relpath" 2>/dev/null && \
          git -C "$WORKSPACE" diff --cached --quiet -- "$relpath" 2>/dev/null && \
          git -C "$WORKSPACE" ls-files --error-unmatch "$relpath" &>/dev/null; then
@@ -1692,7 +1728,7 @@ cmd_validate() {
 
   local errors=0
   for file in "${files[@]}"; do
-    local relpath="${file#$WORKSPACE/}"
+    local relpath="${file#"$WORKSPACE/"}"
     local name desc status
     name=$(get_field "$file" "name")
     [[ -z "$name" ]] && name=$(get_field "$file" "title")
@@ -1719,7 +1755,11 @@ cmd_validate() {
     fi
   done
 
-  [[ $errors -gt 0 ]] && return 1 || return 0
+  if [[ $errors -gt 0 ]]; then
+    return 1
+  else
+    return 0
+  fi
 }
 
 cmd_git() {
@@ -1728,7 +1768,7 @@ cmd_git() {
 
   while IFS= read -r file; do
     [[ -z "$file" ]] && continue
-    local relpath="${file#$WORKSPACE/}"
+    local relpath="${file#"$WORKSPACE/"}"
     # Check if file has uncommitted changes
     if ! git -C "$WORKSPACE" diff --quiet -- "$relpath" 2>/dev/null || \
        ! git -C "$WORKSPACE" diff --cached --quiet -- "$relpath" 2>/dev/null || \
@@ -1890,6 +1930,9 @@ cmd_migrate() {
       ((renamed++)) || true
     fi
   done < <(find_threads)
+
+  # Invalidate cache after migration completes
+  invalidate_threads_cache
 
   echo ""
   echo "Migrated (new id + rename): $migrated, Renamed (existing id): $renamed, Skipped (already done): $skipped"

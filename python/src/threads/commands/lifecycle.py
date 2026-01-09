@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from ..git import git_add, git_commit, git_pull_rebase, git_push, is_modified, is_tracked, get_file_status
-from ..models import LogEntry
+from ..models import LogEntry, Thread
 from ..storage import find_threads, load_thread, save_thread
 from ..workspace import find_thread_by_ref, get_workspace, infer_scope, parse_thread_path
 
@@ -76,7 +76,7 @@ def generate_commit_message(files: list[Path], workspace: Path) -> str:
         return f"threads: {action} {total} threads"
 
 
-def add_log_entry(thread, entry_text: str) -> None:
+def add_log_entry(thread: Thread, entry_text: str) -> None:
     """Add a timestamped log entry."""
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
