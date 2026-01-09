@@ -145,7 +145,7 @@ module Threads
           end
         end
 
-        raise "no item with hash '#{hash}' found" unless found
+        raise Threads::ThreadNotFound, "no item with hash '#{hash}' found" unless found
 
         result.join("\n")
       end
@@ -178,7 +178,7 @@ module Threads
           end
         end
 
-        raise "no item with hash '#{hash}' found" unless found
+        raise Threads::ThreadNotFound, "no item with hash '#{hash}' found" unless found
 
         result.join("\n")
       end
@@ -209,7 +209,7 @@ module Threads
           end
         end
 
-        raise "no item with hash '#{hash}' found" unless found
+        raise Threads::ThreadNotFound, "no item with hash '#{hash}' found" unless found
 
         result.join("\n")
       end

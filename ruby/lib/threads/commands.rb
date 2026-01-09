@@ -39,7 +39,7 @@ module Threads
         threads.each do |path|
           begin
             t = Thread.parse(path)
-          rescue StandardError
+          rescue Threads::ParseError, Errno::ENOENT
             next
           end
 
@@ -119,14 +119,17 @@ module Threads
         desc = opts[:desc] || ''
         body_content = opts[:body] || ''
 
-        raise 'title is required' if title.nil? || title.empty?
+        raise ArgumentError, 'title is required' if title.nil? || title.empty?
+
+        # Validate status before creating thread
+        Threads.validate_status!(status)
 
         # Warn if no description
         warn 'Warning: No --desc provided. Add one with: threads update <id> --desc "..."' if desc.empty?
 
         # Slugify title
         slug = Workspace.slugify(title)
-        raise 'title produces empty slug' if slug.empty?
+        raise ArgumentError, 'title produces empty slug' if slug.empty?
 
         # Read body from stdin if not provided and stdin has data
         if body_content.empty? && stdin_has_data?
@@ -146,7 +149,7 @@ module Threads
         filename = "#{id}-#{slug}.md"
         thread_path = File.join(scope.threads_dir, filename)
 
-        raise "thread already exists: #{thread_path}" if File.exist?(thread_path)
+        raise Threads::Error, "thread already exists: #{thread_path}" if File.exist?(thread_path)
 
         # Generate content
         today = Time.now.strftime('%Y-%m-%d')
@@ -188,6 +191,9 @@ module Threads
 
       # Change thread status
       def status(ws, ref, new_status)
+        # Validate status before applying
+        Threads.validate_status!(new_status)
+
         file = Workspace.find_by_ref(ws, ref)
         t = Thread.parse(file)
         old_status = t.status
@@ -204,7 +210,7 @@ module Threads
         title = opts[:title]
         desc = opts[:desc]
 
-        raise 'specify --title and/or --desc' if (title.nil? || title.empty?) && (desc.nil? || desc.empty?)
+        raise ArgumentError, 'specify --title and/or --desc' if (title.nil? || title.empty?) && (desc.nil? || desc.empty?)
 
         file = Workspace.find_by_ref(ws, ref)
         t = Thread.parse(file)
@@ -238,7 +244,7 @@ module Threads
           content = $stdin.read
         end
 
-        raise 'no content provided (use stdin)' if content.empty?
+        raise ArgumentError, 'no content provided (use stdin)' if content.empty?
 
         file = Workspace.find_by_ref(ws, ref)
         t = Thread.parse(file)
@@ -264,7 +270,7 @@ module Threads
         case action
         when 'add'
           text = args[0]
-          raise 'usage: threads note <id> add "text"' if text.nil? || text.empty?
+          raise ArgumentError, 'usage: threads note <id> add "text"' if text.nil? || text.empty?
 
           t.content, hash = Section.add_note(t.content, text)
           t.content = Section.insert_log_entry(t.content, "Added note: #{text}")
@@ -273,11 +279,11 @@ module Threads
         when 'edit'
           hash = args[0]
           new_text = args[1]
-          raise 'usage: threads note <id> edit <hash> "new text"' if hash.nil? || new_text.nil?
+          raise ArgumentError, 'usage: threads note <id> edit <hash> "new text"' if hash.nil? || new_text.nil?
 
           count = Section.count_matching_items(t.content, 'Notes', hash)
-          raise "no note with hash '#{hash}' found" if count == 0
-          raise "ambiguous hash '#{hash}' matches #{count} notes" if count > 1
+          raise Threads::ThreadNotFound, "no note with hash '#{hash}' found" if count == 0
+          raise Threads::AmbiguousReference, "ambiguous hash '#{hash}' matches #{count} notes" if count > 1
 
           t.content = Section.edit_by_hash(t.content, 'Notes', hash, new_text)
           t.content = Section.insert_log_entry(t.content, "Edited note #{hash}")
@@ -285,18 +291,18 @@ module Threads
 
         when 'remove'
           hash = args[0]
-          raise 'usage: threads note <id> remove <hash>' if hash.nil?
+          raise ArgumentError, 'usage: threads note <id> remove <hash>' if hash.nil?
 
           count = Section.count_matching_items(t.content, 'Notes', hash)
-          raise "no note with hash '#{hash}' found" if count == 0
-          raise "ambiguous hash '#{hash}' matches #{count} notes" if count > 1
+          raise Threads::ThreadNotFound, "no note with hash '#{hash}' found" if count == 0
+          raise Threads::AmbiguousReference, "ambiguous hash '#{hash}' matches #{count} notes" if count > 1
 
           t.content = Section.remove_by_hash(t.content, 'Notes', hash)
           t.content = Section.insert_log_entry(t.content, "Removed note #{hash}")
           puts "Removed note #{hash}"
 
         else
-          raise "unknown action '#{action}'. Use: add, edit, remove"
+          raise ArgumentError, "unknown action '#{action}'. Use: add, edit, remove"
         end
 
         t.write
@@ -311,46 +317,46 @@ module Threads
         case action
         when 'add'
           text = args[0]
-          raise 'usage: threads todo <id> add "item text"' if text.nil? || text.empty?
+          raise ArgumentError, 'usage: threads todo <id> add "item text"' if text.nil? || text.empty?
 
           t.content, hash = Section.add_todo_item(t.content, text)
           puts "Added to Todo: #{text} (id: #{hash})"
 
         when 'check', 'complete', 'done'
           hash = args[0]
-          raise 'usage: threads todo <id> check <hash>' if hash.nil?
+          raise ArgumentError, 'usage: threads todo <id> check <hash>' if hash.nil?
 
           count = Section.count_matching_items(t.content, 'Todo', hash)
-          raise "no unchecked item with hash '#{hash}' found" if count == 0
-          raise "ambiguous hash '#{hash}' matches #{count} items" if count > 1
+          raise Threads::ThreadNotFound, "no unchecked item with hash '#{hash}' found" if count == 0
+          raise Threads::AmbiguousReference, "ambiguous hash '#{hash}' matches #{count} items" if count > 1
 
           t.content = Section.set_todo_checked(t.content, hash, true)
           puts "Checked item #{hash}"
 
         when 'uncheck'
           hash = args[0]
-          raise 'usage: threads todo <id> uncheck <hash>' if hash.nil?
+          raise ArgumentError, 'usage: threads todo <id> uncheck <hash>' if hash.nil?
 
           count = Section.count_matching_items(t.content, 'Todo', hash)
-          raise "no checked item with hash '#{hash}' found" if count == 0
-          raise "ambiguous hash '#{hash}' matches #{count} items" if count > 1
+          raise Threads::ThreadNotFound, "no checked item with hash '#{hash}' found" if count == 0
+          raise Threads::AmbiguousReference, "ambiguous hash '#{hash}' matches #{count} items" if count > 1
 
           t.content = Section.set_todo_checked(t.content, hash, false)
           puts "Unchecked item #{hash}"
 
         when 'remove'
           hash = args[0]
-          raise 'usage: threads todo <id> remove <hash>' if hash.nil?
+          raise ArgumentError, 'usage: threads todo <id> remove <hash>' if hash.nil?
 
           count = Section.count_matching_items(t.content, 'Todo', hash)
-          raise "no item with hash '#{hash}' found" if count == 0
-          raise "ambiguous hash '#{hash}' matches #{count} items" if count > 1
+          raise Threads::ThreadNotFound, "no item with hash '#{hash}' found" if count == 0
+          raise Threads::AmbiguousReference, "ambiguous hash '#{hash}' matches #{count} items" if count > 1
 
           t.content = Section.remove_by_hash(t.content, 'Todo', hash)
           puts "Removed item #{hash}"
 
         else
-          raise "unknown action '#{action}'. Use: add, check, uncheck, remove"
+          raise ArgumentError, "unknown action '#{action}'. Use: add, check, uncheck, remove"
         end
 
         t.write
@@ -364,7 +370,7 @@ module Threads
           entry = $stdin.read if stdin_has_data?
         end
 
-        raise 'no log entry provided' if entry.nil? || entry.empty?
+        raise ArgumentError, 'no log entry provided' if entry.nil? || entry.empty?
 
         file = Workspace.find_by_ref(ws, ref)
         t = Thread.parse(file)
@@ -393,6 +399,9 @@ module Threads
       # Reopen thread
       def reopen(ws, ref, opts = {})
         new_status = opts[:status] || 'active'
+
+        # Validate status before applying
+        Threads.validate_status!(new_status)
 
         file = Workspace.find_by_ref(ws, ref)
         t = Thread.parse(file)
@@ -439,7 +448,7 @@ module Threads
         filename = File.basename(src_file)
         dest_file = File.join(scope.threads_dir, filename)
 
-        raise "thread already exists at destination: #{dest_file}" if File.exist?(dest_file)
+        raise Threads::Error, "thread already exists at destination: #{dest_file}" if File.exist?(dest_file)
 
         FileUtils.mv(src_file, dest_file)
 
@@ -487,7 +496,7 @@ module Threads
             files << t if Git.has_changes?(ws, rel_path)
           end
         else
-          raise 'provide thread IDs or use --pending' if ids.empty?
+          raise ArgumentError, 'provide thread IDs or use --pending' if ids.empty?
 
           ids.each do |id|
             file = Workspace.find_by_ref(ws, id)
@@ -517,7 +526,7 @@ module Threads
 
         begin
           Git.push(ws)
-        rescue StandardError => e
+        rescue Threads::GitError => e
           warn "WARNING: git push failed (commit succeeded): #{e.message}"
         end
 
@@ -551,7 +560,7 @@ module Threads
             elsif !Threads.valid_status?(t.status)
               issues << "invalid status '#{t.base_status}'"
             end
-          rescue StandardError => e
+          rescue Threads::ParseError, Errno::ENOENT => e
             issues << "parse error: #{e.message}"
           end
 
@@ -563,7 +572,7 @@ module Threads
           end
         end
 
-        raise "#{errors} validation error(s)" if errors > 0
+        raise Threads::Error, "#{errors} validation error(s)" if errors > 0
       end
 
       # Show stats
@@ -613,7 +622,7 @@ module Threads
             status = '(none)' if status.nil? || status.empty?
             counts[status] += 1
             total += 1
-          rescue StandardError
+          rescue Threads::ParseError, Errno::ENOENT
             next
           end
         end

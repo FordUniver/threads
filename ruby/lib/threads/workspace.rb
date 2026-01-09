@@ -10,8 +10,8 @@ module Threads
       # Find workspace root from $WORKSPACE
       def find
         ws = ENV['WORKSPACE'].to_s
-        raise 'WORKSPACE environment variable not set' if ws.empty?
-        raise "WORKSPACE directory does not exist: #{ws}" unless File.directory?(ws)
+        raise WorkspaceError, 'WORKSPACE environment variable not set' if ws.empty?
+        raise WorkspaceError, "WORKSPACE directory does not exist: #{ws}" unless File.directory?(ws)
         ws
       end
 
@@ -45,7 +45,7 @@ module Threads
           return id unless existing.include?(id)
         end
 
-        raise 'could not generate unique ID after 10 attempts'
+        raise Threads::Error, 'could not generate unique ID after 10 attempts'
       end
 
       # Extract 6-char hex ID from filename
@@ -120,7 +120,7 @@ module Threads
                    elsif File.directory?(path)
                      File.expand_path(path)
                    else
-                     raise "path not found: #{path}"
+                     raise WorkspaceError, "path not found: #{path}"
                    end
 
         # Must be within workspace
@@ -190,10 +190,10 @@ module Threads
             name = extract_name_from_path(m)
             "#{id} (#{name})"
           end
-          raise "ambiguous reference '#{ref}' matches #{substring_matches.length} threads: #{ids.join(', ')}"
+          raise AmbiguousReference, "ambiguous reference '#{ref}' matches #{substring_matches.length} threads: #{ids.join(', ')}"
         end
 
-        raise "thread not found: #{ref}"
+        raise ThreadNotFound, "thread not found: #{ref}"
       end
     end
   end

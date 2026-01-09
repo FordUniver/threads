@@ -38,7 +38,7 @@ module Threads
       # Find workspace first
       begin
         @ws = Workspace.find
-      rescue StandardError => e
+      rescue Threads::WorkspaceError => e
         $stderr.puts "Error: #{e.message}"
         return EXIT_ERROR
       end
@@ -86,12 +86,10 @@ module Threads
         $stderr.puts "Run 'threads --help' for usage."
         EXIT_ERROR
       end
-    rescue StandardError => e
-      # Check for ambiguous match
-      if e.message.include?('ambiguous')
-        $stderr.puts "Error: #{e.message}"
-        return EXIT_AMBIGUOUS
-      end
+    rescue Threads::AmbiguousReference => e
+      $stderr.puts "Error: #{e.message}"
+      EXIT_AMBIGUOUS
+    rescue Threads::Error, ArgumentError, Errno::ENOENT, Errno::EACCES, IOError => e
       $stderr.puts "Error: #{e.message}"
       EXIT_ERROR
     end
@@ -189,7 +187,7 @@ module Threads
         title = remaining[0]
         path = Dir.pwd
       else
-        raise 'usage: threads new [path] <title>'
+        raise ArgumentError, 'usage: threads new [path] <title>'
       end
 
       opts[:path] = path
@@ -200,14 +198,14 @@ module Threads
     end
 
     def run_read(args)
-      raise 'usage: threads read <id>' if args.empty?
+      raise ArgumentError, 'usage: threads read <id>' if args.empty?
 
       Commands.read(@ws, args[0])
       EXIT_SUCCESS
     end
 
     def run_status(args)
-      raise 'usage: threads status <id> <new-status>' if args.length < 2
+      raise ArgumentError, 'usage: threads status <id> <new-status>' if args.length < 2
 
       Commands.status(@ws, args[0], args[1])
       EXIT_SUCCESS
@@ -222,7 +220,7 @@ module Threads
       end
 
       remaining = parser.parse(args)
-      raise 'usage: threads update <id> [--title=X] [--desc=X]' if remaining.empty?
+      raise ArgumentError, 'usage: threads update <id> [--title=X] [--desc=X]' if remaining.empty?
 
       Commands.update(@ws, remaining[0], opts)
       EXIT_SUCCESS
@@ -237,14 +235,14 @@ module Threads
       end
 
       remaining = parser.parse(args)
-      raise 'usage: threads body <id> [--set|--append]' if remaining.empty?
+      raise ArgumentError, 'usage: threads body <id> [--set|--append]' if remaining.empty?
 
       Commands.body(@ws, remaining[0], opts)
       EXIT_SUCCESS
     end
 
     def run_note(args)
-      raise 'usage: threads note <id> <action> [text|hash] [new-text]' if args.length < 2
+      raise ArgumentError, 'usage: threads note <id> <action> [text|hash] [new-text]' if args.length < 2
 
       ref = args[0]
       action = args[1]
@@ -255,7 +253,7 @@ module Threads
     end
 
     def run_todo(args)
-      raise 'usage: threads todo <id> <action> [item|hash]' if args.length < 2
+      raise ArgumentError, 'usage: threads todo <id> <action> [item|hash]' if args.length < 2
 
       ref = args[0]
       action = args[1]
@@ -266,7 +264,7 @@ module Threads
     end
 
     def run_log(args)
-      raise 'usage: threads log <id> [entry]' if args.empty?
+      raise ArgumentError, 'usage: threads log <id> [entry]' if args.empty?
 
       ref = args[0]
       entry = args[1]
@@ -276,7 +274,7 @@ module Threads
     end
 
     def run_resolve(args)
-      raise 'usage: threads resolve <id>' if args.empty?
+      raise ArgumentError, 'usage: threads resolve <id>' if args.empty?
 
       Commands.resolve(@ws, args[0])
       EXIT_SUCCESS
@@ -290,21 +288,21 @@ module Threads
       end
 
       remaining = parser.parse(args)
-      raise 'usage: threads reopen <id> [--status=X]' if remaining.empty?
+      raise ArgumentError, 'usage: threads reopen <id> [--status=X]' if remaining.empty?
 
       Commands.reopen(@ws, remaining[0], opts)
       EXIT_SUCCESS
     end
 
     def run_remove(args)
-      raise 'usage: threads remove <id>' if args.empty?
+      raise ArgumentError, 'usage: threads remove <id>' if args.empty?
 
       Commands.remove(@ws, args[0])
       EXIT_SUCCESS
     end
 
     def run_move(args)
-      raise 'usage: threads move <id> <new-path>' if args.length < 2
+      raise ArgumentError, 'usage: threads move <id> <new-path>' if args.length < 2
 
       Commands.move(@ws, args[0], args[1])
       EXIT_SUCCESS
