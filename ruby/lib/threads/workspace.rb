@@ -1,12 +1,40 @@
 # frozen_string_literal: true
 
 require 'fileutils'
+require 'pathname'
 require 'securerandom'
 
 module Threads
   # Workspace utilities for finding and navigating thread directories
   module Workspace
     class << self
+      # Check if a path is contained within a directory (secure path containment)
+      # This uses proper path canonicalization to prevent path traversal attacks.
+      # Example: /foo/bar/../baz is correctly resolved before comparison.
+      def path_contained_in?(path, container)
+        # Resolve both paths to their canonical form
+        resolved_path = begin
+          File.realpath(path)
+        rescue Errno::ENOENT
+          File.expand_path(path)
+        end
+        resolved_container = begin
+          File.realpath(container)
+        rescue Errno::ENOENT
+          File.expand_path(container)
+        end
+
+        # Use Pathname for proper path component comparison
+        path_parts = Pathname.new(resolved_path).each_filename.to_a
+        container_parts = Pathname.new(resolved_container).each_filename.to_a
+
+        # The path must have at least as many components as the container
+        return false if path_parts.size < container_parts.size
+
+        # The first N components of path must match all container components
+        path_parts.first(container_parts.size) == container_parts
+      end
+
       # Find workspace root from $WORKSPACE
       def find
         ws = ENV['WORKSPACE'].to_s
@@ -73,10 +101,29 @@ module Threads
 
       # Parse thread path to extract category, project, name
       def parse_thread_path(ws, path)
-        rel = path.sub("#{ws}/", '')
-        filename = File.basename(path, '.md')
-        name = extract_name_from_path(path)
+        # Canonicalize both paths to prevent path traversal
+        resolved_path = begin
+          File.realpath(path)
+        rescue Errno::ENOENT
+          File.expand_path(path)
+        end
+        resolved_ws = begin
+          File.realpath(ws)
+        rescue Errno::ENOENT
+          File.expand_path(ws)
+        end
+
+        filename = File.basename(resolved_path, '.md')
+        name = extract_name_from_path(resolved_path)
         name = filename if name.nil? || name.empty?
+
+        # Compute relative path using canonical paths
+        # Only strip the workspace prefix if the path is actually contained in it
+        unless path_contained_in?(resolved_path, resolved_ws)
+          return ['-', '-', name]
+        end
+
+        rel = resolved_path.sub("#{resolved_ws}/", '')
 
         # Check if workspace-level
         if rel.start_with?('.threads/')
@@ -123,8 +170,8 @@ module Threads
                      raise WorkspaceError, "path not found: #{path}"
                    end
 
-        # Must be within workspace
-        unless abs_path.start_with?(ws)
+        # Must be within workspace (use secure path containment check)
+        unless path_contained_in?(abs_path, ws)
           return Scope.new(
             File.join(ws, '.threads'),
             '-',

@@ -4,31 +4,27 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from ..git import git_add, git_commit, git_pull_rebase, git_push, is_modified, is_tracked, get_file_status
+from ..git import git_add, git_commit, is_modified, get_file_status
 from ..models import LogEntry, Thread, validate_status
 from ..storage import find_threads, load_thread, save_thread
 from ..workspace import find_thread_by_ref, get_workspace, infer_scope, parse_thread_path
 
 
 def auto_commit(file: Path, message: str, workspace: Path) -> None:
-    """Stage, commit, and push a file."""
+    """Stage and commit a file (push is opt-in)."""
     try:
         git_add(file, workspace)
         git_commit(message, workspace)
-        if not git_pull_rebase(workspace) or not git_push(workspace):
-            print("WARNING: git push failed (commit succeeded)", file=sys.stderr)
     except Exception as e:
         print(f"ERROR: git operation failed: {e}", file=sys.stderr)
         raise
 
 
 def auto_commit_remove(rel_path: Path, message: str, workspace: Path) -> None:
-    """Stage removal, commit, and push."""
+    """Stage removal and commit (push is opt-in)."""
     try:
         git_add(rel_path, workspace)
         git_commit(message, workspace)
-        if not git_pull_rebase(workspace) or not git_push(workspace):
-            print("WARNING: git push failed (commit succeeded)", file=sys.stderr)
     except Exception as e:
         print(f"ERROR: git operation failed: {e}", file=sys.stderr)
         raise
@@ -113,7 +109,7 @@ def cmd_status(
             message = f"threads: update {file_path.stem}"
         auto_commit(file_path, message, workspace)
     else:
-        print(f"Note: Thread {ref} has uncommitted changes. Use 'thread commit {ref}' when ready.")
+        print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.", file=sys.stderr)
 
 
 def cmd_resolve(ref: str, do_commit: bool = False, message: str | None = None) -> None:
@@ -135,7 +131,7 @@ def cmd_resolve(ref: str, do_commit: bool = False, message: str | None = None) -
             message = f"threads: update {file_path.stem}"
         auto_commit(file_path, message, workspace)
     else:
-        print(f"Note: Thread {ref} has uncommitted changes. Use 'thread commit {ref}' when ready.")
+        print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.", file=sys.stderr)
 
 
 def cmd_reopen(
@@ -165,7 +161,7 @@ def cmd_reopen(
             message = f"threads: update {file_path.stem}"
         auto_commit(file_path, message, workspace)
     else:
-        print(f"Note: Thread {ref} has uncommitted changes. Use 'thread commit {ref}' when ready.")
+        print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.", file=sys.stderr)
 
 
 def cmd_move(
@@ -203,9 +199,8 @@ def cmd_move(
         if message is None:
             message = f"threads: move {src_file.stem} to {scope.level_desc}"
         git_commit(message, workspace)
-        git_pull_rebase(workspace) and git_push(workspace)
     else:
-        print("Note: Use --commit to commit this move")
+        print("Note: Use --commit to commit this move", file=sys.stderr)
 
 
 def cmd_commit(
@@ -253,9 +248,6 @@ def cmd_commit(
         git_add(file, workspace)
 
     git_commit(message, workspace)
-    if not git_pull_rebase(workspace) or not git_push(workspace):
-        print("WARNING: git push failed (commit succeeded)", file=sys.stderr)
-
     print(f"Committed {len(files)} thread(s).")
 
 

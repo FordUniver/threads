@@ -122,21 +122,24 @@ benchmark-quick: build-all
 benchmark-full: build-all
 	./test/benchmark.sh --full
 
-# Build targets
+# Build targets - check ALL source files, not just one
 build-go:
-	@if [ ! -f ./go/threads ] || [ ./go/threads -ot ./go/cmd/threads/main.go ]; then \
+	@newest=$$(find ./go -name '*.go' -newer ./go/threads 2>/dev/null | head -1); \
+	if [ ! -f ./go/threads ] || [ -n "$$newest" ]; then \
 		echo "Building Go implementation..."; \
 		$(MAKE) -C go build; \
 	fi
 
 build-rust:
-	@if [ ! -f ./rust/target/release/threads ] || [ ./rust/src/main.rs -nt ./rust/target/release/threads ]; then \
+	@newest=$$(find ./rust/src -name '*.rs' -newer ./rust/target/release/threads 2>/dev/null | head -1); \
+	if [ ! -f ./rust/target/release/threads ] || [ -n "$$newest" ]; then \
 		echo "Building Rust implementation..."; \
 		cd rust && cargo build --release; \
 	fi
 
 build-swift:
-	@if [ ! -f ./swift/.build/release/threads ] || [ ./swift/Sources/threads/Threads.swift -nt ./swift/.build/release/threads ]; then \
+	@newest=$$(find ./swift/Sources -name '*.swift' -newer ./swift/.build/release/threads 2>/dev/null | head -1); \
+	if [ ! -f ./swift/.build/release/threads ] || [ -n "$$newest" ]; then \
 		echo "Building Swift implementation..."; \
 		cd swift && swift build -c release; \
 	fi

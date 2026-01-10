@@ -88,7 +88,7 @@ $WORKSPACE/
 └── category/project/.threads/   # project-level threads
 ```
 
-The `WORKSPACE` environment variable points to the root. If not set, the CLI searches upward for a directory containing `.threads/`.
+The `WORKSPACE` environment variable must point to the root directory.
 
 ## Running Tests
 

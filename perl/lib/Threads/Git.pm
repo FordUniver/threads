@@ -68,13 +68,7 @@ sub git_commit {
 
     # Commit
     my $exit = _workspace_git('commit', '-m', $message);
-    return 1 if $exit != 0;
-
-    # Pull and push
-    _workspace_git('pull', '--rebase');
-    _workspace_git('push');
-
-    return 0;
+    return $exit != 0 ? 1 : 0;
 }
 
 # Commit all pending thread changes
@@ -106,13 +100,7 @@ sub git_commit_pending {
     # Commit
     $message //= 'threads: update pending';
     my $exit = _workspace_git('commit', '-m', $message);
-    return 1 if $exit != 0;
-
-    # Pull and push
-    _workspace_git('pull', '--rebase');
-    _workspace_git('push');
-
-    return 0;
+    return $exit != 0 ? 1 : 0;
 }
 
 # Get git status for thread files

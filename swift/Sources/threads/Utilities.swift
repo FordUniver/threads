@@ -73,6 +73,41 @@ func truncate(_ s: String, _ max: Int) -> String {
     return String(s.prefix(max - 1)) + "…"
 }
 
+/// Check if a path is contained within a workspace directory using proper path canonicalization.
+/// This is secure against path traversal attacks (e.g., /workspace/../etc/passwd).
+func isContained(_ path: String, in workspace: String) -> Bool {
+    let resolvedPath = (path as NSString).standardizingPath
+    let resolvedWs = (workspace as NSString).standardizingPath
+
+    // Get path components and compare
+    let pathComponents = URL(fileURLWithPath: resolvedPath).standardized.pathComponents
+    let wsComponents = URL(fileURLWithPath: resolvedWs).standardized.pathComponents
+
+    guard pathComponents.count >= wsComponents.count else { return false }
+    return Array(pathComponents.prefix(wsComponents.count)) == wsComponents
+}
+
+/// Compute relative path from a workspace to a contained path using secure path containment.
+/// Returns nil if the path is not contained in the workspace.
+func relativePathSecure(_ path: String, from workspace: String) -> String? {
+    let resolvedPath = (path as NSString).standardizingPath
+    let resolvedWs = (workspace as NSString).standardizingPath
+
+    let pathComponents = URL(fileURLWithPath: resolvedPath).standardized.pathComponents
+    let wsComponents = URL(fileURLWithPath: resolvedWs).standardized.pathComponents
+
+    guard pathComponents.count >= wsComponents.count,
+          Array(pathComponents.prefix(wsComponents.count)) == wsComponents else {
+        return nil
+    }
+
+    let relComponents = Array(pathComponents.dropFirst(wsComponents.count))
+    if relComponents.isEmpty {
+        return ""
+    }
+    return relComponents.joined(separator: "/")
+}
+
 extension String {
     // Left-pad a string to a given length
     func leftPad(toLength length: Int, withPad pad: Character = " ") -> String {
@@ -90,15 +125,8 @@ extension String {
         return self + String(repeating: pad, count: length - self.count)
     }
 
-    // Compute relative path from a base path
+    // Compute relative path from a base path (uses secure path containment)
     func relativePath(from base: String) -> String? {
-        let basePath = (base as NSString).standardizingPath
-        let selfPath = (self as NSString).standardizingPath
-        guard selfPath.hasPrefix(basePath) else { return nil }
-        var rel = String(selfPath.dropFirst(basePath.count))
-        if rel.hasPrefix("/") {
-            rel = String(rel.dropFirst())
-        }
-        return rel
+        return relativePathSecure(self, from: base)
     }
 }

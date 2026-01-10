@@ -26,8 +26,8 @@ struct ValidateCmd: ParsableCommand {
 
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: absPath, isDirectory: &isDir), isDir.boolValue {
-                // It's a directory - find threads under it
-                files = try findAllThreads(ws).filter { $0.hasPrefix(absPath) }
+                // It's a directory - find threads under it (use secure containment check)
+                files = try findAllThreads(ws).filter { isContained($0, in: absPath) }
             } else {
                 files = [absPath]
             }
@@ -49,13 +49,7 @@ struct ValidateCmd: ParsableCommand {
         var errorCount = 0
 
         for file in files {
-            var relPath = file
-            if file.hasPrefix(ws) {
-                relPath = String(file.dropFirst(ws.count))
-                if relPath.hasPrefix("/") {
-                    relPath = String(relPath.dropFirst())
-                }
-            }
+            let relPath = file.relativePath(from: ws) ?? file
 
             var issues: [String] = []
 

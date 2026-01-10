@@ -24,13 +24,7 @@ struct RemoveCmd: ParsableCommand {
         let t = try Thread.parse(path: file)
 
         let name = t.name
-        var relPath = file
-        if file.hasPrefix(ws) {
-            relPath = String(file.dropFirst(ws.count))
-            if relPath.hasPrefix("/") {
-                relPath = String(relPath.dropFirst())
-            }
-        }
+        let relPath = file.relativePath(from: ws) ?? file
 
         // Check if file is tracked
         let wasTracked = gitIsTracked(ws, relPath)

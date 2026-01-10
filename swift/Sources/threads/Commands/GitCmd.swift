@@ -14,13 +14,7 @@ struct GitCmd: ParsableCommand {
 
         var modified: [String] = []
         for t in threads {
-            var relPath = t
-            if t.hasPrefix(ws) {
-                relPath = String(t.dropFirst(ws.count))
-                if relPath.hasPrefix("/") {
-                    relPath = String(relPath.dropFirst())
-                }
-            }
+            let relPath = t.relativePath(from: ws) ?? t
             if gitHasChanges(ws, relPath) {
                 modified.append(relPath)
             }

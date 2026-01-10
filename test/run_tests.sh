@@ -42,12 +42,15 @@ convert_relative_paths() {
     local result=""
     local word
     for word in $cmd; do
-        # Check if it's a relative path (contains / but doesn't start with /)
-        if [[ "$word" == */* && ! "$word" =~ ^/ ]]; then
+        # Only convert if:
+        # 1. Contains / but doesn't start with /
+        # 2. Doesn't start with - (not a flag like -I./perl/lib)
+        # 3. Starts with ./ or is a bare path (not --foo=bar style)
+        if [[ "$word" == */* && ! "$word" =~ ^/ && ! "$word" =~ ^- ]]; then
             # Try to resolve it
             local dir base
-            dir="$(dirname "$word")"
-            base="$(basename "$word")"
+            dir="$(dirname -- "$word")"
+            base="$(basename -- "$word")"
             if [[ -d "$dir" ]]; then
                 word="$(cd "$dir" && pwd)/$base"
             fi

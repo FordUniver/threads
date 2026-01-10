@@ -31,9 +31,9 @@ IMPL_CMDS["perl"]="perl -I$REPO_DIR/perl/lib $REPO_DIR/perl/bin/threads"
 IMPL_PATHS["rust"]="$REPO_DIR/rust/target/release/threads"
 IMPL_CMDS["rust"]="$REPO_DIR/rust/target/release/threads"
 
-# Swift (compiled)
-IMPL_PATHS["swift"]="$REPO_DIR/swift/.build/arm64-apple-macosx/release/threads"
-IMPL_CMDS["swift"]="$REPO_DIR/swift/.build/arm64-apple-macosx/release/threads"
+# Swift (compiled) - use standard release path (works across architectures)
+IMPL_PATHS["swift"]="$REPO_DIR/swift/.build/release/threads"
+IMPL_CMDS["swift"]="$REPO_DIR/swift/.build/release/threads"
 
 # Ruby (interpreted)
 IMPL_PATHS["ruby"]="$REPO_DIR/ruby/bin/threads"

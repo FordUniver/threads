@@ -524,13 +524,8 @@ module Threads
         rel_paths = files.map { |f| f.sub("#{ws}/", '') }
         Git.commit(ws, rel_paths, message)
 
-        begin
-          Git.push(ws)
-        rescue Threads::GitError => e
-          warn "WARNING: git push failed (commit succeeded): #{e.message}"
-        end
-
         puts "Committed #{files.length} thread(s)."
+        $stderr.puts "Note: Changes committed locally. Push with 'git push' when ready."
       end
 
       # Validate thread files

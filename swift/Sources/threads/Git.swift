@@ -186,18 +186,11 @@ func gitPush(_ ws: String) throws {
     }
 }
 
-// gitAutoCommit stages, commits, and pushes a file
+// gitAutoCommit stages and commits a file (push is opt-in, not automatic)
 func gitAutoCommit(_ ws: String, _ file: String, _ message: String) throws {
     let relPath = file.relativePath(from: ws) ?? file
 
     try gitCommit(ws, [relPath], message)
-
-    do {
-        try gitPush(ws)
-    } catch {
-        // Warning only - commit succeeded
-        fputs("WARNING: git push failed (commit succeeded): \(error.localizedDescription)\n", stderr)
-    }
 }
 
 // generateCommitMessage creates a conventional commit message for thread changes

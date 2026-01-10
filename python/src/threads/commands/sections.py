@@ -73,7 +73,7 @@ def cmd_body(
             message = f"threads: update {file_path.stem}"
         auto_commit(file_path, message, workspace)
     else:
-        print(f"Note: Thread {ref} has uncommitted changes. Use 'thread commit {ref}' when ready.")
+        print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.")
 
 
 def cmd_note(
@@ -140,7 +140,7 @@ def cmd_note(
             message = f"threads: update {file_path.stem}"
         auto_commit(file_path, message, workspace)
     else:
-        print(f"Note: Thread {ref} has uncommitted changes. Use 'thread commit {ref}' when ready.")
+        print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.")
 
 
 def cmd_todo(
@@ -207,7 +207,7 @@ def cmd_todo(
             message = f"threads: update {file_path.stem}"
         auto_commit(file_path, message, workspace)
     else:
-        print(f"Note: Thread {ref} has uncommitted changes. Use 'thread commit {ref}' when ready.")
+        print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.")
 
 
 def cmd_log(
@@ -242,4 +242,4 @@ def cmd_log(
             message = f"threads: update {file_path.stem}"
         auto_commit(file_path, message, workspace)
     else:
-        print(f"Note: Thread {ref} has uncommitted changes. Use 'thread commit {ref}' when ready.")
+        print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.")

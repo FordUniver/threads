@@ -1022,9 +1022,8 @@ async function cmdRemove(args: string[]): Promise<void> {
     try {
       git.add(ws, relPath);
       git.commit(ws, [relPath], msg);
-      git.push(ws);
     } catch (e: unknown) {
-      console.log(`WARNING: ${getErrorMessage(e)}`);
+      console.error(`WARNING: ${getErrorMessage(e)}`);
     }
   } else {
     console.log('Note: To commit this removal, run:');
@@ -1085,9 +1084,8 @@ async function cmdMove(args: string[]): Promise<void> {
       git.add(ws, relSrc, relDest);
       const msg = (flags.m || `threads: move ${path.basename(srcFile)} to ${scope.levelDesc}`) as string;
       git.commit(ws, [relSrc, relDest], msg);
-      git.push(ws);
     } catch (e: unknown) {
-      console.log(`WARNING: ${getErrorMessage(e)}`);
+      console.error(`WARNING: ${getErrorMessage(e)}`);
     }
   } else {
     console.log('Note: Use --commit to commit this move');
@@ -1179,12 +1177,6 @@ async function cmdCommit(args: string[]): Promise<void> {
   } catch (e: unknown) {
     console.error(`Error: ${getErrorMessage(e)}`);
     process.exit(1);
-  }
-
-  try {
-    git.push(ws);
-  } catch (e: unknown) {
-    console.log(`WARNING: git push failed (commit succeeded): ${getErrorMessage(e)}`);
   }
 
   console.log(`Committed ${files.length} thread(s).`);

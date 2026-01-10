@@ -62,16 +62,10 @@ module Threads
         raise GitError, "git push failed: #{output}" unless status.success?
       end
 
-      # Auto-commit: stage, commit, and push
+      # Auto-commit: stage and commit (no push)
       def auto_commit(ws, file, message)
         rel_path = file.sub("#{ws}/", '')
         commit(ws, [rel_path], message)
-
-        begin
-          push(ws)
-        rescue GitError => e
-          warn "WARNING: git push failed (commit succeeded): #{e.message}"
-        end
       end
 
       # Generate commit message for thread changes

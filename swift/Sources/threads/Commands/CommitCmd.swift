@@ -33,13 +33,7 @@ struct CommitCmd: ParsableCommand {
             let threads = try findAllThreads(ws)
 
             for t in threads {
-                var relPath = t
-                if t.hasPrefix(ws) {
-                    relPath = String(t.dropFirst(ws.count))
-                    if relPath.hasPrefix("/") {
-                        relPath = String(relPath.dropFirst())
-                    }
-                }
+                let relPath = t.relativePath(from: ws) ?? t
                 if gitHasChanges(ws, relPath) {
                     files.append(t)
                 }
@@ -52,15 +46,9 @@ struct CommitCmd: ParsableCommand {
 
             for id in ids {
                 let file = try findByRef(ws, id)
-                var relPath = file
-                if file.hasPrefix(ws) {
-                    relPath = String(file.dropFirst(ws.count))
-                    if relPath.hasPrefix("/") {
-                        relPath = String(relPath.dropFirst())
-                    }
-                }
+                let relPath = file.relativePath(from: ws) ?? file
                 if !gitHasChanges(ws, relPath) {
-                    print("No changes in thread: \(id)")
+                    fputs("No changes in thread: \(id)\n", stderr)
                     continue
                 }
                 files.append(file)
@@ -92,25 +80,9 @@ struct CommitCmd: ParsableCommand {
         }
 
         // Stage and commit
-        var relPaths: [String] = []
-        for f in files {
-            var relPath = f
-            if f.hasPrefix(ws) {
-                relPath = String(f.dropFirst(ws.count))
-                if relPath.hasPrefix("/") {
-                    relPath = String(relPath.dropFirst())
-                }
-            }
-            relPaths.append(relPath)
-        }
+        let relPaths = files.map { $0.relativePath(from: ws) ?? $0 }
 
         try gitCommit(ws, relPaths, msg!)
-
-        do {
-            try gitPush(ws)
-        } catch {
-            print("WARNING: git push failed (commit succeeded): \(error.localizedDescription)")
-        }
 
         print("Committed \(files.count) thread(s).")
     }

@@ -145,8 +145,8 @@ func inferScope(_ ws: String, _ path: String) throws -> Scope {
         }
     }
 
-    // Must be within workspace
-    if !absPath.hasPrefix(ws) {
+    // Must be within workspace (use secure path containment)
+    if !isContained(absPath, in: ws) {
         return Scope(
             threadsDir: (ws as NSString).appendingPathComponent(".threads"),
             category: "-",

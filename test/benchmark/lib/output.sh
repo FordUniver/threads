@@ -151,7 +151,8 @@ print_md_table() {
         IFS='|' read -r impl mean min max stddev <<< "$row"
         local relative
         if [[ $fastest -gt 0 ]]; then
-            relative=$(echo "scale=1; $mean / $fastest" | bc)x
+            # Use awk for portable floating point division (bc may not be available)
+            relative=$(gawk -v m="$mean" -v f="$fastest" 'BEGIN { printf "%.1fx", m/f }')
         else
             relative="1.0x"
         fi

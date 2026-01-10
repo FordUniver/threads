@@ -8,6 +8,21 @@ use regex::Regex;
 
 use crate::thread;
 
+/// Check if a path is contained within a workspace directory.
+/// Uses canonicalization to resolve symlinks and ".." components,
+/// then uses Path::starts_with which is component-based (not string-based).
+fn is_contained_in(path: &Path, workspace: &Path) -> bool {
+    let resolved = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    let ws_resolved = match workspace.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    resolved.starts_with(&ws_resolved)
+}
+
 // Cached regexes for workspace operations
 static ID_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[0-9a-f]{6}$").unwrap()
@@ -152,10 +167,8 @@ pub fn infer_scope(ws: &Path, path: &str) -> Result<Scope, String> {
         }
     };
 
-    // Must be within workspace
-    let ws_str = ws.to_string_lossy();
-    let abs_str = abs_path.to_string_lossy();
-    if !abs_str.starts_with(ws_str.as_ref()) {
+    // Must be within workspace (use secure canonicalized path check)
+    if !is_contained_in(&abs_path, ws) {
         return Ok(Scope {
             threads_dir: ws.join(".threads"),
             category: "-".to_string(),
@@ -164,8 +177,11 @@ pub fn infer_scope(ws: &Path, path: &str) -> Result<Scope, String> {
         });
     }
 
-    let rel = abs_path
-        .strip_prefix(ws)
+    // After is_contained_in succeeds, we can safely use strip_prefix on canonicalized paths
+    let abs_canonical = abs_path.canonicalize().unwrap_or(abs_path.clone());
+    let ws_canonical = ws.canonicalize().unwrap_or(ws.to_path_buf());
+    let rel = abs_canonical
+        .strip_prefix(&ws_canonical)
         .map(|p| p.to_path_buf())
         .unwrap_or_else(|_| PathBuf::new());
 
@@ -209,13 +225,18 @@ pub fn infer_scope(ws: &Path, path: &str) -> Result<Scope, String> {
 
 /// Parse thread path to extract category, project, and name
 pub fn parse_thread_path(ws: &Path, path: &Path) -> (String, String, String) {
-    let ws_str = ws.to_string_lossy();
-    let path_str = path.to_string_lossy();
+    // Use canonicalized paths for secure path containment check
+    let ws_canonical = ws.canonicalize().unwrap_or_else(|_| ws.to_path_buf());
+    let path_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
-    let rel = if path_str.starts_with(ws_str.as_ref()) {
-        path_str[ws_str.len()..].trim_start_matches('/').to_string()
+    // Use Path::strip_prefix (component-based, not string-based) for secure relative path extraction
+    let rel = if path_canonical.starts_with(&ws_canonical) {
+        path_canonical
+            .strip_prefix(&ws_canonical)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| path.to_string_lossy().to_string())
     } else {
-        path_str.to_string()
+        path.to_string_lossy().to_string()
     };
 
     let filename = path

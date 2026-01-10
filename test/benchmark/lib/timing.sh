@@ -28,8 +28,15 @@ warn_missing_bc() {
 }
 
 # Get current time in nanoseconds (cross-platform)
+# Priority: gdate (macOS with coreutils), date (Linux), python fallback
 now_ns() {
-    gdate +%s%N 2>/dev/null || date +%s%N 2>/dev/null || echo "0"
+    # GNU date (gdate on macOS, date on Linux)
+    gdate +%s%N 2>/dev/null && return
+    date +%s%N 2>/dev/null && return
+    # Fallback: use Python for sub-second precision
+    python3 -c 'import time; print(int(time.time() * 1e9))' 2>/dev/null && return
+    # Last resort: seconds only (multiply by 1e9 for ns)
+    echo "$(($(date +%s) * 1000000000))"
 }
 
 # Run benchmark with hyperfine

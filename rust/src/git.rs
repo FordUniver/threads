@@ -93,40 +93,7 @@ pub fn commit(ws: &Path, files: &[String], message: &str) -> Result<(), String> 
     Ok(())
 }
 
-/// Push (git pull --rebase && git push)
-pub fn push(ws: &Path) -> Result<(), String> {
-    let ws_str = ws.to_string_lossy();
-
-    // Pull with rebase
-    let output = Command::new("git")
-        .args(["-C", &ws_str, "pull", "--rebase"])
-        .output()
-        .map_err(|e| format!("git pull --rebase failed: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "git pull --rebase failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    // Push
-    let output = Command::new("git")
-        .args(["-C", &ws_str, "push"])
-        .output()
-        .map_err(|e| format!("git push failed: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "git push failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    Ok(())
-}
-
-/// Auto-commit: stage, commit, and push
+/// Auto-commit: stage and commit (push is opt-in via separate command)
 pub fn auto_commit(ws: &Path, file: &Path, message: &str) -> Result<(), String> {
     let rel_path = file
         .strip_prefix(ws)
@@ -134,10 +101,6 @@ pub fn auto_commit(ws: &Path, file: &Path, message: &str) -> Result<(), String> 
         .unwrap_or_else(|_| file.to_string_lossy().to_string());
 
     commit(ws, &[rel_path], message)?;
-
-    if let Err(e) = push(ws) {
-        eprintln!("WARNING: git push failed (commit succeeded): {}", e);
-    }
 
     Ok(())
 }

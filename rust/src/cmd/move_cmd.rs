@@ -78,9 +78,7 @@ pub fn run(args: MoveArgs, ws: &Path) -> Result<(), String> {
 
         git::commit(ws, &[rel_src, rel_dest], &msg)?;
 
-        if let Err(e) = git::push(ws) {
-            eprintln!("WARNING: git push failed (commit succeeded): {}", e);
-        }
+        eprintln!("Note: Changes are local. Push with 'git push' when ready.");
     } else {
         println!("Note: Use --commit to commit this move");
     }

@@ -41,26 +41,14 @@ struct MoveCmd: ParsableCommand {
 
         try FileManager.default.moveItem(atPath: srcFile, toPath: destFile)
 
-        var relDest = destFile
-        if destFile.hasPrefix(ws) {
-            relDest = String(destFile.dropFirst(ws.count))
-            if relDest.hasPrefix("/") {
-                relDest = String(relDest.dropFirst())
-            }
-        }
+        let relDest = destFile.relativePath(from: ws) ?? destFile
 
         print("Moved to \(scope.levelDesc)")
         print("  → \(relDest)")
 
         // Commit if requested
         if commit {
-            var relSrc = srcFile
-            if srcFile.hasPrefix(ws) {
-                relSrc = String(srcFile.dropFirst(ws.count))
-                if relSrc.hasPrefix("/") {
-                    relSrc = String(relSrc.dropFirst())
-                }
-            }
+            let relSrc = srcFile.relativePath(from: ws) ?? srcFile
 
             try gitAdd(ws, [relSrc, relDest])
             let msg = m ?? "threads: move \((srcFile as NSString).lastPathComponent) to \(scope.levelDesc)"

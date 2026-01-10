@@ -20,7 +20,7 @@ export PATH="/path/to/threads.glab.repo/ruby/bin:$PATH"
 ## Usage
 
 ```bash
-# Set workspace (or let it auto-detect via .threads/ directories)
+# Set workspace (required)
 export WORKSPACE=/path/to/workspace
 
 # Create a new thread

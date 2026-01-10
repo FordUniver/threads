@@ -902,7 +902,7 @@ sub _extract_scope {
 sub _print_uncommitted_note {
     my ($id, $committed) = @_;
     return if $committed;
-    say "Note: Thread $id has uncommitted changes. Use 'thread commit $id' when ready.";
+    say "Note: Thread $id has uncommitted changes. Use 'threads commit $id' when ready.";
 }
 
 1;

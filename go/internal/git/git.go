@@ -89,23 +89,14 @@ func Push(ws string) error {
 	return nil
 }
 
-// AutoCommit stages, commits, and pushes a file
+// AutoCommit stages and commits a file locally (does not push)
 func AutoCommit(ws, file, message string) error {
 	relPath, err := filepath.Rel(ws, file)
 	if err != nil {
 		relPath = file
 	}
 
-	if err := Commit(ws, []string{relPath}, message); err != nil {
-		return err
-	}
-
-	if err := Push(ws); err != nil {
-		// Warning only - commit succeeded
-		fmt.Printf("WARNING: git push failed (commit succeeded): %v\n", err)
-	}
-
-	return nil
+	return Commit(ws, []string{relPath}, message)
 }
 
 // GenerateCommitMessage creates a conventional commit message for thread changes

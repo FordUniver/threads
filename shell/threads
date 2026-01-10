@@ -146,6 +146,21 @@ is_terminal() {
   echo "$base" | grep -qE "^($TERMINAL_STATUSES)$"
 }
 
+# Safe path containment check using realpath to prevent path traversal
+# Returns 0 if path is contained within workspace, 1 otherwise
+is_contained() {
+  local path="$1"
+  local workspace="$2"
+
+  # Canonicalize both paths (resolve symlinks, .., etc.)
+  local resolved ws_resolved
+  resolved=$(realpath -m "$path" 2>/dev/null) || resolved=$(cd "$(dirname "$path")" 2>/dev/null && pwd)/$(basename "$path")
+  ws_resolved=$(realpath -m "$workspace" 2>/dev/null) || ws_resolved=$(cd "$workspace" 2>/dev/null && pwd)
+
+  # Check if path equals workspace or is under workspace (with trailing slash to avoid /foo/bar matching /foo/bar2)
+  [[ "$resolved" == "$ws_resolved" || "$resolved" == "$ws_resolved"/* ]]
+}
+
 # Parse path into category, project, name
 parse_thread_path() {
   local file="$1"
@@ -205,8 +220,8 @@ infer_scope() {
     return 1
   fi
 
-  # Must be within WORKSPACE
-  if [[ "$abs_path" != "$WORKSPACE"* ]]; then
+  # Must be within WORKSPACE (use secure path containment check)
+  if ! is_contained "$abs_path" "$WORKSPACE"; then
     echo "Warning: cwd outside workspace, defaulting to workspace level" >&2
     echo "$WORKSPACE/.threads|-|-|workspace-level thread"
     return
@@ -340,12 +355,11 @@ slugify() {
   echo "$1" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//' | sed 's/-$//'
 }
 
-# Auto-commit and push a thread file (only commits the specified file)
+# Auto-commit a thread file (only commits the specified file, does not push)
 auto_commit() {
   local file="$1" message="$2"
   git -C "$WORKSPACE" add "$file" || { echo "ERROR: git add failed" >&2; return 1; }
   git -C "$WORKSPACE" commit "$file" -m "$message" || { echo "ERROR: git commit failed" >&2; return 1; }
-  git -C "$WORKSPACE" pull --rebase && git -C "$WORKSPACE" push || { echo "WARNING: git push failed (commit succeeded)" >&2; return 0; }
 }
 
 # Generate commit message for thread changes
@@ -736,7 +750,7 @@ BODY
     [[ -z "$message" ]] && message=$(generate_commit_message "$filepath")
     auto_commit "$filepath" "$message"
   else
-    echo "Note: Thread $tid has uncommitted changes. Use 'thread commit $tid' when ready."
+    echo "Note: Thread $tid has uncommitted changes. Use 'threads commit $tid' when ready."
   fi
 }
 
@@ -855,7 +869,7 @@ cmd_status() {
     [[ -z "$message" ]] && message=$(generate_commit_message "$file")
     auto_commit "$file" "$message"
   else
-    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+    echo "Note: Thread $ref has uncommitted changes. Use 'threads commit $ref' when ready."
   fi
 }
 
@@ -903,7 +917,7 @@ cmd_update() {
     [[ -z "$message" ]] && message=$(generate_commit_message "$file")
     auto_commit "$file" "$message"
   else
-    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+    echo "Note: Thread $ref has uncommitted changes. Use 'threads commit $ref' when ready."
   fi
 }
 
@@ -996,7 +1010,7 @@ cmd_body() {
     [[ -z "$message" ]] && message=$(generate_commit_message "$file")
     auto_commit "$file" "$message"
   else
-    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+    echo "Note: Thread $ref has uncommitted changes. Use 'threads commit $ref' when ready."
   fi
 }
 
@@ -1201,7 +1215,7 @@ cmd_note() {
     [[ -z "$message" ]] && message=$(generate_commit_message "$file")
     auto_commit "$file" "$message"
   else
-    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+    echo "Note: Thread $ref has uncommitted changes. Use 'threads commit $ref' when ready."
   fi
 }
 
@@ -1372,7 +1386,7 @@ cmd_todo() {
     [[ -z "$message" ]] && message=$(generate_commit_message "$file")
     auto_commit "$file" "$message"
   else
-    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+    echo "Note: Thread $ref has uncommitted changes. Use 'threads commit $ref' when ready."
   fi
 }
 
@@ -1465,7 +1479,7 @@ EOF
     [[ -z "$message" ]] && message=$(generate_commit_message "$file")
     auto_commit "$file" "$message"
   else
-    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+    echo "Note: Thread $ref has uncommitted changes. Use 'threads commit $ref' when ready."
   fi
 }
 
@@ -1534,7 +1548,7 @@ EOF
     [[ -z "$message" ]] && message=$(generate_commit_message "$file")
     auto_commit "$file" "$message"
   else
-    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+    echo "Note: Thread $ref has uncommitted changes. Use 'threads commit $ref' when ready."
   fi
 }
 
@@ -1608,7 +1622,7 @@ EOF
     [[ -z "$message" ]] && message=$(generate_commit_message "$file")
     auto_commit "$file" "$message"
   else
-    echo "Note: Thread $ref has uncommitted changes. Use 'thread commit $ref' when ready."
+    echo "Note: Thread $ref has uncommitted changes. Use 'threads commit $ref' when ready."
   fi
 }
 

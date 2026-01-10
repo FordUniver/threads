@@ -104,11 +104,8 @@ pub fn run(args: CommitArgs, ws: &Path) -> Result<(), String> {
 
     git::commit(ws, &rel_paths, &msg)?;
 
-    if let Err(e) = git::push(ws) {
-        eprintln!("WARNING: git push failed (commit succeeded): {}", e);
-    }
-
     println!("Committed {} thread(s).", files.len());
+    eprintln!("Note: Changes are local. Push with 'git push' when ready.");
     Ok(())
 }
 

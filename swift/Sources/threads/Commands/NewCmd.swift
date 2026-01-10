@@ -132,13 +132,7 @@ struct NewCmd: ParsableCommand {
         // Write file
         try content.write(toFile: threadPath, atomically: true, encoding: .utf8)
 
-        var relPath = threadPath
-        if threadPath.hasPrefix(ws) {
-            relPath = String(threadPath.dropFirst(ws.count))
-            if relPath.hasPrefix("/") {
-                relPath = String(relPath.dropFirst())
-            }
-        }
+        let relPath = threadPath.relativePath(from: ws) ?? threadPath
 
         print("Created \(scope.levelDesc): \(id)")
         print("  → \(relPath)")

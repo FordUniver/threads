@@ -83,18 +83,11 @@ export function push(ws: string): void {
   }
 }
 
-// Auto commit and push a file
+// Auto commit a file (push is user's responsibility)
 export function autoCommit(ws: string, file: string, message: string): void {
   const relPath = path.relative(ws, file);
 
   commit(ws, [relPath], message);
-
-  try {
-    push(ws);
-  } catch (e) {
-    // Warning only - commit succeeded
-    console.log(`WARNING: git push failed (commit succeeded): ${e}`);
-  }
 }
 
 // Generate conventional commit message for thread changes

@@ -115,7 +115,7 @@ def cmd_new(
             message = f"threads: add {tid}-{slug}"
         auto_commit(filepath, message, workspace)
     else:
-        print(f"Note: Thread {tid} has uncommitted changes. Use 'thread commit {tid}' when ready.")
+        print(f"Note: Thread {tid} has uncommitted changes. Use 'threads commit {tid}' when ready.")
 
     return tid
 
@@ -129,7 +129,7 @@ def cmd_remove(ref: str, do_commit: bool = False, message: str | None = None) ->
     rel_path = file_path.relative_to(workspace)
 
     # Check if tracked in git
-    from .lifecycle import is_tracked
+    from ..git import is_tracked
     was_tracked = is_tracked(file_path, workspace)
 
     # Delete file
@@ -180,4 +180,4 @@ def cmd_update(
             message = f"threads: update {file_path.stem}"
         auto_commit(file_path, message, workspace)
     else:
-        print(f"Note: Thread {ref} has uncommitted changes. Use 'thread commit {ref}' when ready.")
+        print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.")

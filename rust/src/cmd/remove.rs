@@ -49,9 +49,7 @@ pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
         let msg = args.m.unwrap_or_else(|| format!("threads: remove '{}'", name));
         git::add(ws, &[&rel_path])?;
         git::commit(ws, &[rel_path.clone()], &msg)?;
-        if let Err(e) = git::push(ws) {
-            eprintln!("WARNING: git push failed (commit succeeded): {}", e);
-        }
+        eprintln!("Note: Changes are local. Push with 'git push' when ready.");
     } else {
         println!("Note: To commit this removal, run:");
         println!(
