@@ -9,7 +9,7 @@ use Threads::Section qw(get_section set_section append_to_section has_section);
 
 # Valid statuses
 our @ACTIVE_STATUSES = qw(idea planning active blocked paused);
-our @TERMINAL_STATUSES = qw(resolved superseded deferred reject);
+our @TERMINAL_STATUSES = qw(resolved superseded deferred rejected);
 our @ALL_STATUSES = (@ACTIVE_STATUSES, @TERMINAL_STATUSES);
 
 # Precompiled regex patterns for notes/todos with hash markers

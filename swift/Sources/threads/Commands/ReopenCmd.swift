@@ -23,7 +23,7 @@ struct ReopenCmd: ParsableCommand {
         let ws = try getWorkspace()
 
         guard Thread.isValidStatus(status) else {
-            throw ValidationError("Invalid status '\(status)'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, reject")
+            throw ValidationError("Invalid status '\(status)'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, rejected")
         }
 
         let file = try findByRef(ws, id)

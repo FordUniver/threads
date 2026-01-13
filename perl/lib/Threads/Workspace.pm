@@ -17,7 +17,7 @@ our @EXPORT_OK = qw(
 );
 
 # Precompiled pattern for terminal status detection (quick check)
-our $TERMINAL_STATUS_RE = qr/^status:\s*(resolved|superseded|deferred|reject)/m;
+our $TERMINAL_STATUS_RE = qr/^status:\s*(resolved|superseded|deferred|rejected)/m;
 
 # Get workspace root from WORKSPACE environment variable
 sub workspace_root {

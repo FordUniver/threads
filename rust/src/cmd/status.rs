@@ -26,7 +26,7 @@ pub struct StatusArgs {
 pub fn run(args: StatusArgs, ws: &Path) -> Result<(), String> {
     if !thread::is_valid_status(&args.new_status) {
         return Err(format!(
-            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, reject",
+            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, rejected",
             args.new_status
         ));
     }
