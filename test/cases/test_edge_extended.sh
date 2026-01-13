@@ -248,6 +248,7 @@ test_terminal_statuses() {
     create_thread "res001" "Resolved" "resolved"
     create_thread "sup001" "Superseded" "superseded"
     create_thread "def001" "Deferred" "deferred"
+    create_thread "rej001" "Rejected" "reject"
 
     local output
     output=$(capture_stdout $THREADS_BIN list --all)
@@ -255,6 +256,7 @@ test_terminal_statuses() {
     assert_contains "$output" "res001" "should include resolved"
     assert_contains "$output" "sup001" "should include superseded"
     assert_contains "$output" "def001" "should include deferred"
+    assert_contains "$output" "rej001" "should include reject"
 
     teardown_test_workspace
     end_test
@@ -294,6 +296,23 @@ test_reopen_from_deferred() {
     end_test
 }
 
+# Test: reopen from reject
+test_reopen_from_reject() {
+    begin_test "reopen from reject"
+    setup_test_workspace
+
+    create_thread "abc123" "Rejected Thread" "reject"
+
+    $THREADS_BIN reopen abc123 >/dev/null 2>&1
+
+    local status
+    status=$(get_thread_field "abc123" "status")
+    assert_eq "active" "$status" "should be active after reopen"
+
+    teardown_test_workspace
+    end_test
+}
+
 # Run all tests
 test_name_with_double_quotes
 test_name_with_single_quotes
@@ -310,3 +329,4 @@ test_all_active_statuses
 test_terminal_statuses
 test_reopen_from_superseded
 test_reopen_from_deferred
+test_reopen_from_reject

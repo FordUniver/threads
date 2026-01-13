@@ -21,6 +21,7 @@ struct Threads: ParsableCommand {
             GitCmd.self,
             StatsCmd.self,
             ReadCmd.self,
+            PathCmd.self,
             StatusCmd.self,
             UpdateCmd.self,
             BodyCmd.self,

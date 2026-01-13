@@ -2,7 +2,7 @@ import * as yaml from 'js-yaml';
 import * as path from 'path';
 
 // Status constants with const assertions for type safety
-export const TERMINAL_STATUSES = ['resolved', 'superseded', 'deferred'] as const;
+export const TERMINAL_STATUSES = ['resolved', 'superseded', 'deferred', 'reject'] as const;
 export const ACTIVE_STATUSES = ['idea', 'planning', 'active', 'blocked', 'paused'] as const;
 export const ALL_STATUSES = [...ACTIVE_STATUSES, ...TERMINAL_STATUSES] as const;
 

@@ -17,6 +17,7 @@ Workspace operations:
 
 Single-thread operations:
   threads read <id>                        Read thread content
+  threads path <id>                        Print thread file path
   threads status <id> <new-status>         Change thread status
   threads update <id> --title=X            Update thread title/desc
   threads body <id> [--set|--append]       Edit Body section (stdin)
@@ -82,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
     # read
     p_read = subparsers.add_parser("read", help="Read thread content")
     p_read.add_argument("ref", help="Thread ID or name")
+
+    # path
+    p_path = subparsers.add_parser("path", help="Print thread file path")
+    p_path.add_argument("ref", help="Thread ID or name")
 
     # status
     p_status = subparsers.add_parser("status", help="Change thread status")
@@ -232,6 +237,10 @@ def main() -> int:
         elif args.command == "read":
             from .commands.query import cmd_read
             cmd_read(args.ref)
+
+        elif args.command == "path":
+            from .commands.query import cmd_path
+            cmd_path(args.ref)
 
         elif args.command == "status":
             from .commands.lifecycle import cmd_status

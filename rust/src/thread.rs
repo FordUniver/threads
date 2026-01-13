@@ -29,7 +29,7 @@ static TODO_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 /// Terminal statuses
-pub const TERMINAL_STATUSES: &[&str] = &["resolved", "superseded", "deferred"];
+pub const TERMINAL_STATUSES: &[&str] = &["resolved", "superseded", "deferred", "reject"];
 
 /// Active statuses
 pub const ACTIVE_STATUSES: &[&str] = &["idea", "planning", "active", "blocked", "paused"];

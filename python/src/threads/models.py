@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Valid status values
 ACTIVE_STATUSES = frozenset({"idea", "planning", "active", "blocked", "paused"})
-TERMINAL_STATUSES = frozenset({"resolved", "superseded", "deferred"})
+TERMINAL_STATUSES = frozenset({"resolved", "superseded", "deferred", "reject"})
 ALL_STATUSES = ACTIVE_STATUSES | TERMINAL_STATUSES
 
 

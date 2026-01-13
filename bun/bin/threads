@@ -412,6 +412,30 @@ async function cmdRead(args: string[]): Promise<void> {
   process.stdout.write(content);
 }
 
+// path command
+async function cmdPath(args: string[]): Promise<void> {
+  const { positional } = parseFlags(args);
+  const ws = getWorkspace();
+
+  if (positional.length < 1) {
+    console.error('Usage: threads path <id>');
+    process.exit(1);
+  }
+
+  const ref = positional[0];
+
+  let file: string;
+  try {
+    file = findByRef(ws, ref);
+  } catch (e: unknown) {
+    console.error(`Error: ${getErrorMessage(e)}`);
+    process.exit(1);
+  }
+
+  const absPath = path.resolve(file);
+  console.log(absPath);
+}
+
 // status command
 async function cmdStatus(args: string[]): Promise<void> {
   const { flags, positional } = parseFlags(args);
@@ -1380,6 +1404,7 @@ function printHelp(): void {
   console.log('  list [path]           List threads');
   console.log('  new [path] <title>    Create a new thread');
   console.log('  read <id>             Read thread content');
+  console.log('  path <id>             Print thread file path');
   console.log('  status <id> <status>  Change thread status');
   console.log('  update <id>           Update thread title/desc');
   console.log('  body <id>             Edit Body section');
@@ -1419,6 +1444,9 @@ async function main(): Promise<void> {
       break;
     case 'read':
       await cmdRead(cmdArgs);
+      break;
+    case 'path':
+      await cmdPath(cmdArgs);
       break;
     case 'status':
       await cmdStatus(cmdArgs);

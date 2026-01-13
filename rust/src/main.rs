@@ -42,6 +42,9 @@ enum Commands {
     /// Read thread content
     Read(cmd::read::ReadArgs),
 
+    /// Print thread file path
+    Path(cmd::path::PathArgs),
+
     /// Change thread status
     Status(cmd::status::StatusArgs),
 
@@ -108,6 +111,7 @@ fn main() {
         Commands::Git(args) => cmd::git_cmd::run(args, &ws),
         Commands::Stats(args) => cmd::stats::run(args, &ws),
         Commands::Read(args) => cmd::read::run(args, &ws),
+        Commands::Path(args) => cmd::path::run(args, &ws),
         Commands::Status(args) => cmd::status::run(args, &ws),
         Commands::Update(args) => cmd::update::run(args, &ws),
         Commands::Body(args) => cmd::body::run(args, &ws),

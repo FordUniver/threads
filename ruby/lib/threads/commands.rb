@@ -189,6 +189,12 @@ module Threads
         print File.read(file)
       end
 
+      # Print thread file path
+      def path(ws, ref)
+        file = Workspace.find_by_ref(ws, ref)
+        puts File.absolute_path(file)
+      end
+
       # Change thread status
       def status(ws, ref, new_status)
         # Validate status before applying

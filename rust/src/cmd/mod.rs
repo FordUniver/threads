@@ -6,6 +6,7 @@ pub mod log;
 pub mod move_cmd;
 pub mod new;
 pub mod note;
+pub mod path;
 pub mod read;
 pub mod remove;
 pub mod reopen;

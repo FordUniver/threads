@@ -64,7 +64,7 @@ func runNew(cmd *cobra.Command, args []string) error {
 	}
 
 	if !thread.IsValidStatus(newStatus) {
-		return fmt.Errorf("invalid status '%s'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred", newStatus)
+		return fmt.Errorf("invalid status '%s'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, reject", newStatus)
 	}
 
 	// Warn if no description provided

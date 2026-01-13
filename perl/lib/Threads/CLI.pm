@@ -60,6 +60,7 @@ Commands:
   list [path]              List threads (default: current scope)
   new [path] <title>       Create new thread
   read <id>                Read thread content
+  path <id>                Print thread file path
   stats [path]             Show thread statistics
 
   body <id>                Set/append body content (stdin)
@@ -192,6 +193,19 @@ sub cmd_read {
     my $path = find_thread($id);
     my $t = Threads::Thread->new_from_file($path);
     print $t->content;
+    return 0;
+}
+
+# ============================================================================
+# Path command
+# ============================================================================
+
+sub cmd_path {
+    my ($class, @args) = @_;
+
+    my $id = shift @args or die "Usage: threads path <id>\n";
+    my $path = find_thread($id);
+    say abs_path($path) // $path;
     return 0;
 }
 

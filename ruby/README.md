@@ -128,7 +128,7 @@ $WORKSPACE/
 
 **Active statuses:** idea, planning, active, blocked, paused
 
-**Terminal statuses:** resolved, superseded, deferred
+**Terminal statuses:** resolved, superseded, deferred, reject
 
 Status can include a reason suffix: `blocked (waiting for review)`
 

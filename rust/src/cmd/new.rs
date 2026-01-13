@@ -42,7 +42,7 @@ pub fn run(args: NewArgs, ws: &Path) -> Result<(), String> {
     // Validate status early
     if !thread::is_valid_status(&args.status) {
         return Err(format!(
-            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred",
+            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, reject",
             args.status
         ));
     }

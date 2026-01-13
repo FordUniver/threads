@@ -12,7 +12,7 @@ import (
 
 // Status constants
 var (
-	TerminalStatuses = []string{"resolved", "superseded", "deferred"}
+	TerminalStatuses = []string{"resolved", "superseded", "deferred", "reject"}
 	ActiveStatuses   = []string{"idea", "planning", "active", "blocked", "paused"}
 	AllStatuses      = append(ActiveStatuses, TerminalStatuses...)
 )

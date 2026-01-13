@@ -175,6 +175,27 @@ def cmd_read(ref: str) -> None:
     print(file_path.read_text())
 
 
+def cmd_path(ref: str) -> None:
+    """Print the absolute path of a thread file."""
+    from ..workspace import find_thread_by_ref
+
+    workspace = get_workspace()
+
+    # Try to find by ID/name
+    try:
+        file_path = find_thread_by_ref(ref, workspace)
+    except ValueError:
+        # Try as direct path
+        if Path(ref).is_file():
+            file_path = Path(ref)
+        elif (workspace / ref).is_file():
+            file_path = workspace / ref
+        else:
+            raise
+
+    print(file_path.resolve())
+
+
 def cmd_stats(path: str | None = None, recursive: bool = False) -> None:
     """Show thread count by status."""
     workspace = get_workspace()

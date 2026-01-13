@@ -3,7 +3,13 @@
 
 # threads - Persistent context management for LLM-assisted development
 
-$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+# Try multiple paths to find lib (placement independent)
+[
+  File.expand_path('../lib', __dir__),      # Standard: bin/threads -> lib/
+  File.expand_path('lib', __dir__),         # Flat: threads -> lib/
+].each do |path|
+  $LOAD_PATH.unshift(path) if File.directory?(path)
+end
 
 require 'optparse'
 require 'fileutils'
@@ -50,6 +56,8 @@ module Threads
         run_new(args)
       when 'read'
         run_read(args)
+      when 'path'
+        run_path(args)
       when 'status'
         run_status(args)
       when 'update'
@@ -120,6 +128,7 @@ module Threads
 
         THREAD COMMANDS:
           read <id>           Read thread content
+          path <id>           Print thread file path
           status <id> <status>  Change thread status
           update <id>         Update thread title/desc
           body <id> [--set|--append]
@@ -201,6 +210,13 @@ module Threads
       raise ArgumentError, 'usage: threads read <id>' if args.empty?
 
       Commands.read(@ws, args[0])
+      EXIT_SUCCESS
+    end
+
+    def run_path(args)
+      raise ArgumentError, 'usage: threads path <id>' if args.empty?
+
+      Commands.path(@ws, args[0])
       EXIT_SUCCESS
     end
 

@@ -2,7 +2,7 @@ import Foundation
 import Yams
 
 // Status constants
-let terminalStatuses = ["resolved", "superseded", "deferred"]
+let terminalStatuses = ["resolved", "superseded", "deferred", "reject"]
 let activeStatuses = ["idea", "planning", "active", "blocked", "paused"]
 let allStatuses = activeStatuses + terminalStatuses
 

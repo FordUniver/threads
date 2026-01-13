@@ -15,7 +15,7 @@ module Threads
   class GitError < Error; end
 
   # Status constants
-  TERMINAL_STATUSES = %w[resolved superseded deferred].freeze
+  TERMINAL_STATUSES = %w[resolved superseded deferred reject].freeze
   ACTIVE_STATUSES = %w[idea planning active blocked paused].freeze
   ALL_STATUSES = (ACTIVE_STATUSES + TERMINAL_STATUSES).freeze
 

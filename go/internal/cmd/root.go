@@ -46,6 +46,7 @@ func init() {
 
 	// Single-thread operations
 	rootCmd.AddCommand(readCmd)
+	rootCmd.AddCommand(pathCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(bodyCmd)

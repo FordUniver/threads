@@ -23,7 +23,7 @@ struct StatusCmd: ParsableCommand {
         let ws = try getWorkspace()
 
         guard Thread.isValidStatus(newStatus) else {
-            throw ValidationError("Invalid status '\(newStatus)'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred")
+            throw ValidationError("Invalid status '\(newStatus)'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, reject")
         }
 
         let file = try findByRef(ws, id)
