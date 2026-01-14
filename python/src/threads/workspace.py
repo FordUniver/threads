@@ -198,12 +198,17 @@ def find_thread_by_ref(ref: str, workspace: Path | None = None) -> Path:
         thread = load_thread(path)
         thread_id = thread.id or "????"
 
-        # Exact match by name
-        if thread.name == ref:
+        # Extract slug from filename (e.g., "abc123-my-thread.md" → "my-thread")
+        filename = path.stem  # Remove .md
+        slug = filename[7:] if len(filename) > 7 and filename[6] == "-" else filename
+
+        # Exact match by name or slug
+        if thread.name == ref or slug == ref:
             return path
 
-        # Substring match (case-insensitive)
-        if ref.lower() in thread.name.lower():
+        # Substring match (case-insensitive) against both name and slug
+        ref_lower = ref.lower()
+        if ref_lower in thread.name.lower() or ref_lower in slug.lower():
             substring_matches.append((thread_id, thread.name, path))
 
     if len(substring_matches) == 1:

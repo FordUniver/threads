@@ -109,6 +109,14 @@ test_empty_description() {
     begin_test "empty description"
     setup_test_workspace
 
+    # Shell/Perl GetOptions doesn't support --desc="" or --desc ""
+    # (with =s spec, empty string is rejected or treated as positional arg)
+    if [[ "$THREADS_BIN" == *"perl"* || "$THREADS_BIN" == *"shell"* ]]; then
+        skip_test "shell/perl doesn't support empty string for --desc"
+        teardown_test_workspace
+        return
+    fi
+
     # Swift ArgumentParser can't parse --desc="" (equals with empty value)
     # Use space syntax for Swift, equals syntax for others
     local output

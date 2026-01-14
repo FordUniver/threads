@@ -2,6 +2,17 @@
 
 import argparse
 import sys
+from typing import NoReturn
+
+
+class ArgumentParserExitCode1(argparse.ArgumentParser):
+    """ArgumentParser that exits with code 1 instead of 2 for consistency with other implementations."""
+
+    def error(self, message: str) -> NoReturn:
+        """Print error and exit with code 1."""
+        self.print_usage(sys.stderr)
+        self.exit(1, f"{self.prog}: error: {message}\n")
+
 
 USAGE = """\
 Usage: threads <command> [options]
@@ -53,7 +64,7 @@ Status values:
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
-    parser = argparse.ArgumentParser(
+    parser = ArgumentParserExitCode1(
         prog="threads",
         description="Thread management CLI for LLM workflows",
         formatter_class=argparse.RawDescriptionHelpFormatter,

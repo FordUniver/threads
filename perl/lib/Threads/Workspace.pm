@@ -179,8 +179,6 @@ sub _thread_id_name {
     my $filename = basename($path, '.md');
     if ($filename =~ /^([0-9a-f]{6})-(.+)$/) {
         my ($id, $slug) = ($1, $2);
-        # Convert slug back to name (approximate)
-        $slug =~ s/-/ /g;
         return ($id, $slug);
     }
     return (undef, $filename);

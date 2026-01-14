@@ -269,10 +269,10 @@ test_list_unknown_flag_rejected() {
     local output
     output=$($THREADS_BIN list --resolved 2>&1) || exit_code=$?
 
-    assert_eq "$exit_code" "1" "should exit with code 1"
+    assert_eq "1" "$exit_code" "should exit with code 1"
     # Check for error message (different implementations use different wording)
     if ! echo "$output" | grep -qi "unknown\|unrecognized\|invalid"; then
-        fail "error message should mention unknown/unrecognized flag"
+        _fail "error message should mention unknown/unrecognized flag"
     fi
 
     teardown_test_workspace
@@ -288,7 +288,7 @@ test_list_unknown_long_flag_different() {
     local output
     output=$($THREADS_BIN list --invalid-flag-name 2>&1) || exit_code=$?
 
-    assert_eq "$exit_code" "1" "should exit with code 1"
+    assert_eq "1" "$exit_code" "should exit with code 1"
     if ! echo "$output" | grep -qi "unknown\|unrecognized\|invalid"; then
         fail "error message should mention unknown/unrecognized flag"
     fi
@@ -306,7 +306,7 @@ test_list_unknown_short_flag_rejected() {
     local output
     output=$($THREADS_BIN list -x 2>&1) || exit_code=$?
 
-    assert_eq "$exit_code" "1" "should exit with code 1"
+    assert_eq "1" "$exit_code" "should exit with code 1"
 
     teardown_test_workspace
     end_test
