@@ -89,6 +89,16 @@ function truncate(s: string, max: number): string {
 // list command
 async function cmdList(args: string[]): Promise<void> {
   const { flags, positional } = parseFlags(args);
+
+  // Validate flags
+  const validFlags = ['search', 's', 'status', 'r', 'recursive', 'include-closed', 'json'];
+  for (const flag in flags) {
+    if (!validFlags.includes(flag)) {
+      console.error(`Unknown option: ${flag}`);
+      process.exit(1);
+    }
+  }
+
   const ws = getWorkspace();
 
   let pathFilter = positional[0] || '';
