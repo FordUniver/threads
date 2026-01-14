@@ -67,10 +67,16 @@ module Threads
           end
 
           # Status filter
-          if status_filter && !status_filter.empty?
+          if status_filter
+            # Status filter was explicitly provided
+            if status_filter.empty?
+              # Empty status value matches nothing
+              next
+            end
             status_list = status_filter.split(',')
             next unless status_list.include?(base_status)
           else
+            # No status filter: apply default terminal filtering
             next if !include_closed && t.terminal?
           end
 

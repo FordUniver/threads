@@ -75,10 +75,15 @@ def cmd_list(
 
         # Status filter
         base = thread.base_status()
-        if status_filter:
+        if status_filter is not None:
+            # Status filter was explicitly provided
+            if status_filter == "":
+                # Empty status value matches nothing
+                continue
             if base not in status_filter.split(","):
                 continue
         else:
+            # No status filter: apply default terminal filtering
             if not include_closed and thread.is_terminal():
                 continue
 

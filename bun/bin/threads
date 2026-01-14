@@ -95,7 +95,7 @@ async function cmdList(args: string[]): Promise<void> {
   let listCategory = '';
   let listProject = '';
   let listSearch = (flags.search || flags.s || '') as string;
-  const listStatus = (flags.status || '') as string;
+  const listStatus = flags.status as string | undefined;
   const listRecursive = !!flags.r || !!flags.recursive;
   const listIncludeClosed = !!flags['include-closed'];
   const listJSON = !!flags.json;
@@ -170,11 +170,17 @@ async function cmdList(args: string[]): Promise<void> {
     }
 
     // Status filter
-    if (listStatus) {
+    if (listStatus !== undefined) {
+      // Status filter was explicitly provided
+      if (listStatus === '') {
+        // Empty status value matches nothing
+        continue;
+      }
       if (!listStatus.split(',').includes(base)) {
         continue;
       }
     } else {
+      // No status filter: apply default terminal filtering
       if (!listIncludeClosed && isTerminal(status)) {
         continue;
       }

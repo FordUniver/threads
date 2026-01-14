@@ -125,11 +125,18 @@ func runList(cmd *cobra.Command, args []string) error {
 		}
 
 		// Status filter
-		if listStatus != "" {
+		statusFlagSet := cmd.Flags().Changed("status")
+		if statusFlagSet {
+			// Status filter was explicitly provided
+			if listStatus == "" {
+				// Empty status value matches nothing
+				continue
+			}
 			if !strings.Contains(","+listStatus+",", ","+baseStatus+",") {
 				continue
 			}
 		} else {
+			// No status filter: apply default terminal filtering
 			if !listIncludeClosed && thread.IsTerminal(status) {
 				continue
 			}
