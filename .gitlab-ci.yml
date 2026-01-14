@@ -89,7 +89,7 @@ test:bun:
   extends: .test_template
   image: oven/bun:1.0
   before_script:
-    - apt-get update && apt-get install -y gawk make
+    - apt-get update && apt-get install -y gawk make git
   script:
     - make test-bun
 
