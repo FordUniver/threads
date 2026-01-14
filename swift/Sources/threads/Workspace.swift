@@ -240,11 +240,7 @@ func generateID(_ ws: String) throws -> String {
 
     // Try to generate unique ID
     for _ in 0..<10 {
-        var bytes = [UInt8](repeating: 0, count: 3)
-        let status = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
-        guard status == errSecSuccess else {
-            throw WorkspaceError.idGenerationFailed
-        }
+        let bytes = (0..<3).map { _ in UInt8.random(in: 0...255) }
         let id = bytes.map { String(format: "%02x", $0) }.joined()
         if !existing.contains(id) {
             return id

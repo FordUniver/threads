@@ -46,17 +46,17 @@ enum ThreadsMain {
             // Workspace errors (not found, ambiguous) -> exit 1
             if case .ambiguousReference = error {
                 fputs("Error: \(error.localizedDescription)\n", stderr)
-                Darwin.exit(2)
+                exit(2)
             }
             fputs("Error: \(error.localizedDescription)\n", stderr)
-            Darwin.exit(1)
+            exit(1)
         } catch let error as ValidationError {
             // Validation errors from ArgumentParser -> exit 1
             fputs("Error: \(error.message)\n", stderr)
-            Darwin.exit(1)
+            exit(1)
         } catch let exitCode as ExitCode {
             // Explicit exit code request
-            Darwin.exit(exitCode.rawValue)
+            exit(exitCode.rawValue)
         } catch {
             // Check if this is a help request or version request
             let errorStr = "\(error)"
@@ -72,7 +72,7 @@ enum ThreadsMain {
             } else {
                 fputs("Error: \(error.localizedDescription)\n", stderr)
             }
-            Darwin.exit(1)
+            exit(1)
         }
     }
 }

@@ -73,7 +73,6 @@ test:swift:
     - apt-get update && apt-get install -y gawk make
   script:
     - make test-swift
-  allow_failure: true  # Uses Darwin-specific APIs, needs Linux port
 
 # Ruby implementation
 test:ruby:
