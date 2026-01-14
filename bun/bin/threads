@@ -97,7 +97,7 @@ async function cmdList(args: string[]): Promise<void> {
   let listSearch = (flags.search || flags.s || '') as string;
   const listStatus = (flags.status || '') as string;
   const listRecursive = !!flags.r || !!flags.recursive;
-  const listAll = !!flags.all;
+  const listIncludeClosed = !!flags['include-closed'];
   const listJSON = !!flags.json;
 
   // If path filter provided, extract category/project from it
@@ -174,8 +174,10 @@ async function cmdList(args: string[]): Promise<void> {
       if (!listStatus.split(',').includes(base)) {
         continue;
       }
-    } else if (!listAll && isTerminal(status)) {
-      continue;
+    } else {
+      if (!listIncludeClosed && isTerminal(status)) {
+        continue;
+      }
     }
 
     // Search filter
@@ -231,7 +233,7 @@ async function cmdList(args: string[]): Promise<void> {
   let statusDesc = 'active';
   if (listStatus) {
     statusDesc = listStatus;
-  } else if (listAll) {
+  } else if (listIncludeClosed) {
     statusDesc = '';
   }
 

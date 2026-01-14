@@ -18,7 +18,7 @@ pub struct ListArgs {
 
     /// Include resolved/terminal threads
     #[arg(long)]
-    all: bool,
+    include_closed: bool,
 
     /// Search name/title/desc (substring)
     #[arg(short = 's', long)]
@@ -123,8 +123,10 @@ pub fn run(args: ListArgs, ws: &Path) -> Result<(), String> {
             if !filter_statuses.contains(&base_status.as_str()) {
                 continue;
             }
-        } else if !args.all && thread::is_terminal(&status) {
-            continue;
+        } else {
+            if !args.include_closed && thread::is_terminal(&status) {
+                continue;
+            }
         }
 
         // Search filter
@@ -163,7 +165,7 @@ pub fn run(args: ListArgs, ws: &Path) -> Result<(), String> {
     if args.json {
         output_json(&results)?;
     } else {
-        output_table(&results, &category_filter, &project_filter, args.recursive, args.all, args.status.as_deref())?;
+        output_table(&results, &category_filter, &project_filter, args.recursive, args.include_closed, args.status.as_deref())?;
     }
 
     Ok(())
@@ -181,7 +183,7 @@ fn output_table(
     category_filter: &Option<String>,
     project_filter: &Option<String>,
     recursive: bool,
-    all: bool,
+    include_closed: bool,
     status_filter: Option<&str>,
 ) -> Result<(), String> {
     // Build header description
@@ -201,7 +203,7 @@ fn output_table(
 
     let status_desc = if let Some(s) = status_filter {
         s.to_string()
-    } else if all {
+    } else if include_closed {
         String::new()
     } else {
         "active".to_string()

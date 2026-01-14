@@ -30,9 +30,9 @@ Single-thread operations:
   threads commit <id> [-m msg]             Commit single thread
 
 Options for 'list':
-  -r, --recursive    Include nested categories/projects
-  --search=X         Search name/title/desc (substring)
-  --all              Include resolved/terminal threads
+  -r, --recursive       Include nested categories/projects
+  --search=X            Search name/title/desc (substring)
+  --include-closed      Include resolved/terminal threads
 
 Options for 'new':
   --status=X      Initial status (default: idea)
@@ -65,7 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_list = subparsers.add_parser("list", help="List threads")
     p_list.add_argument("path", nargs="?", help="Filter by path")
     p_list.add_argument("-r", "--recursive", action="store_true", help="Include nested")
-    p_list.add_argument("--all", action="store_true", dest="show_all", help="Include terminal")
+    p_list.add_argument("--include-closed", action="store_true", dest="include_closed", help="Include terminal")
     p_list.add_argument("-s", "--search", help="Search filter")
     p_list.add_argument("--status", help="Status filter")
     p_list.add_argument("--json", action="store_true", dest="json_output", help="JSON output")
@@ -204,7 +204,7 @@ def main() -> int:
             cmd_list(
                 path=args.path,
                 recursive=args.recursive,
-                show_all=args.show_all,
+                include_closed=args.include_closed,
                 search=args.search,
                 status_filter=args.status,
                 json_output=args.json_output,

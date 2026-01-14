@@ -20,7 +20,7 @@ struct ListCmd: ParsableCommand {
 
             By default shows active threads at the current level only.
             Use -r to include nested categories/projects.
-            Use --all to include resolved/terminal threads.
+            Use --include-closed to include resolved/terminal threads.
             """
     )
 
@@ -28,7 +28,7 @@ struct ListCmd: ParsableCommand {
     var recursive = false
 
     @Flag(name: .long, help: "Include resolved/terminal threads")
-    var all = false
+    var includeClosed = false
 
     @Option(name: .shortAndLong, help: "Search name/title/desc (substring)")
     var search: String?
@@ -115,8 +115,10 @@ struct ListCmd: ParsableCommand {
                 if !statuses.contains(baseStatus) {
                     continue
                 }
-            } else if !all && Thread.isTerminal(threadStatus) {
-                continue
+            } else {
+                if !includeClosed && Thread.isTerminal(threadStatus) {
+                    continue
+                }
             }
 
             // Search filter
@@ -153,7 +155,7 @@ struct ListCmd: ParsableCommand {
         if json {
             outputJSON(results)
         } else {
-            outputTable(results, ws, categoryFilter: categoryFilter, projectFilter: projectFilter, statusFilter: status, showAll: all, recursive: recursive)
+            outputTable(results, ws, categoryFilter: categoryFilter, projectFilter: projectFilter, statusFilter: status, showAll: includeClosed, recursive: recursive)
         }
     }
 

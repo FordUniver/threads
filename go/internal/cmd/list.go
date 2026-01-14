@@ -13,13 +13,13 @@ import (
 )
 
 var (
-	listRecursive bool
-	listAll       bool
-	listSearch    string
-	listStatus    string
-	listCategory  string
-	listProject   string
-	listJSON      bool
+	listRecursive     bool
+	listIncludeClosed bool
+	listSearch        string
+	listStatus        string
+	listCategory      string
+	listProject       string
+	listJSON          bool
 )
 
 var listCmd = &cobra.Command{
@@ -29,14 +29,14 @@ var listCmd = &cobra.Command{
 
 By default shows active threads at the current level only.
 Use -r to include nested categories/projects.
-Use --all to include resolved/terminal threads.`,
+Use --include-closed to include resolved/terminal threads.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runList,
 }
 
 func init() {
 	listCmd.Flags().BoolVarP(&listRecursive, "recursive", "r", false, "Include nested categories/projects")
-	listCmd.Flags().BoolVar(&listAll, "all", false, "Include resolved/terminal threads")
+	listCmd.Flags().BoolVar(&listIncludeClosed, "include-closed", false, "Include resolved/terminal threads")
 	listCmd.Flags().StringVarP(&listSearch, "search", "s", "", "Search name/title/desc (substring)")
 	listCmd.Flags().StringVar(&listStatus, "status", "", "Filter by status")
 	listCmd.Flags().StringVarP(&listCategory, "category", "c", "", "Filter by category")
@@ -129,8 +129,10 @@ func runList(cmd *cobra.Command, args []string) error {
 			if !strings.Contains(","+listStatus+",", ","+baseStatus+",") {
 				continue
 			}
-		} else if !listAll && thread.IsTerminal(status) {
-			continue
+		} else {
+			if !listIncludeClosed && thread.IsTerminal(status) {
+				continue
+			}
 		}
 
 		// Search filter
@@ -195,7 +197,7 @@ func outputTable(results []threadInfo, ws string) error {
 	statusDesc := "active"
 	if listStatus != "" {
 		statusDesc = listStatus
-	} else if listAll {
+	} else if listIncludeClosed {
 		statusDesc = ""
 	}
 

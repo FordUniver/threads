@@ -116,7 +116,7 @@ module Threads
           threads <command> [options] [arguments]
 
         WORKSPACE COMMANDS:
-          list [path] [-r] [--search=X] [--status=X] [--all] [--json]
+          list [path] [-r] [--search=X] [--status=X] [--include-closed] [--json]
                               List threads
           new [path] <title>  Create new thread
           move <id> <path>    Move thread to new location
@@ -155,12 +155,12 @@ module Threads
     end
 
     def run_list(args)
-      opts = { recursive: false, all: false, json: false }
+      opts = { recursive: false, include_closed: false, json: false }
       path = nil
 
       parser = OptionParser.new do |o|
         o.on('-r', '--recursive', 'Include nested categories/projects') { opts[:recursive] = true }
-        o.on('--all', 'Include resolved/terminal threads') { opts[:all] = true }
+        o.on('--include-closed', 'Include resolved/terminal threads') { opts[:include_closed] = true }
         o.on('-s', '--search=TERM', 'Search name/title/desc') { |v| opts[:search] = v }
         o.on('--status=STATUS', 'Filter by status') { |v| opts[:status] = v }
         o.on('-c', '--category=CAT', 'Filter by category') { |v| opts[:category] = v }

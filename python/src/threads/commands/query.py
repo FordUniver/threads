@@ -12,7 +12,7 @@ from ..workspace import get_workspace, parse_thread_path
 def cmd_list(
     path: str | None = None,
     recursive: bool = False,
-    show_all: bool = False,
+    include_closed: bool = False,
     search: str | None = None,
     status_filter: str | None = None,
     json_output: bool = False,
@@ -78,8 +78,9 @@ def cmd_list(
         if status_filter:
             if base not in status_filter.split(","):
                 continue
-        elif not show_all and thread.is_terminal():
-            continue
+        else:
+            if not include_closed and thread.is_terminal():
+                continue
 
         threads.append((thread, category, project))
 
@@ -87,7 +88,7 @@ def cmd_list(
     if json_output:
         output_json(threads)
     else:
-        output_table(threads, category_filter, project_filter, recursive, status_filter, show_all)
+        output_table(threads, category_filter, project_filter, recursive, status_filter, include_closed)
 
 
 def output_json(threads: list[tuple[Thread, str | None, str | None]]) -> None:
@@ -112,7 +113,7 @@ def output_table(
     project_filter: str | None,
     recursive: bool,
     status_filter: str | None,
-    show_all: bool,
+    include_closed: bool,
 ) -> None:
     """Output threads as formatted table."""
     # Header
@@ -127,7 +128,7 @@ def output_table(
 
     if status_filter:
         status_desc = status_filter
-    elif show_all:
+    elif include_closed:
         status_desc = ""
     else:
         status_desc = "active"

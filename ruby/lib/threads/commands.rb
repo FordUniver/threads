@@ -11,7 +11,7 @@ module Threads
       # List threads
       def list(ws, opts = {})
         recursive = opts[:recursive]
-        all = opts[:all]
+        include_closed = opts[:include_closed]
         search = opts[:search]
         status_filter = opts[:status]
         json_output = opts[:json]
@@ -70,8 +70,8 @@ module Threads
           if status_filter && !status_filter.empty?
             status_list = status_filter.split(',')
             next unless status_list.include?(base_status)
-          elsif !all && t.terminal?
-            next
+          else
+            next if !include_closed && t.terminal?
           end
 
           # Search filter
@@ -108,7 +108,7 @@ module Threads
           return
         end
 
-        output_table(results, ws, category_filter, project_filter, status_filter, all, recursive)
+        output_table(results, ws, category_filter, project_filter, status_filter, include_closed, recursive)
       end
 
       # Create new thread
@@ -678,7 +678,7 @@ module Threads
       end
 
       # Output table format
-      def output_table(results, ws, category_filter, project_filter, status_filter, all, recursive)
+      def output_table(results, ws, category_filter, project_filter, status_filter, include_closed, recursive)
         # Build header description
         level_desc, path_suffix = if project_filter && category_filter
                                     ['project-level', " (#{category_filter}/#{project_filter})"]
@@ -690,7 +690,7 @@ module Threads
 
         status_desc = if status_filter && !status_filter.empty?
                         status_filter
-                      elsif all
+                      elsif include_closed
                         ''
                       else
                         'active'

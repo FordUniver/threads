@@ -5,7 +5,7 @@ use v5.16;
 
 use open ':std', ':encoding(UTF-8)';
 use Cwd qw(abs_path);
-use Getopt::Long qw(:config pass_through no_auto_abbrev);
+use Getopt::Long qw(:config no_auto_abbrev);
 use File::Basename qw(basename dirname);
 use File::Path qw(make_path);
 use File::Spec;
@@ -97,24 +97,24 @@ HELP
 sub cmd_list {
     my ($class, @args) = @_;
 
-    my %opts = (recursive => 0, search => undef, status => undef, all => 0, json => 0);
+    my %opts = (recursive => 0, search => undef, status => undef, include_closed => 0, json => 0);
     local @ARGV = @args;
     GetOptions(
-        'r|recursive' => \$opts{recursive},
-        's|search=s'  => \$opts{search},
-        'status=s'    => \$opts{status},
-        'all'         => \$opts{all},
-        'json'        => \$opts{json},
+        'r|recursive'     => \$opts{recursive},
+        's|search=s'      => \$opts{search},
+        'status=s'        => \$opts{status},
+        'include-closed'  => \$opts{include_closed},
+        'json'            => \$opts{json},
     ) or return 1;
 
     my $path = shift @ARGV // '.';
     my ($threads_dir, $cat, $proj, $level) = infer_scope($path);
 
     my @files = find_all_threads(
-        category        => $cat,
-        project         => $proj,
-        recursive       => $opts{recursive},
-        include_terminal => $opts{all},
+        category         => $cat,
+        project          => $proj,
+        recursive        => $opts{recursive},
+        include_terminal => 1,  # Always load all threads
     );
 
     # Load threads and filter
@@ -134,7 +134,12 @@ sub cmd_list {
 
         # Filter by status
         if ($opts{status}) {
-            next unless $t->base_status eq $opts{status};
+            my @statuses = split /,/, $opts{status};
+            my $base = $t->base_status;
+            next unless grep { $_ eq $base } @statuses;
+        } else {
+            # If no status filter, exclude terminal statuses unless --include-closed
+            next if !$opts{include_closed} && $t->is_terminal;
         }
 
         # Filter by search term
