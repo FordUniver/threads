@@ -19,6 +19,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// List threads
+    #[command(alias = "ls")]
     List(cmd::list::ListArgs),
 
     /// Create a new thread

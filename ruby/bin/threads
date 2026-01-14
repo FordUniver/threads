@@ -116,7 +116,7 @@ module Threads
           threads <command> [options] [arguments]
 
         WORKSPACE COMMANDS:
-          list [path] [-r] [--search=X] [--status=X] [--include-closed] [--json]
+          list, ls [path] [-r] [--search=X] [--status=X] [--include-closed] [--json]
                               List threads
           new [path] <title>  Create new thread
           move <id> <path>    Move thread to new location

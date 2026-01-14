@@ -57,7 +57,7 @@ threads - Persistent topic tracking for LLM workflows
 Usage: threads <command> [options]
 
 Commands:
-  list [path]              List threads (default: current scope)
+  list, ls [path]          List threads (default: current scope)
   new [path] <title>       Create new thread
   read <id>                Read thread content
   path <id>                Print thread file path
@@ -185,6 +185,11 @@ sub cmd_list {
     }
 
     return 0;
+}
+# ls - Alias for list
+sub cmd_ls {
+    my ($class, @args) = @_;
+    return cmd_list($class, @args);
 }
 
 # ============================================================================

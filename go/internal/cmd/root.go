@@ -37,6 +37,7 @@ func Execute() error {
 func init() {
 	// Workspace operations
 	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(lsCmd) // Alias for listCmd
 	rootCmd.AddCommand(newCmd)
 	rootCmd.AddCommand(moveCmd)
 	rootCmd.AddCommand(commitCmd)

@@ -81,6 +81,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--status", help="Status filter")
     p_list.add_argument("--json", action="store_true", dest="json_output", help="JSON output")
 
+    # ls (alias for list)
+    p_ls = subparsers.add_parser("ls", help="List threads (alias for list)")
+    p_ls.add_argument("path", nargs="?", help="Filter by path")
+    p_ls.add_argument("-r", "--recursive", action="store_true", help="Include nested")
+    p_ls.add_argument("--include-closed", action="store_true", dest="include_closed", help="Include terminal")
+    p_ls.add_argument("-s", "--search", help="Search filter")
+    p_ls.add_argument("--status", help="Status filter")
+    p_ls.add_argument("--json", action="store_true", dest="json_output", help="JSON output")
+
     # new
     p_new = subparsers.add_parser("new", help="Create new thread")
     p_new.add_argument("path_or_title", nargs="?", help="Path or title")
@@ -210,7 +219,7 @@ def main() -> int:
         return 1
 
     try:
-        if args.command == "list":
+        if args.command == "list" or args.command == "ls":
             from .commands.query import cmd_list
             cmd_list(
                 path=args.path,

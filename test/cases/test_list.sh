@@ -560,6 +560,31 @@ test_list_status_and_recursive_combined() {
 }
 
 # ====================================================================================
+# Alias Tests
+# ====================================================================================
+
+# Test: ls command works as alias for list
+test_ls_alias() {
+    begin_test "ls command as alias for list"
+    setup_test_workspace
+
+    create_thread "abc123" "Active Thread" "active"
+    create_thread "def456" "Idea Thread" "idea"
+
+    local list_output
+    local ls_output
+    list_output=$($THREADS_BIN list 2>/dev/null)
+    ls_output=$($THREADS_BIN ls 2>/dev/null)
+
+    # Both should show the same threads
+    assert_contains "$ls_output" "abc123" "ls should show active thread"
+    assert_contains "$ls_output" "def456" "ls should show idea thread"
+
+    teardown_test_workspace
+    end_test
+}
+
+# ====================================================================================
 # Run all tests
 # ====================================================================================
 
@@ -601,3 +626,6 @@ test_list_terminal_status_with_parenthetical
 # Interaction tests
 test_list_status_and_search_combined
 test_list_status_and_recursive_combined
+
+# Alias tests
+test_ls_alias

@@ -1455,6 +1455,7 @@ async function main(): Promise<void> {
 
   switch (command) {
     case 'list':
+    case 'ls':
       await cmdList(cmdArgs);
       break;
     case 'new':
