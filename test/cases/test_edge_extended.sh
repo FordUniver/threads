@@ -230,7 +230,7 @@ test_all_active_statuses() {
     done
 
     local output
-    output=$(capture_stdout $THREADS_BIN list --all)
+    output=$(capture_stdout $THREADS_BIN list --include-closed)
 
     for s in "${statuses[@]}"; do
         assert_contains "$output" "${s}001" "should list thread with status $s"
@@ -251,7 +251,7 @@ test_terminal_statuses() {
     create_thread "rej001" "Rejected" "rejected"
 
     local output
-    output=$(capture_stdout $THREADS_BIN list --all)
+    output=$(capture_stdout $THREADS_BIN list --include-closed)
 
     assert_contains "$output" "res001" "should include resolved"
     assert_contains "$output" "sup001" "should include superseded"
