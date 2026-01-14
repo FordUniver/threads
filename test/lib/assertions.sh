@@ -17,32 +17,27 @@ _TEST_PASSED=0
 _TEST_FAILED=0
 _TEST_CURRENT=""
 _CURRENT_TEST_FAILED=""
+_DIAGNOSTIC_OUTPUT=""
 
 # Start a test (call before assertions)
 begin_test() {
     _TEST_CURRENT="$1"
     _CURRENT_TEST_FAILED=""
+    _DIAGNOSTIC_OUTPUT=""
 }
 
-# Record pass
-_pass() {
-    ((_TEST_PASSED++))
-    echo -e "${GREEN}ok${NC} $_TEST_PASSED - $_TEST_CURRENT"
-}
-
-# Record failure with details
+# Record failure with details (no TAP output - accumulated for end_test)
 _fail() {
     local msg="$1"
     _CURRENT_TEST_FAILED=1
-    ((_TEST_FAILED++))
-    local total=$((_TEST_PASSED + _TEST_FAILED))
-    echo -e "${RED}not ok${NC} $total - $_TEST_CURRENT"
-    echo "# $msg" | sed 's/^/  /'
+
+    # Accumulate diagnostic output
+    _DIAGNOSTIC_OUTPUT="${_DIAGNOSTIC_OUTPUT}  # $msg\n"
     if [[ -n "${2:-}" ]]; then
-        echo "#   expected: $2" | sed 's/^/  /'
+        _DIAGNOSTIC_OUTPUT="${_DIAGNOSTIC_OUTPUT}  #   expected: $2\n"
     fi
     if [[ -n "${3:-}" ]]; then
-        echo "#   actual: $3" | sed 's/^/  /'
+        _DIAGNOSTIC_OUTPUT="${_DIAGNOSTIC_OUTPUT}  #   actual: $3\n"
     fi
 }
 
@@ -223,15 +218,33 @@ assert_gt() {
     fi
 }
 
-# End test and record result
+# End test and output TAP result
 end_test() {
-    # Only call _pass if this specific test didn't fail
-    # (_fail already printed the failure, so we don't print anything on failure)
-    if [[ -z "$_CURRENT_TEST_FAILED" ]] && [[ -n "$_TEST_CURRENT" ]]; then
-        _pass
+    # Skip if no test is active
+    if [[ -z "$_TEST_CURRENT" ]]; then
+        return
     fi
+
+    # Calculate test number
+    local test_num=$((_TEST_PASSED + _TEST_FAILED + 1))
+
+    # Output single TAP line based on test result
+    if [[ -n "$_CURRENT_TEST_FAILED" ]]; then
+        ((_TEST_FAILED++))
+        echo -e "${RED}not ok${NC} $test_num - $_TEST_CURRENT"
+        # Output accumulated diagnostics
+        if [[ -n "$_DIAGNOSTIC_OUTPUT" ]]; then
+            echo -e "$_DIAGNOSTIC_OUTPUT"
+        fi
+    else
+        ((_TEST_PASSED++))
+        echo -e "${GREEN}ok${NC} $test_num - $_TEST_CURRENT"
+    fi
+
+    # Reset state
     _TEST_CURRENT=""
     _CURRENT_TEST_FAILED=""
+    _DIAGNOSTIC_OUTPUT=""
 }
 
 # Print summary and return appropriate exit code
@@ -254,6 +267,7 @@ reset_counters() {
     _TEST_FAILED=0
     _TEST_CURRENT=""
     _CURRENT_TEST_FAILED=""
+    _DIAGNOSTIC_OUTPUT=""
 
     # Reset setup/teardown state for clean slate between test files
     if [[ -n "$TEST_WS" && -d "$TEST_WS" ]]; then

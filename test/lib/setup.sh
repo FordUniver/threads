@@ -92,8 +92,14 @@ register_cleanup() {
 # Skip test with message
 skip_test() {
     local reason="${1:-skipped}"
-    echo "# SKIP: $reason"
-    return 0
+    local test_num=$((_TEST_PASSED + _TEST_FAILED + 1))
+    ((_TEST_PASSED++))  # Skips count as "passed" in TAP
+    echo -e "${YELLOW}ok${NC} $test_num - $_TEST_CURRENT # SKIP $reason"
+
+    # Reset test state (same as end_test)
+    _TEST_CURRENT=""
+    _CURRENT_TEST_FAILED=""
+    _DIAGNOSTIC_OUTPUT=""
 }
 
 # Create test workspace with git repo initialized
