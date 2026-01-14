@@ -23,7 +23,7 @@ test:shell:
   extends: .test_template
   image: bash:5.2
   before_script:
-    - apk add --no-cache coreutils grep gawk git make
+    - apk add --no-cache coreutils grep gawk git make perl
   script:
     - make test-shell
 
