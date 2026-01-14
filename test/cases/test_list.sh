@@ -271,7 +271,7 @@ test_list_unknown_flag_rejected() {
 
     assert_eq "1" "$exit_code" "should exit with code 1"
     # Check for error message (different implementations use different wording)
-    if ! echo "$output" | grep -qi "unknown\|unrecognized\|invalid"; then
+    if ! echo "$output" | grep -qi "unknown\|unrecognized\|invalid\|unexpected"; then
         _fail "error message should mention unknown/unrecognized flag"
     fi
 
