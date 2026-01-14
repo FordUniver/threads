@@ -23,7 +23,7 @@ test:shell:
   extends: .test_template
   image: bash:5.2
   before_script:
-    - apk add --no-cache coreutils grep gawk git make perl
+    - apk add --no-cache coreutils grep gawk git make perl perl-yaml-tiny
   script:
     - make test-shell
 
@@ -52,6 +52,7 @@ test:perl:
   image: perl:5.38
   before_script:
     - apt-get update && apt-get install -y gawk make
+    - cpanm --notest YAML::Tiny
   script:
     - make test-perl
 
