@@ -9,6 +9,7 @@ description = "Thread management CLI for LLM workflows"
 requires-python = ">=3.11"
 dependencies = [
     "python-frontmatter>=1.0.0",
+    "argcomplete>=3.0",
 ]
 
 [project.optional-dependencies]

@@ -1,6 +1,8 @@
+use std::io;
 use std::process;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::{generate, Shell};
 
 mod cmd;
 mod git;
@@ -73,6 +75,24 @@ enum Commands {
     /// Remove thread entirely
     #[command(alias = "rm")]
     Remove(cmd::remove::RemoveArgs),
+
+    /// Generate shell completion script
+    Completion(CompletionArgs),
+}
+
+#[derive(clap::Args)]
+struct CompletionArgs {
+    /// Shell to generate completions for
+    #[arg(value_enum)]
+    shell: CompletionShell,
+}
+
+#[derive(Clone, ValueEnum)]
+enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
 }
 
 fn main() {
@@ -93,6 +113,18 @@ fn main() {
             process::exit(exit_code);
         }
     };
+
+    // Handle completion before workspace lookup (doesn't need workspace)
+    if let Commands::Completion(args) = &cli.command {
+        let shell = match args.shell {
+            CompletionShell::Bash => Shell::Bash,
+            CompletionShell::Zsh => Shell::Zsh,
+            CompletionShell::Fish => Shell::Fish,
+            CompletionShell::Powershell => Shell::PowerShell,
+        };
+        generate(shell, &mut Cli::command(), "threads", &mut io::stdout());
+        return;
+    }
 
     // Find workspace
     let ws = match workspace::find() {
@@ -122,6 +154,7 @@ fn main() {
         Commands::Resolve(args) => cmd::resolve::run(args, &ws),
         Commands::Reopen(args) => cmd::reopen::run(args, &ws),
         Commands::Remove(args) => cmd::remove::run(args, &ws),
+        Commands::Completion(_) => unreachable!(), // Handled above
     };
 
     if let Err(e) = result {

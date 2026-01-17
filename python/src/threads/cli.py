@@ -1,8 +1,11 @@
 """CLI entry point for threads."""
 
 import argparse
+import subprocess
 import sys
 from typing import NoReturn
+
+import argcomplete
 
 
 class ArgumentParserExitCode1(argparse.ArgumentParser):
@@ -206,12 +209,41 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate.add_argument("path", nargs="?", help="Specific file or directory")
     p_validate.add_argument("-r", "--recursive", action="store_true", help="Validate recursively")
 
+    # completion
+    p_completion = subparsers.add_parser("completion", help="Generate shell completion script")
+    p_completion.add_argument(
+        "shell",
+        choices=["bash", "zsh", "fish"],
+        help="Shell to generate completions for",
+    )
+
     return parser
+
+
+def _generate_completion(shell: str) -> int:
+    """Generate shell completion script using register-python-argcomplete."""
+    try:
+        result = subprocess.run(
+            ["register-python-argcomplete", "--shell", shell, "threads"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        print(result.stdout, end="")
+        return 0
+    except FileNotFoundError:
+        print("Error: register-python-argcomplete not found", file=sys.stderr)
+        print("Install with: pip install argcomplete", file=sys.stderr)
+        return 1
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e.stderr}", file=sys.stderr)
+        return 1
 
 
 def main() -> int:
     """Main entry point."""
     parser = build_parser()
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
     if args.command is None:
@@ -375,6 +407,9 @@ def main() -> int:
             from .commands.lifecycle import cmd_validate
             if not cmd_validate(args.path, recursive=args.recursive):
                 return 1
+
+        elif args.command == "completion":
+            return _generate_completion(args.shell)
 
         else:
             print(f"Unknown command: {args.command}", file=sys.stderr)
