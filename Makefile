@@ -42,7 +42,7 @@ test-go: build-go
 
 test-python:
 	@echo "=== Testing Python ==="
-	./test/run_tests.sh ./python/run-threads.sh
+	./test/run_tests.sh ./python/threads-wrapper
 
 test-perl:
 	@echo "=== Testing Perl ==="
