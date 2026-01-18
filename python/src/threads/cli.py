@@ -96,7 +96,12 @@ def build_parser() -> argparse.ArgumentParser:
     # list
     p_list = subparsers.add_parser("list", help="List threads")
     p_list.add_argument("path", nargs="?", help="Filter by path")
-    p_list.add_argument("-r", "--recursive", action="store_true", help="Include nested")
+    p_list.add_argument("-d", "--down", type=int, nargs="?", const=-1, default=None, metavar="N", help="Search subdirectories (N levels, omit for unlimited)")
+    p_list.add_argument("-r", "--recursive", action="store_true", help="Alias for --down (unlimited)")
+    p_list.add_argument("-u", "--up", type=int, nargs="?", const=-1, default=None, metavar="N", help="Search parent directories (N levels, omit for git root)")
+    p_list.add_argument("--no-git-bound-down", action="store_true", dest="no_git_bound_down", help="Cross git boundaries when searching down")
+    p_list.add_argument("--no-git-bound-up", action="store_true", dest="no_git_bound_up", help="Cross git boundaries when searching up")
+    p_list.add_argument("--no-git-bound", action="store_true", dest="no_git_bound", help="Cross all git boundaries")
     p_list.add_argument("--include-closed", action="store_true", dest="include_closed", help="Include terminal")
     p_list.add_argument("-s", "--search", help="Search filter")
     p_list.add_argument("--status", help="Status filter")
@@ -106,7 +111,12 @@ def build_parser() -> argparse.ArgumentParser:
     # ls (alias for list)
     p_ls = subparsers.add_parser("ls", help="List threads (alias for list)")
     p_ls.add_argument("path", nargs="?", help="Filter by path")
-    p_ls.add_argument("-r", "--recursive", action="store_true", help="Include nested")
+    p_ls.add_argument("-d", "--down", type=int, nargs="?", const=-1, default=None, metavar="N", help="Search subdirectories (N levels, omit for unlimited)")
+    p_ls.add_argument("-r", "--recursive", action="store_true", help="Alias for --down (unlimited)")
+    p_ls.add_argument("-u", "--up", type=int, nargs="?", const=-1, default=None, metavar="N", help="Search parent directories (N levels, omit for git root)")
+    p_ls.add_argument("--no-git-bound-down", action="store_true", dest="no_git_bound_down", help="Cross git boundaries when searching down")
+    p_ls.add_argument("--no-git-bound-up", action="store_true", dest="no_git_bound_up", help="Cross git boundaries when searching up")
+    p_ls.add_argument("--no-git-bound", action="store_true", dest="no_git_bound", help="Cross all git boundaries")
     p_ls.add_argument("--include-closed", action="store_true", dest="include_closed", help="Include terminal")
     p_ls.add_argument("-s", "--search", help="Search filter")
     p_ls.add_argument("--status", help="Status filter")
@@ -222,7 +232,12 @@ def build_parser() -> argparse.ArgumentParser:
     # stats
     p_stats = subparsers.add_parser("stats", help="Show thread count by status")
     p_stats.add_argument("path", nargs="?", help="Filter by path")
-    p_stats.add_argument("-r", "--recursive", action="store_true", help="Include nested")
+    p_stats.add_argument("-d", "--down", type=int, nargs="?", const=-1, default=None, metavar="N", help="Search subdirectories (N levels, omit for unlimited)")
+    p_stats.add_argument("-r", "--recursive", action="store_true", help="Alias for --down (unlimited)")
+    p_stats.add_argument("-u", "--up", type=int, nargs="?", const=-1, default=None, metavar="N", help="Search parent directories (N levels, omit for git root)")
+    p_stats.add_argument("--no-git-bound-down", action="store_true", dest="no_git_bound_down", help="Cross git boundaries when searching down")
+    p_stats.add_argument("--no-git-bound-up", action="store_true", dest="no_git_bound_up", help="Cross git boundaries when searching up")
+    p_stats.add_argument("--no-git-bound", action="store_true", dest="no_git_bound", help="Cross all git boundaries")
     p_stats.add_argument("-f", "--format", choices=["fancy", "plain", "json", "yaml"], default="fancy", dest="format_str", help="Output format")
     p_stats.add_argument("--json", action="store_true", dest="json_output", help="JSON output (shorthand for --format=json)")
 
@@ -277,7 +292,11 @@ def main() -> int:
             from .commands.query import cmd_list
             cmd_list(
                 path=args.path,
+                down=args.down,
                 recursive=args.recursive,
+                up=args.up,
+                no_git_bound_down=args.no_git_bound_down or args.no_git_bound,
+                no_git_bound_up=args.no_git_bound_up or args.no_git_bound,
                 include_closed=args.include_closed,
                 search=args.search,
                 status_filter=args.status,
@@ -426,7 +445,11 @@ def main() -> int:
             from .commands.query import cmd_stats
             cmd_stats(
                 path=args.path,
+                down=args.down,
                 recursive=args.recursive,
+                up=args.up,
+                no_git_bound_down=args.no_git_bound_down or args.no_git_bound,
+                no_git_bound_up=args.no_git_bound_up or args.no_git_bound,
                 format_str=args.format_str,
                 json_output=args.json_output,
             )

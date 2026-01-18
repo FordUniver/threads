@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use crate::output::OutputFormat;
 use crate::thread::{self, Thread};
-use crate::workspace;
+use crate::workspace::{self, FindOptions};
 
 #[derive(Args)]
 pub struct ListArgs {
@@ -13,9 +13,29 @@ pub struct ListArgs {
     #[arg(default_value = "")]
     path: String,
 
-    /// Include nested directories (recursive search)
-    #[arg(short = 'r', long)]
+    /// Search subdirectories (unlimited depth, or specify N levels)
+    #[arg(short = 'd', long = "down", value_name = "N")]
+    down: Option<Option<usize>>,
+
+    /// Alias for --down (backward compatibility)
+    #[arg(short = 'r', long, conflicts_with = "down")]
     recursive: bool,
+
+    /// Search parent directories (up to git root, or specify N levels)
+    #[arg(short = 'u', long = "up", value_name = "N")]
+    up: Option<Option<usize>>,
+
+    /// Cross git boundaries when searching down (enter nested repos)
+    #[arg(long)]
+    no_git_bound_down: bool,
+
+    /// Cross git boundaries when searching up (continue past git root)
+    #[arg(long)]
+    no_git_bound_up: bool,
+
+    /// Cross all git boundaries (alias for --no-git-bound-up --no-git-bound-down)
+    #[arg(long)]
+    no_git_bound: bool,
 
     /// Include resolved/terminal threads
     #[arg(long)]
@@ -52,6 +72,46 @@ struct ThreadInfo {
     is_pwd: bool,
 }
 
+/// Describes the search direction for output display.
+#[derive(Clone)]
+struct SearchDirection {
+    down: Option<Option<usize>>,
+    up: Option<Option<usize>>,
+    has_down: bool,
+    has_up: bool,
+}
+
+impl SearchDirection {
+    fn description(&self) -> String {
+        let mut parts = Vec::new();
+
+        if self.has_down {
+            match self.down {
+                Some(Some(n)) => parts.push(format!("down {}", n)),
+                Some(None) | None => parts.push("recursive".to_string()),
+            }
+        }
+
+        if self.has_up {
+            match self.up {
+                Some(Some(n)) => parts.push(format!("up {}", n)),
+                Some(None) => parts.push("up".to_string()),
+                None => {}
+            }
+        }
+
+        if parts.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", parts.join(", "))
+        }
+    }
+
+    fn is_searching(&self) -> bool {
+        self.has_down || self.has_up
+    }
+}
+
 pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
     // Determine output format (handle --json shorthand)
     let format = if args.json {
@@ -70,8 +130,47 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
     // Resolve the scope to understand current context
     let scope = workspace::infer_scope(git_root, path_filter)?;
     let filter_path = scope.path.clone();
+    let start_path = scope.threads_dir.parent().unwrap_or(git_root);
 
-    let threads = workspace::find_all_threads(git_root)?;
+    // Build FindOptions from flags
+    let no_git_bound_down = args.no_git_bound || args.no_git_bound_down;
+    let no_git_bound_up = args.no_git_bound || args.no_git_bound_up;
+
+    // Determine search direction: --down/-d takes priority, then -r as alias
+    let down_opt = if args.down.is_some() {
+        args.down
+    } else if args.recursive {
+        Some(None) // unlimited depth
+    } else {
+        None
+    };
+
+    let options = FindOptions::new()
+        .with_no_git_bound_down(no_git_bound_down)
+        .with_no_git_bound_up(no_git_bound_up);
+
+    let options = if let Some(depth) = down_opt {
+        options.with_down(depth)
+    } else {
+        options
+    };
+
+    let options = if let Some(depth) = args.up {
+        options.with_up(depth)
+    } else {
+        options
+    };
+
+    // Track search direction for output
+    let search_dir = SearchDirection {
+        down: down_opt,
+        up: args.up,
+        has_down: down_opt.is_some(),
+        has_up: args.up.is_some(),
+    };
+
+    // Find threads using options
+    let threads = workspace::find_threads_with_options(start_path, git_root, &options)?;
     let mut results = Vec::new();
 
     // Get PWD relative path for comparison
@@ -91,25 +190,13 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
         let base_status = thread::base_status(&status);
         let name = thread::extract_name_from_path(&thread_path);
 
-        // Path filter: if not recursive, only show threads at the specified level
-        if !args.recursive {
-            // At specific path: only show threads in that exact directory
+        // Path filter: if not searching, only show threads at the specified level
+        if !search_dir.is_searching() {
             if rel_path != filter_path {
                 continue;
             }
-        } else {
-            // Recursive mode: show threads at or under the filter path
-            if filter_path != "." {
-                let filter_prefix = if filter_path.ends_with('/') {
-                    filter_path.clone()
-                } else {
-                    format!("{}/", filter_path)
-                };
-                if rel_path != filter_path && !rel_path.starts_with(&filter_prefix) {
-                    continue;
-                }
-            }
         }
+        // Note: find_threads_with_options already handles direction/depth filtering
 
         // Status filter
         if let Some(ref status_filter) = args.status {
@@ -167,7 +254,7 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             git_root,
             &filter_path,
             &pwd_rel,
-            args.recursive,
+            &search_dir,
             args.include_closed,
             args.status.as_deref(),
         ),
@@ -176,7 +263,7 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             git_root,
             &filter_path,
             &pwd_rel,
-            args.recursive,
+            &search_dir,
             args.include_closed,
             args.status.as_deref(),
         ),
@@ -190,7 +277,7 @@ fn output_fancy(
     git_root: &Path,
     filter_path: &str,
     pwd_rel: &str,
-    recursive: bool,
+    search_dir: &SearchDirection,
     include_closed: bool,
     status_filter: Option<&str>,
 ) -> Result<(), String> {
@@ -219,19 +306,19 @@ fn output_fancy(
         "active ".to_string()
     };
 
-    let recursive_suffix = if recursive { " (recursive)" } else { "" };
+    let search_suffix = search_dir.description();
 
     println!(
         "Showing {} {}threads{}",
         results.len(),
         status_desc,
-        recursive_suffix
+        search_suffix
     );
     println!();
 
     if results.is_empty() {
-        if !recursive {
-            println!("Hint: use -r to include nested directories");
+        if !search_dir.is_searching() {
+            println!("Hint: use -r to include nested directories, -u to search parents");
         }
         return Ok(());
     }
@@ -263,7 +350,7 @@ fn output_plain(
     git_root: &Path,
     filter_path: &str,
     pwd_rel: &str,
-    recursive: bool,
+    search_dir: &SearchDirection,
     include_closed: bool,
     status_filter: Option<&str>,
 ) -> Result<(), String> {
@@ -291,7 +378,7 @@ fn output_plain(
         "active".to_string()
     };
 
-    let recursive_suffix = if recursive { " (recursive)" } else { "" };
+    let search_suffix = search_dir.description();
 
     let pwd_suffix = if filter_path == pwd_rel {
         " ← PWD"
@@ -305,7 +392,7 @@ fn output_plain(
             results.len(),
             status_desc,
             path_desc,
-            recursive_suffix,
+            search_suffix,
             pwd_suffix
         );
     } else {
@@ -313,15 +400,15 @@ fn output_plain(
             "Showing {} threads in {} (all statuses){}{}",
             results.len(),
             path_desc,
-            recursive_suffix,
+            search_suffix,
             pwd_suffix
         );
     }
     println!();
 
     if results.is_empty() {
-        if !recursive {
-            println!("Hint: use -r to include nested directories");
+        if !search_dir.is_searching() {
+            println!("Hint: use -r to include nested directories, -u to search parents");
         }
         return Ok(());
     }

@@ -3,13 +3,15 @@
 import json
 import os
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import yaml
 
 from ..models import Thread
 from ..output import OutputFormat, parse_format, resolve_format
-from ..storage import find_threads, load_thread
+from ..storage import FindOptions, find_threads, find_threads_with_options, load_thread
 from ..workspace import (
     get_workspace,
     infer_scope,
@@ -18,9 +20,45 @@ from ..workspace import (
 )
 
 
+@dataclass
+class SearchDirection:
+    """Describes the search direction for output display."""
+
+    has_down: bool = False
+    down_depth: int = -1  # -1 = unlimited
+    has_up: bool = False
+    up_depth: int = -1  # -1 = unlimited (to git root)
+
+    def description(self) -> str:
+        parts = []
+
+        if self.has_down:
+            if self.down_depth < 0:
+                parts.append("recursive")
+            else:
+                parts.append(f"down {self.down_depth}")
+
+        if self.has_up:
+            if self.up_depth < 0:
+                parts.append("up")
+            else:
+                parts.append(f"up {self.up_depth}")
+
+        if not parts:
+            return ""
+        return f" ({', '.join(parts)})"
+
+    def is_searching(self) -> bool:
+        return self.has_down or self.has_up
+
+
 def cmd_list(
     path: str | None = None,
+    down: Optional[int] = None,
     recursive: bool = False,
+    up: Optional[int] = None,
+    no_git_bound_down: bool = False,
+    no_git_bound_up: bool = False,
     include_closed: bool = False,
     search: str | None = None,
     status_filter: str | None = None,
@@ -39,6 +77,32 @@ def cmd_list(
     # Resolve the scope
     scope = infer_scope(path, git_root)
     filter_path = scope.path
+    start_path = scope.threads_dir.parent
+
+    # Determine search direction: --down/-d takes priority, then -r as alias
+    has_down = down is not None or recursive
+    down_depth = down if down is not None else -1
+
+    has_up = up is not None
+    up_depth = up if up is not None else -1
+
+    # Build FindOptions
+    options = FindOptions.new()
+    options.no_git_bound_down = no_git_bound_down
+    options.no_git_bound_up = no_git_bound_up
+
+    if has_down:
+        options.down = down_depth
+    if has_up:
+        options.up = up_depth
+
+    # Track search direction for output
+    search_dir = SearchDirection(
+        has_down=has_down,
+        down_depth=down_depth,
+        has_up=has_up,
+        up_depth=up_depth,
+    )
 
     # Get PWD relative path for comparison
     pwd_rel = pwd_relative_to_git_root(git_root)
@@ -46,23 +110,21 @@ def cmd_list(
     # Determine if we need absolute paths (for json/yaml)
     include_absolute = fmt in (OutputFormat.JSON, OutputFormat.YAML)
 
+    # Find threads using options
+    all_threads = find_threads_with_options(start_path, git_root, options)
+
     # Collect matching threads
     threads_info: list[dict] = []
 
-    for file_path in find_threads(git_root):
+    for file_path in all_threads:
         thread = load_thread(file_path)
         rel_path = parse_thread_path(file_path, git_root)
 
-        # Path filter: if not recursive, only show threads at the specified level
-        if not recursive:
+        # Path filter: if not searching, only show threads at the specified level
+        if not search_dir.is_searching():
             if rel_path != filter_path:
                 continue
-        else:
-            # Recursive mode: show threads at or under the filter path
-            if filter_path != ".":
-                filter_prefix = filter_path if filter_path.endswith("/") else filter_path + "/"
-                if rel_path != filter_path and not rel_path.startswith(filter_prefix):
-                    continue
+        # Note: find_threads_with_options already handles direction/depth filtering
 
         # Search filter
         if search:
@@ -103,9 +165,9 @@ def cmd_list(
 
     # Output
     if fmt == OutputFormat.FANCY:
-        output_fancy(threads_info, git_root, filter_path, pwd_rel, recursive, status_filter, include_closed)
+        output_fancy(threads_info, git_root, filter_path, pwd_rel, search_dir, status_filter, include_closed)
     elif fmt == OutputFormat.PLAIN:
-        output_plain(threads_info, git_root, filter_path, pwd_rel, recursive, status_filter, include_closed)
+        output_plain(threads_info, git_root, filter_path, pwd_rel, search_dir, status_filter, include_closed)
     elif fmt == OutputFormat.JSON:
         output_json_list(threads_info, git_root, pwd_rel)
     elif fmt == OutputFormat.YAML:
@@ -117,7 +179,7 @@ def output_fancy(
     git_root: Path,
     filter_path: str,
     pwd_rel: str,
-    recursive: bool,
+    search_dir: SearchDirection,
     status_filter: str | None,
     include_closed: bool,
 ) -> None:
@@ -138,14 +200,14 @@ def output_fancy(
     else:
         status_desc = "active "
 
-    recursive_suffix = " (recursive)" if recursive else ""
+    search_suffix = search_dir.description()
 
-    print(f"Showing {len(threads)} {status_desc}threads{recursive_suffix}")
+    print(f"Showing {len(threads)} {status_desc}threads{search_suffix}")
     print()
 
     if not threads:
-        if not recursive:
-            print("Hint: use -r to include nested directories")
+        if not search_dir.is_searching():
+            print("Hint: use -r to include nested directories, -u to search parents")
         return
 
     # Table header
@@ -164,7 +226,7 @@ def output_plain(
     git_root: Path,
     filter_path: str,
     pwd_rel: str,
-    recursive: bool,
+    search_dir: SearchDirection,
     status_filter: str | None,
     include_closed: bool,
 ) -> None:
@@ -185,18 +247,18 @@ def output_plain(
     else:
         status_desc = "active"
 
-    recursive_suffix = " (recursive)" if recursive else ""
+    search_suffix = search_dir.description()
     pwd_suffix = " ← PWD" if filter_path == pwd_rel else ""
 
     if status_desc:
-        print(f"Showing {len(threads)} {status_desc} threads in {path_desc}{recursive_suffix}{pwd_suffix}")
+        print(f"Showing {len(threads)} {status_desc} threads in {path_desc}{search_suffix}{pwd_suffix}")
     else:
-        print(f"Showing {len(threads)} threads in {path_desc} (all statuses){recursive_suffix}{pwd_suffix}")
+        print(f"Showing {len(threads)} threads in {path_desc} (all statuses){search_suffix}{pwd_suffix}")
     print()
 
     if not threads:
-        if not recursive:
-            print("Hint: use -r to include nested directories")
+        if not search_dir.is_searching():
+            print("Hint: use -r to include nested directories, -u to search parents")
         return
 
     # Table header
@@ -278,7 +340,11 @@ def cmd_path(ref: str) -> None:
 
 def cmd_stats(
     path: str | None = None,
+    down: Optional[int] = None,
     recursive: bool = False,
+    up: Optional[int] = None,
+    no_git_bound_down: bool = False,
+    no_git_bound_up: bool = False,
     format_str: str = "fancy",
     json_output: bool = False,
 ) -> None:
@@ -294,52 +360,76 @@ def cmd_stats(
     # Resolve the scope
     scope = infer_scope(path, git_root)
     filter_path = scope.path
+    start_path = scope.threads_dir.parent
+
+    # Determine search direction
+    has_down = down is not None or recursive
+    down_depth = down if down is not None else -1
+
+    has_up = up is not None
+    up_depth = up if up is not None else -1
+
+    # Build FindOptions
+    options = FindOptions.new()
+    options.no_git_bound_down = no_git_bound_down
+    options.no_git_bound_up = no_git_bound_up
+
+    if has_down:
+        options.down = down_depth
+    if has_up:
+        options.up = up_depth
+
+    # Track search direction for output
+    search_dir = SearchDirection(
+        has_down=has_down,
+        down_depth=down_depth,
+        has_up=has_up,
+        up_depth=up_depth,
+    )
+
+    # Find threads using options
+    all_threads = find_threads_with_options(start_path, git_root, options)
 
     # Count by status
     counts: Counter[str] = Counter()
 
-    for file_path in find_threads(git_root):
+    for file_path in all_threads:
         rel_path = parse_thread_path(file_path, git_root)
 
-        # Path filter: if not recursive, only show threads at the specified level
-        if not recursive:
+        # Path filter: if not searching, only count threads at the specified level
+        if not search_dir.is_searching():
             if rel_path != filter_path:
                 continue
-        else:
-            # Recursive mode: show threads at or under the filter path
-            if filter_path != ".":
-                filter_prefix = filter_path if filter_path.endswith("/") else filter_path + "/"
-                if rel_path != filter_path and not rel_path.startswith(filter_prefix):
-                    continue
+        # Note: find_threads_with_options already handles direction/depth filtering
 
         thread = load_thread(file_path)
         counts[thread.base_status()] += 1
 
     # Output based on format
     if fmt == OutputFormat.FANCY:
-        stats_output_fancy(counts, filter_path, recursive)
+        stats_output_fancy(counts, filter_path, search_dir)
     elif fmt == OutputFormat.PLAIN:
-        stats_output_plain(counts, git_root, filter_path, recursive)
+        stats_output_plain(counts, git_root, filter_path, search_dir)
     elif fmt == OutputFormat.JSON:
         stats_output_json(counts, git_root, filter_path)
     elif fmt == OutputFormat.YAML:
         stats_output_yaml(counts, git_root, filter_path)
 
 
-def stats_output_fancy(counts: Counter[str], filter_path: str, recursive: bool) -> None:
+def stats_output_fancy(counts: Counter[str], filter_path: str, search_dir: SearchDirection) -> None:
     """Output stats in fancy format."""
     # Header
     path_desc = "repo root" if filter_path == "." else filter_path
-    recursive_suffix = " (recursive)" if recursive else ""
+    search_suffix = search_dir.description()
 
-    print(f"Stats for threads in {path_desc}{recursive_suffix}")
+    print(f"Stats for threads in {path_desc}{search_suffix}")
     print()
 
     total = sum(counts.values())
     if total == 0:
         print("No threads found.")
-        if not recursive:
-            print("Hint: use -r to include nested directories")
+        if not search_dir.is_searching():
+            print("Hint: use -r to include nested directories, -u to search parents")
         return
 
     # Table
@@ -351,7 +441,7 @@ def stats_output_fancy(counts: Counter[str], filter_path: str, recursive: bool) 
     print(f"| {'Total':<10} | {total:>5} |")
 
 
-def stats_output_plain(counts: Counter[str], git_root: Path, filter_path: str, recursive: bool) -> None:
+def stats_output_plain(counts: Counter[str], git_root: Path, filter_path: str, search_dir: SearchDirection) -> None:
     """Output stats in plain format."""
     pwd = os.getcwd()
     print(f"PWD: {pwd}")
@@ -359,16 +449,16 @@ def stats_output_plain(counts: Counter[str], git_root: Path, filter_path: str, r
     print()
 
     path_desc = "repo root" if filter_path == "." else filter_path
-    recursive_suffix = " (recursive)" if recursive else ""
+    search_suffix = search_dir.description()
 
-    print(f"Stats for threads in {path_desc}{recursive_suffix}")
+    print(f"Stats for threads in {path_desc}{search_suffix}")
     print()
 
     total = sum(counts.values())
     if total == 0:
         print("No threads found.")
-        if not recursive:
-            print("Hint: use -r to include nested directories")
+        if not search_dir.is_searching():
+            print("Hint: use -r to include nested directories, -u to search parents")
         return
 
     # Table

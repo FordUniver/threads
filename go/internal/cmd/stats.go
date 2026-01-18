@@ -16,9 +16,14 @@ import (
 )
 
 var (
-	statsRecursive bool
-	statsFormat    string
-	statsJSON      bool
+	statsDownVal        int
+	statsRecursive      bool
+	statsUpVal          int
+	statsNoGitBoundDown bool
+	statsNoGitBoundUp   bool
+	statsNoGitBound     bool
+	statsFormat         string
+	statsJSON           bool
 )
 
 var statsCmd = &cobra.Command{
@@ -31,15 +36,60 @@ Path resolution:
   .       → PWD (explicit)
   ./X/Y   → PWD-relative
   /X/Y    → Absolute
-  X/Y     → Git-root-relative`,
+  X/Y     → Git-root-relative
+
+Use -d/--down to include subdirectories, -u/--up to include parent directories.
+Use -r as an alias for --down (unlimited depth).`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runStats,
 }
 
 func init() {
-	statsCmd.Flags().BoolVarP(&statsRecursive, "recursive", "r", false, "Include nested directories")
+	statsCmd.Flags().IntVarP(&statsDownVal, "down", "d", -1, "Search subdirectories (N levels, 0=unlimited)")
+	statsCmd.Flags().BoolVarP(&statsRecursive, "recursive", "r", false, "Alias for --down (unlimited depth)")
+	statsCmd.Flags().IntVarP(&statsUpVal, "up", "u", -1, "Search parent directories (N levels, 0=to git root)")
+	statsCmd.Flags().BoolVar(&statsNoGitBoundDown, "no-git-bound-down", false, "Cross git boundaries when searching down")
+	statsCmd.Flags().BoolVar(&statsNoGitBoundUp, "no-git-bound-up", false, "Cross git boundaries when searching up")
+	statsCmd.Flags().BoolVar(&statsNoGitBound, "no-git-bound", false, "Cross all git boundaries")
 	statsCmd.Flags().StringVarP(&statsFormat, "format", "f", "fancy", "Output format: fancy, plain, json, yaml")
 	statsCmd.Flags().BoolVar(&statsJSON, "json", false, "Output as JSON (shorthand for --format=json)")
+}
+
+// statsSearchDirection describes the search direction for stats output display.
+type statsSearchDirection struct {
+	hasDown   bool
+	downDepth int
+	hasUp     bool
+	upDepth   int
+}
+
+func (s *statsSearchDirection) description() string {
+	var parts []string
+
+	if s.hasDown {
+		if s.downDepth < 0 {
+			parts = append(parts, "recursive")
+		} else {
+			parts = append(parts, fmt.Sprintf("down %d", s.downDepth))
+		}
+	}
+
+	if s.hasUp {
+		if s.upDepth < 0 {
+			parts = append(parts, "up")
+		} else {
+			parts = append(parts, fmt.Sprintf("up %d", s.upDepth))
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%s)", strings.Join(parts, ", "))
+}
+
+func (s *statsSearchDirection) isSearching() bool {
+	return s.hasDown || s.hasUp
 }
 
 type statusCount struct {
@@ -76,9 +126,58 @@ func runStats(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	filterPath := scope.Path
+	startPath := scope.ThreadsDir[:len(scope.ThreadsDir)-len("/.threads")]
 
-	// Find all threads
-	threads, err := workspace.FindAllThreads(gitRoot)
+	// Build FindOptions from flags
+	noGitBoundDown := statsNoGitBound || statsNoGitBoundDown
+	noGitBoundUp := statsNoGitBound || statsNoGitBoundUp
+
+	// Determine search direction
+	downSet := cmd.Flags().Changed("down")
+	hasDown := downSet || statsRecursive
+	downDepth := -1
+	if downSet && statsDownVal > 0 {
+		downDepth = statsDownVal
+	}
+
+	upSet := cmd.Flags().Changed("up")
+	hasUp := upSet
+	upDepth := -1
+	if upSet && statsUpVal > 0 {
+		upDepth = statsUpVal
+	}
+
+	// Build options
+	options := workspace.NewFindOptions().
+		WithNoGitBoundDown(noGitBoundDown).
+		WithNoGitBoundUp(noGitBoundUp)
+
+	if hasDown {
+		depth := downDepth
+		if depth < 0 {
+			depth = 0
+		}
+		options = options.WithDown(&depth)
+	}
+
+	if hasUp {
+		depth := upDepth
+		if depth < 0 {
+			depth = 0
+		}
+		options = options.WithUp(&depth)
+	}
+
+	// Track search direction for output
+	searchDir := &statsSearchDirection{
+		hasDown:   hasDown,
+		downDepth: downDepth,
+		hasUp:     hasUp,
+		upDepth:   upDepth,
+	}
+
+	// Find threads using options
+	threads, err := workspace.FindThreadsWithOptions(startPath, gitRoot, options)
 	if err != nil {
 		return err
 	}
@@ -89,21 +188,10 @@ func runStats(cmd *cobra.Command, args []string) error {
 	for _, path := range threads {
 		relPath := workspace.ParseThreadPath(gitRoot, path)
 
-		// Path filter: if not recursive, only show threads at the specified level
-		if !statsRecursive {
+		// Path filter: if not searching, only count threads at the specified level
+		if !searchDir.isSearching() {
 			if relPath != filterPath {
 				continue
-			}
-		} else {
-			// Recursive mode: show threads at or under the filter path
-			if filterPath != "." {
-				filterPrefix := filterPath
-				if !strings.HasSuffix(filterPrefix, "/") {
-					filterPrefix = filterPath + "/"
-				}
-				if relPath != filterPath && !strings.HasPrefix(relPath, filterPrefix) {
-					continue
-				}
 			}
 		}
 
@@ -132,36 +220,33 @@ func runStats(cmd *cobra.Command, args []string) error {
 
 	switch format {
 	case output.FormatFancy:
-		return statsOutputFancy(sorted, total, filterPath)
+		return statsOutputFancy(sorted, total, filterPath, searchDir)
 	case output.FormatPlain:
-		return statsOutputPlain(sorted, total, gitRoot, filterPath)
+		return statsOutputPlain(sorted, total, gitRoot, filterPath, searchDir)
 	case output.FormatJSON:
 		return statsOutputJSON(sorted, total, gitRoot, filterPath)
 	case output.FormatYAML:
 		return statsOutputYAML(sorted, total, gitRoot, filterPath)
 	default:
-		return statsOutputFancy(sorted, total, filterPath)
+		return statsOutputFancy(sorted, total, filterPath, searchDir)
 	}
 }
 
-func statsOutputFancy(sorted []sortedCount, total int, filterPath string) error {
+func statsOutputFancy(sorted []sortedCount, total int, filterPath string, searchDir *statsSearchDirection) error {
 	pathDesc := filterPath
 	if filterPath == "." {
 		pathDesc = "repo root"
 	}
 
-	recursiveSuffix := ""
-	if statsRecursive {
-		recursiveSuffix = " (recursive)"
-	}
+	searchSuffix := searchDir.description()
 
-	fmt.Printf("Stats for threads in %s%s\n", pathDesc, recursiveSuffix)
+	fmt.Printf("Stats for threads in %s%s\n", pathDesc, searchSuffix)
 	fmt.Println()
 
 	if total == 0 {
 		fmt.Println("No threads found.")
-		if !statsRecursive {
-			fmt.Println("Hint: use -r to include nested directories")
+		if !searchDir.isSearching() {
+			fmt.Println("Hint: use -r to include nested directories, -u to search parents")
 		}
 		return nil
 	}
@@ -177,7 +262,7 @@ func statsOutputFancy(sorted []sortedCount, total int, filterPath string) error 
 	return nil
 }
 
-func statsOutputPlain(sorted []sortedCount, total int, gitRoot, filterPath string) error {
+func statsOutputPlain(sorted []sortedCount, total int, gitRoot, filterPath string, searchDir *statsSearchDirection) error {
 	pwd, _ := os.Getwd()
 	fmt.Printf("PWD: %s\n", pwd)
 	fmt.Printf("Git root: %s\n", gitRoot)
@@ -188,18 +273,15 @@ func statsOutputPlain(sorted []sortedCount, total int, gitRoot, filterPath strin
 		pathDesc = "repo root"
 	}
 
-	recursiveSuffix := ""
-	if statsRecursive {
-		recursiveSuffix = " (recursive)"
-	}
+	searchSuffix := searchDir.description()
 
-	fmt.Printf("Stats for threads in %s%s\n", pathDesc, recursiveSuffix)
+	fmt.Printf("Stats for threads in %s%s\n", pathDesc, searchSuffix)
 	fmt.Println()
 
 	if total == 0 {
 		fmt.Println("No threads found.")
-		if !statsRecursive {
-			fmt.Println("Hint: use -r to include nested directories")
+		if !searchDir.isSearching() {
+			fmt.Println("Hint: use -r to include nested directories, -u to search parents")
 		}
 		return nil
 	}

@@ -14,6 +14,53 @@ use crate::thread;
 // Cached regexes for workspace operations
 static ID_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{6}$").unwrap());
 
+/// Options for finding threads with direction and boundary controls.
+#[derive(Debug, Clone, Default)]
+pub struct FindOptions {
+    /// Search subdirectories. None = no recursion, Some(None) = unlimited, Some(Some(n)) = n levels
+    pub down: Option<Option<usize>>,
+    /// Search parent directories. None = no up search, Some(None) = to git root, Some(Some(n)) = n levels
+    pub up: Option<Option<usize>>,
+    /// Cross git boundaries when searching down (enter nested git repos)
+    pub no_git_bound_down: bool,
+    /// Cross git boundaries when searching up (continue past git root)
+    pub no_git_bound_up: bool,
+}
+
+impl FindOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create options for simple recursive search (backward compat with -r)
+    pub fn recursive() -> Self {
+        Self {
+            down: Some(None), // unlimited depth
+            ..Default::default()
+        }
+    }
+
+    pub fn with_down(mut self, depth: Option<usize>) -> Self {
+        self.down = Some(depth);
+        self
+    }
+
+    pub fn with_up(mut self, depth: Option<usize>) -> Self {
+        self.up = Some(depth);
+        self
+    }
+
+    pub fn with_no_git_bound_down(mut self, value: bool) -> Self {
+        self.no_git_bound_down = value;
+        self
+    }
+
+    pub fn with_no_git_bound_up(mut self, value: bool) -> Self {
+        self.no_git_bound_up = value;
+        self
+    }
+}
+
 static SLUGIFY_NON_ALNUM_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
 
@@ -132,6 +179,169 @@ fn find_threads_recursive(
     }
 
     Ok(())
+}
+
+/// Find threads with options for direction and boundary controls.
+/// This is the primary search function supporting --up, --down, and boundary flags.
+pub fn find_threads_with_options(
+    start_path: &Path,
+    git_root: &Path,
+    options: &FindOptions,
+) -> Result<Vec<PathBuf>, String> {
+    let mut threads = Vec::new();
+    let start_canonical = start_path
+        .canonicalize()
+        .unwrap_or_else(|_| start_path.to_path_buf());
+
+    // Always collect threads at start_path
+    collect_threads_at_path(&start_canonical, &mut threads);
+
+    // Search down (subdirectories)
+    if let Some(max_depth) = options.down {
+        find_threads_down(
+            &start_canonical,
+            git_root,
+            &mut threads,
+            0,
+            max_depth,
+            options.no_git_bound_down,
+        )?;
+    }
+
+    // Search up (parent directories)
+    if let Some(max_depth) = options.up {
+        find_threads_up(
+            &start_canonical,
+            git_root,
+            &mut threads,
+            0,
+            max_depth,
+            options.no_git_bound_up,
+        )?;
+    }
+
+    threads.sort();
+    threads.dedup();
+    Ok(threads)
+}
+
+/// Collect threads from .threads directory at the given path.
+fn collect_threads_at_path(dir: &Path, threads: &mut Vec<PathBuf>) {
+    let threads_dir = dir.join(".threads");
+    if threads_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&threads_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |e| e == "md") {
+                    // Skip archive subdirectory
+                    if !path.to_string_lossy().contains("/archive/") {
+                        threads.push(path);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Recursively find threads going down into subdirectories.
+fn find_threads_down(
+    dir: &Path,
+    git_root: &Path,
+    threads: &mut Vec<PathBuf>,
+    current_depth: usize,
+    max_depth: Option<usize>,
+    cross_git_boundaries: bool,
+) -> Result<(), String> {
+    // Check depth limit
+    if let Some(max) = max_depth {
+        if current_depth >= max {
+            return Ok(());
+        }
+    }
+
+    // Recurse into subdirectories
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+
+            // Skip hidden directories
+            if name_str.starts_with('.') {
+                continue;
+            }
+
+            // Check git boundary
+            if !cross_git_boundaries && path != git_root && is_git_root(&path) {
+                continue;
+            }
+
+            // Collect threads at this level
+            collect_threads_at_path(&path, threads);
+
+            // Continue recursing
+            find_threads_down(
+                &path,
+                git_root,
+                threads,
+                current_depth + 1,
+                max_depth,
+                cross_git_boundaries,
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Find threads going up into parent directories.
+fn find_threads_up(
+    dir: &Path,
+    git_root: &Path,
+    threads: &mut Vec<PathBuf>,
+    current_depth: usize,
+    max_depth: Option<usize>,
+    cross_git_boundaries: bool,
+) -> Result<(), String> {
+    // Check depth limit
+    if let Some(max) = max_depth {
+        if current_depth >= max {
+            return Ok(());
+        }
+    }
+
+    let Some(parent) = dir.parent() else {
+        return Ok(());
+    };
+
+    let parent_canonical = parent
+        .canonicalize()
+        .unwrap_or_else(|_| parent.to_path_buf());
+    let git_root_canonical = git_root
+        .canonicalize()
+        .unwrap_or_else(|_| git_root.to_path_buf());
+
+    // Check git boundary: stop at git root unless crossing is allowed
+    if !cross_git_boundaries && !parent_canonical.starts_with(&git_root_canonical) {
+        return Ok(());
+    }
+
+    // Collect threads at parent
+    collect_threads_at_path(&parent_canonical, threads);
+
+    // Continue up
+    find_threads_up(
+        &parent_canonical,
+        git_root,
+        threads,
+        current_depth + 1,
+        max_depth,
+        cross_git_boundaries,
+    )
 }
 
 /// Scope represents thread placement information.

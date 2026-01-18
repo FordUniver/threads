@@ -3,11 +3,53 @@
 import os
 import re
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 import frontmatter
 
 from .models import LogEntry, Note, Thread, Todo
+
+
+@dataclass
+class FindOptions:
+    """Options for finding threads with direction and boundary controls."""
+
+    # Down depth: None = no recursion, -1 = unlimited, N = N levels
+    down: Optional[int] = None
+    # Up depth: None = no up search, -1 = unlimited (to git root), N = N levels
+    up: Optional[int] = None
+    # Cross git boundaries when searching down
+    no_git_bound_down: bool = False
+    # Cross git boundaries when searching up
+    no_git_bound_up: bool = False
+
+    @classmethod
+    def new(cls) -> "FindOptions":
+        return cls()
+
+    def with_down(self, depth: Optional[int]) -> "FindOptions":
+        self.down = depth
+        return self
+
+    def with_up(self, depth: Optional[int]) -> "FindOptions":
+        self.up = depth
+        return self
+
+    def with_no_git_bound_down(self, value: bool) -> "FindOptions":
+        self.no_git_bound_down = value
+        return self
+
+    def with_no_git_bound_up(self, value: bool) -> "FindOptions":
+        self.no_git_bound_up = value
+        return self
+
+    def has_down(self) -> bool:
+        return self.down is not None
+
+    def has_up(self) -> bool:
+        return self.up is not None
 
 # Section header pattern
 SECTION_RE = re.compile(r"^## (\w+)\s*$", re.MULTILINE)
@@ -269,3 +311,121 @@ def find_threads(git_root: Path) -> list[Path]:
 
     # Sort by modification time (most recent first)
     return sorted(threads, key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def _collect_threads_at_path(dir_path: Path, threads: list[Path]) -> None:
+    """Collect threads from .threads directory at the given path."""
+    threads_dir = dir_path / ".threads"
+    if threads_dir.is_dir():
+        for entry in threads_dir.iterdir():
+            if entry.is_file() and entry.suffix == ".md":
+                # Skip archive subdirectory
+                if "/archive/" not in str(entry):
+                    threads.append(entry)
+
+
+def _find_threads_down(
+    dir_path: Path,
+    git_root: Path,
+    threads: list[Path],
+    current_depth: int,
+    max_depth: int,  # -1 = unlimited
+    cross_git_boundaries: bool,
+) -> None:
+    """Recursively find threads going down into subdirectories."""
+    # Check depth limit
+    if max_depth >= 0 and current_depth >= max_depth:
+        return
+
+    try:
+        for entry in dir_path.iterdir():
+            if not entry.is_dir():
+                continue
+
+            name = entry.name
+
+            # Skip hidden directories
+            if name.startswith("."):
+                continue
+
+            # Check git boundary
+            if not cross_git_boundaries and entry != git_root and _is_git_root(entry):
+                continue
+
+            # Collect threads at this level
+            _collect_threads_at_path(entry, threads)
+
+            # Continue recursing
+            _find_threads_down(
+                entry, git_root, threads, current_depth + 1, max_depth, cross_git_boundaries
+            )
+    except PermissionError:
+        pass
+
+
+def _find_threads_up(
+    dir_path: Path,
+    git_root: Path,
+    threads: list[Path],
+    current_depth: int,
+    max_depth: int,  # -1 = unlimited
+    cross_git_boundaries: bool,
+) -> None:
+    """Find threads going up into parent directories."""
+    # Check depth limit
+    if max_depth >= 0 and current_depth >= max_depth:
+        return
+
+    parent = dir_path.parent
+    if parent == dir_path:
+        return  # reached filesystem root
+
+    parent_resolved = parent.resolve()
+    git_root_resolved = git_root.resolve()
+
+    # Check git boundary: stop at git root unless crossing is allowed
+    if not cross_git_boundaries:
+        try:
+            parent_resolved.relative_to(git_root_resolved)
+        except ValueError:
+            return  # parent is outside git root
+
+    # Collect threads at parent
+    _collect_threads_at_path(parent_resolved, threads)
+
+    # Continue up
+    _find_threads_up(
+        parent_resolved, git_root, threads, current_depth + 1, max_depth, cross_git_boundaries
+    )
+
+
+def find_threads_with_options(
+    start_path: Path, git_root: Path, options: FindOptions
+) -> list[Path]:
+    """Find threads with options for direction and boundary controls.
+
+    This is the primary search function supporting --up, --down, and boundary flags.
+    """
+    threads: list[Path] = []
+    start_resolved = start_path.resolve()
+
+    # Always collect threads at start_path
+    _collect_threads_at_path(start_resolved, threads)
+
+    # Search down (subdirectories)
+    if options.has_down():
+        max_depth = options.down if options.down is not None else -1
+        _find_threads_down(
+            start_resolved, git_root, threads, 0, max_depth, options.no_git_bound_down
+        )
+
+    # Search up (parent directories)
+    if options.has_up():
+        max_depth = options.up if options.up is not None else -1
+        _find_threads_up(
+            start_resolved, git_root, threads, 0, max_depth, options.no_git_bound_up
+        )
+
+    # Sort and deduplicate
+    threads = sorted(set(threads), key=lambda p: p.stat().st_mtime, reverse=True)
+    return threads

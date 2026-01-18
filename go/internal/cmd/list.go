@@ -16,12 +16,17 @@ import (
 )
 
 var (
-	listRecursive     bool
-	listIncludeClosed bool
-	listSearch        string
-	listStatus        string
-	listFormat        string
-	listJSON          bool
+	listDown            *int
+	listRecursive       bool
+	listUp              *int
+	listNoGitBoundDown  bool
+	listNoGitBoundUp    bool
+	listNoGitBound      bool
+	listIncludeClosed   bool
+	listSearch          string
+	listStatus          string
+	listFormat          string
+	listJSON            bool
 )
 
 var listCmd = &cobra.Command{
@@ -38,19 +43,65 @@ Path resolution:
   X/Y     → Git-root-relative
 
 By default shows active threads at the current level only.
-Use -r to include nested directories.
+Use -d/--down to include subdirectories, -u/--up to include parent directories.
+Use -r as an alias for --down (unlimited depth).
 Use --include-closed to include resolved/terminal threads.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runList,
 }
 
+var listDownVal int
+var listUpVal int
+
 func init() {
-	listCmd.Flags().BoolVarP(&listRecursive, "recursive", "r", false, "Include nested directories")
+	listCmd.Flags().IntVarP(&listDownVal, "down", "d", -1, "Search subdirectories (N levels, 0=unlimited)")
+	listCmd.Flags().BoolVarP(&listRecursive, "recursive", "r", false, "Alias for --down (unlimited depth)")
+	listCmd.Flags().IntVarP(&listUpVal, "up", "u", -1, "Search parent directories (N levels, 0=to git root)")
+	listCmd.Flags().BoolVar(&listNoGitBoundDown, "no-git-bound-down", false, "Cross git boundaries when searching down")
+	listCmd.Flags().BoolVar(&listNoGitBoundUp, "no-git-bound-up", false, "Cross git boundaries when searching up")
+	listCmd.Flags().BoolVar(&listNoGitBound, "no-git-bound", false, "Cross all git boundaries")
 	listCmd.Flags().BoolVar(&listIncludeClosed, "include-closed", false, "Include resolved/terminal threads")
 	listCmd.Flags().StringVarP(&listSearch, "search", "s", "", "Search name/title/desc (substring)")
 	listCmd.Flags().StringVar(&listStatus, "status", "", "Filter by status (comma-separated)")
 	listCmd.Flags().StringVarP(&listFormat, "format", "f", "fancy", "Output format: fancy, plain, json, yaml")
 	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON (shorthand for --format=json)")
+}
+
+// searchDirection describes the search direction for output display.
+type searchDirection struct {
+	hasDown   bool
+	downDepth int // -1 = unlimited, 0+ = specific depth
+	hasUp     bool
+	upDepth   int // -1 = unlimited (to git root), 0+ = specific depth
+}
+
+func (s *searchDirection) description() string {
+	var parts []string
+
+	if s.hasDown {
+		if s.downDepth < 0 {
+			parts = append(parts, "recursive")
+		} else {
+			parts = append(parts, fmt.Sprintf("down %d", s.downDepth))
+		}
+	}
+
+	if s.hasUp {
+		if s.upDepth < 0 {
+			parts = append(parts, "up")
+		} else {
+			parts = append(parts, fmt.Sprintf("up %d", s.upDepth))
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%s)", strings.Join(parts, ", "))
+}
+
+func (s *searchDirection) isSearching() bool {
+	return s.hasDown || s.hasUp
 }
 
 type threadInfo struct {
@@ -88,9 +139,58 @@ func runList(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	filterPath := scope.Path
+	startPath := filepath.Dir(scope.ThreadsDir)
 
-	// Find all threads
-	threads, err := workspace.FindAllThreads(gitRoot)
+	// Build FindOptions from flags
+	noGitBoundDown := listNoGitBound || listNoGitBoundDown
+	noGitBoundUp := listNoGitBound || listNoGitBoundUp
+
+	// Determine search direction: --down/-d takes priority, then -r as alias
+	downSet := cmd.Flags().Changed("down")
+	hasDown := downSet || listRecursive
+	downDepth := -1 // unlimited by default
+	if downSet && listDownVal > 0 {
+		downDepth = listDownVal
+	}
+
+	upSet := cmd.Flags().Changed("up")
+	hasUp := upSet
+	upDepth := -1 // unlimited (to git root) by default
+	if upSet && listUpVal > 0 {
+		upDepth = listUpVal
+	}
+
+	// Build options
+	options := workspace.NewFindOptions().
+		WithNoGitBoundDown(noGitBoundDown).
+		WithNoGitBoundUp(noGitBoundUp)
+
+	if hasDown {
+		depth := downDepth
+		if depth < 0 {
+			depth = 0 // 0 means unlimited in our convention
+		}
+		options = options.WithDown(&depth)
+	}
+
+	if hasUp {
+		depth := upDepth
+		if depth < 0 {
+			depth = 0 // 0 means unlimited in our convention
+		}
+		options = options.WithUp(&depth)
+	}
+
+	// Track search direction for output
+	searchDir := &searchDirection{
+		hasDown:   hasDown,
+		downDepth: downDepth,
+		hasUp:     hasUp,
+		upDepth:   upDepth,
+	}
+
+	// Find threads using options
+	threads, err := workspace.FindThreadsWithOptions(startPath, gitRoot, options)
 	if err != nil {
 		return err
 	}
@@ -115,23 +215,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		baseStatus := thread.BaseStatus(status)
 		name := thread.ExtractNameFromPath(path)
 
-		// Path filter: if not recursive, only show threads at the specified level
-		if !listRecursive {
+		// Path filter: if not searching, only show threads at the specified level
+		if !searchDir.isSearching() {
 			if relPath != filterPath {
 				continue
 			}
-		} else {
-			// Recursive mode: show threads at or under the filter path
-			if filterPath != "." {
-				filterPrefix := filterPath
-				if !strings.HasSuffix(filterPrefix, "/") {
-					filterPrefix = filterPath + "/"
-				}
-				if relPath != filterPath && !strings.HasPrefix(relPath, filterPrefix) {
-					continue
-				}
-			}
 		}
+		// Note: FindThreadsWithOptions already handles direction/depth filtering
 
 		// Status filter
 		statusFlagSet := cmd.Flags().Changed("status")
@@ -189,19 +279,19 @@ func runList(cmd *cobra.Command, args []string) error {
 
 	switch format {
 	case output.FormatFancy:
-		return outputFancy(results, gitRoot, filterPath, pwdRel)
+		return outputFancy(results, gitRoot, filterPath, pwdRel, searchDir)
 	case output.FormatPlain:
-		return outputPlain(results, gitRoot, filterPath, pwdRel)
+		return outputPlain(results, gitRoot, filterPath, pwdRel, searchDir)
 	case output.FormatJSON:
 		return outputJSON(results, gitRoot, pwdRel)
 	case output.FormatYAML:
 		return outputYAML(results, gitRoot, pwdRel)
 	default:
-		return outputFancy(results, gitRoot, filterPath, pwdRel)
+		return outputFancy(results, gitRoot, filterPath, pwdRel, searchDir)
 	}
 }
 
-func outputFancy(results []threadInfo, gitRoot, filterPath, pwdRel string) error {
+func outputFancy(results []threadInfo, gitRoot, filterPath, pwdRel string, searchDir *searchDirection) error {
 	// Fancy header: repo-name (rel/path/to/pwd)
 	repoName := filepath.Base(gitRoot)
 
@@ -225,17 +315,14 @@ func outputFancy(results []threadInfo, gitRoot, filterPath, pwdRel string) error
 		statusDesc = ""
 	}
 
-	recursiveSuffix := ""
-	if listRecursive {
-		recursiveSuffix = " (recursive)"
-	}
+	searchSuffix := searchDir.description()
 
-	fmt.Printf("Showing %d %sthreads%s\n", len(results), statusDesc, recursiveSuffix)
+	fmt.Printf("Showing %d %sthreads%s\n", len(results), statusDesc, searchSuffix)
 	fmt.Println()
 
 	if len(results) == 0 {
-		if !listRecursive {
-			fmt.Println("Hint: use -r to include nested directories")
+		if !searchDir.isSearching() {
+			fmt.Println("Hint: use -r to include nested directories, -u to search parents")
 		}
 		return nil
 	}
@@ -256,7 +343,7 @@ func outputFancy(results []threadInfo, gitRoot, filterPath, pwdRel string) error
 	return nil
 }
 
-func outputPlain(results []threadInfo, gitRoot, filterPath, pwdRel string) error {
+func outputPlain(results []threadInfo, gitRoot, filterPath, pwdRel string, searchDir *searchDirection) error {
 	// Plain header: explicit context
 	pwd, _ := os.Getwd()
 	fmt.Printf("PWD: %s\n", pwd)
@@ -276,10 +363,7 @@ func outputPlain(results []threadInfo, gitRoot, filterPath, pwdRel string) error
 		statusDesc = ""
 	}
 
-	recursiveSuffix := ""
-	if listRecursive {
-		recursiveSuffix = " (recursive)"
-	}
+	searchSuffix := searchDir.description()
 
 	pwdSuffix := ""
 	if filterPath == pwdRel {
@@ -287,15 +371,15 @@ func outputPlain(results []threadInfo, gitRoot, filterPath, pwdRel string) error
 	}
 
 	if statusDesc != "" {
-		fmt.Printf("Showing %d %s threads in %s%s%s\n", len(results), statusDesc, pathDesc, recursiveSuffix, pwdSuffix)
+		fmt.Printf("Showing %d %s threads in %s%s%s\n", len(results), statusDesc, pathDesc, searchSuffix, pwdSuffix)
 	} else {
-		fmt.Printf("Showing %d threads in %s (all statuses)%s%s\n", len(results), pathDesc, recursiveSuffix, pwdSuffix)
+		fmt.Printf("Showing %d threads in %s (all statuses)%s%s\n", len(results), pathDesc, searchSuffix, pwdSuffix)
 	}
 	fmt.Println()
 
 	if len(results) == 0 {
-		if !listRecursive {
-			fmt.Println("Hint: use -r to include nested directories")
+		if !searchDir.isSearching() {
+			fmt.Println("Hint: use -r to include nested directories, -u to search parents")
 		}
 		return nil
 	}

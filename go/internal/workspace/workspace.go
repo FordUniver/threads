@@ -21,6 +21,81 @@ var (
 	hexIDRe       = regexp.MustCompile(`^[0-9a-f]{6}$`)
 )
 
+// FindOptions contains options for finding threads with direction and boundary controls.
+type FindOptions struct {
+	// Down specifies subdirectory search. nil = no recursion, *int nil = unlimited, *int N = N levels
+	Down *int
+	// Up specifies parent directory search. nil = no up search, *int nil = to git root, *int N = N levels
+	Up *int
+	// NoGitBoundDown allows crossing git boundaries when searching down
+	NoGitBoundDown bool
+	// NoGitBoundUp allows crossing git boundaries when searching up
+	NoGitBoundUp bool
+}
+
+// NewFindOptions creates FindOptions with default values.
+func NewFindOptions() *FindOptions {
+	return &FindOptions{}
+}
+
+// WithDown enables searching subdirectories with optional depth limit.
+// Pass nil for unlimited depth, or a pointer to a specific depth.
+func (o *FindOptions) WithDown(depth *int) *FindOptions {
+	o.Down = depth
+	return o
+}
+
+// WithUp enables searching parent directories with optional depth limit.
+// Pass nil for unlimited (to git root), or a pointer to a specific depth.
+func (o *FindOptions) WithUp(depth *int) *FindOptions {
+	o.Up = depth
+	return o
+}
+
+// WithNoGitBoundDown allows crossing git boundaries when searching down.
+func (o *FindOptions) WithNoGitBoundDown(value bool) *FindOptions {
+	o.NoGitBoundDown = value
+	return o
+}
+
+// WithNoGitBoundUp allows crossing git boundaries when searching up.
+func (o *FindOptions) WithNoGitBoundUp(value bool) *FindOptions {
+	o.NoGitBoundUp = value
+	return o
+}
+
+// HasDown returns true if down searching is enabled.
+func (o *FindOptions) HasDown() bool {
+	return o.Down != nil
+}
+
+// HasUp returns true if up searching is enabled.
+func (o *FindOptions) HasUp() bool {
+	return o.Up != nil
+}
+
+// DownDepth returns the down depth limit, or -1 for unlimited.
+func (o *FindOptions) DownDepth() int {
+	if o.Down == nil {
+		return 0
+	}
+	if *o.Down == 0 {
+		return -1 // unlimited
+	}
+	return *o.Down
+}
+
+// UpDepth returns the up depth limit, or -1 for unlimited.
+func (o *FindOptions) UpDepth() int {
+	if o.Up == nil {
+		return 0
+	}
+	if *o.Up == 0 {
+		return -1 // unlimited
+	}
+	return *o.Up
+}
+
 // Find returns the git repository root from current directory.
 // Returns an error if not in a git repository.
 func Find() (string, error) {
@@ -122,6 +197,140 @@ func findThreadsRecursive(dir, gitRoot string, threads *[]string) error {
 	}
 
 	return nil
+}
+
+// FindThreadsWithOptions finds threads with direction and boundary controls.
+// This is the primary search function supporting --up, --down, and boundary flags.
+func FindThreadsWithOptions(startPath, gitRoot string, options *FindOptions) ([]string, error) {
+	var threads []string
+
+	absStart, err := filepath.Abs(startPath)
+	if err != nil {
+		absStart = startPath
+	}
+
+	// Always collect threads at start_path
+	collectThreadsAtPath(absStart, &threads)
+
+	// Search down (subdirectories)
+	if options.HasDown() {
+		maxDepth := options.DownDepth()
+		findThreadsDown(absStart, gitRoot, &threads, 0, maxDepth, options.NoGitBoundDown)
+	}
+
+	// Search up (parent directories)
+	if options.HasUp() {
+		maxDepth := options.UpDepth()
+		findThreadsUp(absStart, gitRoot, &threads, 0, maxDepth, options.NoGitBoundUp)
+	}
+
+	// Sort and deduplicate
+	sort.Strings(threads)
+	threads = deduplicate(threads)
+
+	return threads, nil
+}
+
+// collectThreadsAtPath collects threads from .threads directory at the given path.
+func collectThreadsAtPath(dir string, threads *[]string) {
+	threadsDir := filepath.Join(dir, ".threads")
+	if info, err := os.Stat(threadsDir); err == nil && info.IsDir() {
+		entries, err := os.ReadDir(threadsDir)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				if strings.HasSuffix(entry.Name(), ".md") {
+					path := filepath.Join(threadsDir, entry.Name())
+					// Skip archive subdirectory
+					if !strings.Contains(path, "/archive/") {
+						*threads = append(*threads, path)
+					}
+				}
+			}
+		}
+	}
+}
+
+// findThreadsDown recursively finds threads going down into subdirectories.
+func findThreadsDown(dir, gitRoot string, threads *[]string, currentDepth, maxDepth int, crossGitBoundaries bool) {
+	// Check depth limit (-1 means unlimited)
+	if maxDepth >= 0 && currentDepth >= maxDepth {
+		return
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+
+		// Skip hidden directories
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+
+		subdir := filepath.Join(dir, name)
+
+		// Check git boundary
+		if !crossGitBoundaries && subdir != gitRoot && IsGitRoot(subdir) {
+			continue
+		}
+
+		// Collect threads at this level
+		collectThreadsAtPath(subdir, threads)
+
+		// Continue recursing
+		findThreadsDown(subdir, gitRoot, threads, currentDepth+1, maxDepth, crossGitBoundaries)
+	}
+}
+
+// findThreadsUp finds threads going up into parent directories.
+func findThreadsUp(dir, gitRoot string, threads *[]string, currentDepth, maxDepth int, crossGitBoundaries bool) {
+	// Check depth limit (-1 means unlimited)
+	if maxDepth >= 0 && currentDepth >= maxDepth {
+		return
+	}
+
+	parent := filepath.Dir(dir)
+	if parent == dir {
+		return // reached root
+	}
+
+	absParent, _ := filepath.Abs(parent)
+	absGitRoot, _ := filepath.Abs(gitRoot)
+
+	// Check git boundary: stop at git root unless crossing is allowed
+	if !crossGitBoundaries && !strings.HasPrefix(absParent, absGitRoot) {
+		return
+	}
+
+	// Collect threads at parent
+	collectThreadsAtPath(absParent, threads)
+
+	// Continue up
+	findThreadsUp(absParent, gitRoot, threads, currentDepth+1, maxDepth, crossGitBoundaries)
+}
+
+// deduplicate removes duplicate strings from a sorted slice.
+func deduplicate(s []string) []string {
+	if len(s) == 0 {
+		return s
+	}
+	result := []string{s[0]}
+	for i := 1; i < len(s); i++ {
+		if s[i] != s[i-1] {
+			result = append(result, s[i])
+		}
+	}
+	return result
 }
 
 // Scope represents thread placement information.
