@@ -100,7 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_list.add_argument("--include-closed", action="store_true", dest="include_closed", help="Include terminal")
     p_list.add_argument("-s", "--search", help="Search filter")
     p_list.add_argument("--status", help="Status filter")
-    p_list.add_argument("--json", action="store_true", dest="json_output", help="JSON output")
+    p_list.add_argument("-f", "--format", choices=["fancy", "plain", "json", "yaml"], default="fancy", dest="format_str", help="Output format")
+    p_list.add_argument("--json", action="store_true", dest="json_output", help="JSON output (shorthand for --format=json)")
 
     # ls (alias for list)
     p_ls = subparsers.add_parser("ls", help="List threads (alias for list)")
@@ -109,7 +110,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_ls.add_argument("--include-closed", action="store_true", dest="include_closed", help="Include terminal")
     p_ls.add_argument("-s", "--search", help="Search filter")
     p_ls.add_argument("--status", help="Status filter")
-    p_ls.add_argument("--json", action="store_true", dest="json_output", help="JSON output")
+    p_ls.add_argument("-f", "--format", choices=["fancy", "plain", "json", "yaml"], default="fancy", dest="format_str", help="Output format")
+    p_ls.add_argument("--json", action="store_true", dest="json_output", help="JSON output (shorthand for --format=json)")
 
     # new
     p_new = subparsers.add_parser("new", help="Create new thread")
@@ -221,6 +223,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats = subparsers.add_parser("stats", help="Show thread count by status")
     p_stats.add_argument("path", nargs="?", help="Filter by path")
     p_stats.add_argument("-r", "--recursive", action="store_true", help="Include nested")
+    p_stats.add_argument("-f", "--format", choices=["fancy", "plain", "json", "yaml"], default="fancy", dest="format_str", help="Output format")
+    p_stats.add_argument("--json", action="store_true", dest="json_output", help="JSON output (shorthand for --format=json)")
 
     # validate
     p_validate = subparsers.add_parser("validate", help="Validate thread files")
@@ -277,6 +281,7 @@ def main() -> int:
                 include_closed=args.include_closed,
                 search=args.search,
                 status_filter=args.status,
+                format_str=args.format_str,
                 json_output=args.json_output,
             )
 
@@ -419,7 +424,12 @@ def main() -> int:
 
         elif args.command == "stats":
             from .commands.query import cmd_stats
-            cmd_stats(path=args.path, recursive=args.recursive)
+            cmd_stats(
+                path=args.path,
+                recursive=args.recursive,
+                format_str=args.format_str,
+                json_output=args.json_output,
+            )
 
         elif args.command == "validate":
             from .commands.lifecycle import cmd_validate

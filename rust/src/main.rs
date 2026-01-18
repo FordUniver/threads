@@ -7,6 +7,7 @@ use clap_complete::{generate, Shell};
 
 mod cmd;
 mod git;
+mod output;
 mod thread;
 mod workspace;
 

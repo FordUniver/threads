@@ -1,51 +1,84 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
+	"git.zib.de/cspiegel/threads/internal/output"
 	"git.zib.de/cspiegel/threads/internal/thread"
 	"git.zib.de/cspiegel/threads/internal/workspace"
 )
 
 var (
 	statsRecursive bool
+	statsFormat    string
+	statsJSON      bool
 )
 
 var statsCmd = &cobra.Command{
 	Use:   "stats [path]",
 	Short: "Show thread count by status",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runStats,
+	Long: `Show thread count by status at the specified level.
+
+Path resolution:
+  (none)  → PWD (current directory)
+  .       → PWD (explicit)
+  ./X/Y   → PWD-relative
+  /X/Y    → Absolute
+  X/Y     → Git-root-relative`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runStats,
 }
 
 func init() {
-	statsCmd.Flags().BoolVarP(&statsRecursive, "recursive", "r", false, "Include nested categories/projects")
+	statsCmd.Flags().BoolVarP(&statsRecursive, "recursive", "r", false, "Include nested directories")
+	statsCmd.Flags().StringVarP(&statsFormat, "format", "f", "fancy", "Output format: fancy, plain, json, yaml")
+	statsCmd.Flags().BoolVar(&statsJSON, "json", false, "Output as JSON (shorthand for --format=json)")
+}
+
+type statusCount struct {
+	Status string `json:"status" yaml:"status"`
+	Count  int    `json:"count" yaml:"count"`
+}
+
+type sortedCount struct {
+	Key   string
+	Value int
 }
 
 func runStats(cmd *cobra.Command, args []string) error {
-	ws := getWorkspace()
+	gitRoot := getWorkspace()
 
-	// Parse path filter
-	var categoryFilter, projectFilter string
-	if len(args) > 0 {
-		pathFilter := args[0]
-		info, err := os.Stat(fmt.Sprintf("%s/%s", ws, pathFilter))
-		if err == nil && info.IsDir() {
-			parts := strings.SplitN(pathFilter, "/", 2)
-			categoryFilter = parts[0]
-			if len(parts) > 1 {
-				projectFilter = parts[1]
-			}
-		}
+	// Determine output format (handle --json shorthand)
+	var format output.Format
+	if statsJSON {
+		format = output.FormatJSON
+	} else {
+		format, _ = output.ParseFormat(statsFormat)
+		format = format.Resolve()
 	}
 
+	// Parse path filter
+	pathArg := ""
+	if len(args) > 0 {
+		pathArg = args[0]
+	}
+
+	// Resolve the scope
+	scope, err := workspace.InferScope(gitRoot, pathArg)
+	if err != nil {
+		return err
+	}
+	filterPath := scope.Path
+
 	// Find all threads
-	threads, err := workspace.FindAllThreads(ws)
+	threads, err := workspace.FindAllThreads(gitRoot)
 	if err != nil {
 		return err
 	}
@@ -54,28 +87,21 @@ func runStats(cmd *cobra.Command, args []string) error {
 	total := 0
 
 	for _, path := range threads {
-		category, project, _ := workspace.ParseThreadPath(ws, path)
+		relPath := workspace.ParseThreadPath(gitRoot, path)
 
-		// Category filter
-		if categoryFilter != "" && category != categoryFilter {
-			continue
-		}
-
-		// Project filter
-		if projectFilter != "" && project != projectFilter {
-			continue
-		}
-
-		// Non-recursive: only threads at current hierarchy level
+		// Path filter: if not recursive, only show threads at the specified level
 		if !statsRecursive {
-			if projectFilter != "" {
-				// At project level, count all
-			} else if categoryFilter != "" {
-				if project != "-" {
-					continue
+			if relPath != filterPath {
+				continue
+			}
+		} else {
+			// Recursive mode: show threads at or under the filter path
+			if filterPath != "." {
+				filterPrefix := filterPath
+				if !strings.HasSuffix(filterPrefix, "/") {
+					filterPrefix = filterPath + "/"
 				}
-			} else {
-				if category != "-" {
+				if relPath != filterPath && !strings.HasPrefix(relPath, filterPrefix) {
 					continue
 				}
 			}
@@ -90,57 +116,157 @@ func runStats(cmd *cobra.Command, args []string) error {
 		if status == "" {
 			status = "(none)"
 		}
+
 		counts[status]++
 		total++
 	}
 
-	// Build scope description
-	var levelDesc, pathSuffix string
-	if projectFilter != "" && categoryFilter != "" {
-		levelDesc = "project-level"
-		pathSuffix = fmt.Sprintf(" (%s/%s)", categoryFilter, projectFilter)
-	} else if categoryFilter != "" {
-		levelDesc = "category-level"
-		pathSuffix = fmt.Sprintf(" (%s)", categoryFilter)
-	} else {
-		levelDesc = "workspace-level"
+	// Sort by count descending
+	var sorted []sortedCount
+	for k, v := range counts {
+		sorted = append(sorted, sortedCount{k, v})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Value > sorted[j].Value
+	})
+
+	switch format {
+	case output.FormatFancy:
+		return statsOutputFancy(sorted, total, filterPath)
+	case output.FormatPlain:
+		return statsOutputPlain(sorted, total, gitRoot, filterPath)
+	case output.FormatJSON:
+		return statsOutputJSON(sorted, total, gitRoot, filterPath)
+	case output.FormatYAML:
+		return statsOutputYAML(sorted, total, gitRoot, filterPath)
+	default:
+		return statsOutputFancy(sorted, total, filterPath)
+	}
+}
+
+func statsOutputFancy(sorted []sortedCount, total int, filterPath string) error {
+	pathDesc := filterPath
+	if filterPath == "." {
+		pathDesc = "repo root"
 	}
 
 	recursiveSuffix := ""
 	if statsRecursive {
-		recursiveSuffix = " (including nested)"
+		recursiveSuffix = " (recursive)"
 	}
 
-	fmt.Printf("Stats for %s threads%s%s\n\n", levelDesc, pathSuffix, recursiveSuffix)
+	fmt.Printf("Stats for threads in %s%s\n", pathDesc, recursiveSuffix)
+	fmt.Println()
 
 	if total == 0 {
 		fmt.Println("No threads found.")
 		if !statsRecursive {
-			fmt.Println("Hint: use -r to include nested categories/projects")
+			fmt.Println("Hint: use -r to include nested directories")
 		}
 		return nil
 	}
 
-	// Sort by count descending
-	type statusCount struct {
-		status string
-		count  int
-	}
-	var sorted []statusCount
-	for s, c := range counts {
-		sorted = append(sorted, statusCount{s, c})
-	}
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].count > sorted[j].count
-	})
-
 	fmt.Println("| Status     | Count |")
 	fmt.Println("|------------|-------|")
-	for _, sc := range sorted {
-		fmt.Printf("| %-10s | %5d |\n", sc.status, sc.count)
+	for _, kv := range sorted {
+		fmt.Printf("| %-10s | %5d |\n", kv.Key, kv.Value)
 	}
 	fmt.Println("|------------|-------|")
 	fmt.Printf("| %-10s | %5d |\n", "Total", total)
 
 	return nil
+}
+
+func statsOutputPlain(sorted []sortedCount, total int, gitRoot, filterPath string) error {
+	pwd, _ := os.Getwd()
+	fmt.Printf("PWD: %s\n", pwd)
+	fmt.Printf("Git root: %s\n", gitRoot)
+	fmt.Println()
+
+	pathDesc := filterPath
+	if filterPath == "." {
+		pathDesc = "repo root"
+	}
+
+	recursiveSuffix := ""
+	if statsRecursive {
+		recursiveSuffix = " (recursive)"
+	}
+
+	fmt.Printf("Stats for threads in %s%s\n", pathDesc, recursiveSuffix)
+	fmt.Println()
+
+	if total == 0 {
+		fmt.Println("No threads found.")
+		if !statsRecursive {
+			fmt.Println("Hint: use -r to include nested directories")
+		}
+		return nil
+	}
+
+	fmt.Println("| Status     | Count |")
+	fmt.Println("|------------|-------|")
+	for _, kv := range sorted {
+		fmt.Printf("| %-10s | %5d |\n", kv.Key, kv.Value)
+	}
+	fmt.Println("|------------|-------|")
+	fmt.Printf("| %-10s | %5d |\n", "Total", total)
+
+	return nil
+}
+
+func statsOutputJSON(sorted []sortedCount, total int, gitRoot, filterPath string) error {
+	type jsonOutput struct {
+		GitRoot string        `json:"git_root"`
+		Path    string        `json:"path"`
+		Counts  []statusCount `json:"counts"`
+		Total   int           `json:"total"`
+	}
+
+	var counts []statusCount
+	for _, kv := range sorted {
+		counts = append(counts, statusCount{
+			Status: kv.Key,
+			Count:  kv.Value,
+		})
+	}
+
+	output := jsonOutput{
+		GitRoot: gitRoot,
+		Path:    filterPath,
+		Counts:  counts,
+		Total:   total,
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(output)
+}
+
+func statsOutputYAML(sorted []sortedCount, total int, gitRoot, filterPath string) error {
+	type yamlOutput struct {
+		GitRoot string        `yaml:"git_root"`
+		Path    string        `yaml:"path"`
+		Counts  []statusCount `yaml:"counts"`
+		Total   int           `yaml:"total"`
+	}
+
+	var counts []statusCount
+	for _, kv := range sorted {
+		counts = append(counts, statusCount{
+			Status: kv.Key,
+			Count:  kv.Value,
+		})
+	}
+
+	output := yamlOutput{
+		GitRoot: gitRoot,
+		Path:    filterPath,
+		Counts:  counts,
+		Total:   total,
+	}
+
+	enc := yaml.NewEncoder(os.Stdout)
+	enc.SetIndent(2)
+	return enc.Encode(output)
 }

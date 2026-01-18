@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
+	"git.zib.de/cspiegel/threads/internal/output"
 	"git.zib.de/cspiegel/threads/internal/thread"
 	"git.zib.de/cspiegel/threads/internal/workspace"
 )
@@ -17,8 +20,7 @@ var (
 	listIncludeClosed bool
 	listSearch        string
 	listStatus        string
-	listCategory      string
-	listProject       string
+	listFormat        string
 	listJSON          bool
 )
 
@@ -28,62 +30,76 @@ var listCmd = &cobra.Command{
 	Short:   "List threads",
 	Long: `List threads at the specified level.
 
+Path resolution:
+  (none)  → PWD (current directory)
+  .       → PWD (explicit)
+  ./X/Y   → PWD-relative
+  /X/Y    → Absolute
+  X/Y     → Git-root-relative
+
 By default shows active threads at the current level only.
-Use -r to include nested categories/projects.
+Use -r to include nested directories.
 Use --include-closed to include resolved/terminal threads.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runList,
 }
 
 func init() {
-	listCmd.Flags().BoolVarP(&listRecursive, "recursive", "r", false, "Include nested categories/projects")
+	listCmd.Flags().BoolVarP(&listRecursive, "recursive", "r", false, "Include nested directories")
 	listCmd.Flags().BoolVar(&listIncludeClosed, "include-closed", false, "Include resolved/terminal threads")
 	listCmd.Flags().StringVarP(&listSearch, "search", "s", "", "Search name/title/desc (substring)")
-	listCmd.Flags().StringVar(&listStatus, "status", "", "Filter by status")
-	listCmd.Flags().StringVarP(&listCategory, "category", "c", "", "Filter by category")
-	listCmd.Flags().StringVarP(&listProject, "project", "p", "", "Filter by project")
-	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
+	listCmd.Flags().StringVar(&listStatus, "status", "", "Filter by status (comma-separated)")
+	listCmd.Flags().StringVarP(&listFormat, "format", "f", "fancy", "Output format: fancy, plain, json, yaml")
+	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON (shorthand for --format=json)")
 }
 
 type threadInfo struct {
-	ID       string `json:"id"`
-	Status   string `json:"status"`
-	Category string `json:"category"`
-	Project  string `json:"project"`
-	Name     string `json:"name"`
-	Title    string `json:"title"`
-	Desc     string `json:"desc"`
+	ID           string `json:"id" yaml:"id"`
+	Status       string `json:"status" yaml:"status"`
+	Path         string `json:"path" yaml:"path"`
+	Name         string `json:"name" yaml:"name"`
+	Title        string `json:"title" yaml:"title"`
+	Desc         string `json:"desc" yaml:"desc"`
+	PathAbsolute string `json:"path_absolute,omitempty" yaml:"path_absolute,omitempty"`
+	IsPwd        bool   `json:"is_pwd,omitempty" yaml:"is_pwd,omitempty"`
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	ws := getWorkspace()
+	gitRoot := getWorkspace()
+
+	// Determine output format (handle --json shorthand)
+	var format output.Format
+	if listJSON {
+		format = output.FormatJSON
+	} else {
+		format, _ = output.ParseFormat(listFormat)
+		format = format.Resolve()
+	}
 
 	// Parse path filter if provided
-	pathFilter := ""
+	pathArg := ""
 	if len(args) > 0 {
-		pathFilter = args[0]
+		pathArg = args[0]
 	}
 
-	// If path filter provided, extract category/project from it
-	if pathFilter != "" {
-		info, err := os.Stat(fmt.Sprintf("%s/%s", ws, pathFilter))
-		if err == nil && info.IsDir() {
-			parts := strings.SplitN(pathFilter, "/", 2)
-			listCategory = parts[0]
-			if len(parts) > 1 {
-				listProject = parts[1]
-			}
-		} else {
-			// Treat as search filter
-			listSearch = pathFilter
-		}
-	}
-
-	// Find all threads
-	threads, err := workspace.FindAllThreads(ws)
+	// Resolve the scope
+	scope, err := workspace.InferScope(gitRoot, pathArg)
 	if err != nil {
 		return err
 	}
+	filterPath := scope.Path
+
+	// Find all threads
+	threads, err := workspace.FindAllThreads(gitRoot)
+	if err != nil {
+		return err
+	}
+
+	// Get PWD relative path for comparison
+	pwdRel, _ := workspace.PWDRelativeToGitRoot(gitRoot)
+
+	// Determine if we need absolute paths (for json/yaml)
+	includeAbsolute := format == output.FormatJSON || format == output.FormatYAML
 
 	var results []threadInfo
 
@@ -94,32 +110,24 @@ func runList(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		category, project, name := workspace.ParseThreadPath(ws, path)
+		relPath := workspace.ParseThreadPath(gitRoot, path)
 		status := t.Status()
 		baseStatus := thread.BaseStatus(status)
+		name := thread.ExtractNameFromPath(path)
 
-		// Category filter
-		if listCategory != "" && category != listCategory {
-			continue
-		}
-
-		// Project filter
-		if listProject != "" && project != listProject {
-			continue
-		}
-
-		// Non-recursive: only threads at current hierarchy level
+		// Path filter: if not recursive, only show threads at the specified level
 		if !listRecursive {
-			if listProject != "" {
-				// At project level, show all threads here
-			} else if listCategory != "" {
-				// At category level: only show category-level threads
-				if project != "-" {
-					continue
+			if relPath != filterPath {
+				continue
+			}
+		} else {
+			// Recursive mode: show threads at or under the filter path
+			if filterPath != "." {
+				filterPrefix := filterPath
+				if !strings.HasSuffix(filterPrefix, "/") {
+					filterPrefix = filterPath + "/"
 				}
-			} else {
-				// At workspace level: only show workspace-level threads
-				if category != "-" {
+				if relPath != filterPath && !strings.HasPrefix(relPath, filterPrefix) {
 					continue
 				}
 			}
@@ -128,16 +136,13 @@ func runList(cmd *cobra.Command, args []string) error {
 		// Status filter
 		statusFlagSet := cmd.Flags().Changed("status")
 		if statusFlagSet {
-			// Status filter was explicitly provided
 			if listStatus == "" {
-				// Empty status value matches nothing
 				continue
 			}
 			if !strings.Contains(","+listStatus+",", ","+baseStatus+",") {
 				continue
 			}
 		} else {
-			// No status filter: apply default terminal filtering
 			if !listIncludeClosed && thread.IsTerminal(status) {
 				continue
 			}
@@ -163,43 +168,105 @@ func runList(cmd *cobra.Command, args []string) error {
 			title = strings.ReplaceAll(name, "-", " ")
 		}
 
-		results = append(results, threadInfo{
-			ID:       t.ID(),
-			Status:   baseStatus,
-			Category: category,
-			Project:  project,
-			Name:     name,
-			Title:    title,
-			Desc:     t.Frontmatter.Desc,
-		})
+		isPwd := relPath == pwdRel
+
+		info := threadInfo{
+			ID:     t.ID(),
+			Status: baseStatus,
+			Path:   relPath,
+			Name:   name,
+			Title:  title,
+			Desc:   t.Frontmatter.Desc,
+			IsPwd:  isPwd,
+		}
+
+		if includeAbsolute {
+			info.PathAbsolute = path
+		}
+
+		results = append(results, info)
 	}
 
-	if listJSON {
-		return outputJSON(results)
+	switch format {
+	case output.FormatFancy:
+		return outputFancy(results, gitRoot, filterPath, pwdRel)
+	case output.FormatPlain:
+		return outputPlain(results, gitRoot, filterPath, pwdRel)
+	case output.FormatJSON:
+		return outputJSON(results, gitRoot, pwdRel)
+	case output.FormatYAML:
+		return outputYAML(results, gitRoot, pwdRel)
+	default:
+		return outputFancy(results, gitRoot, filterPath, pwdRel)
+	}
+}
+
+func outputFancy(results []threadInfo, gitRoot, filterPath, pwdRel string) error {
+	// Fancy header: repo-name (rel/path/to/pwd)
+	repoName := filepath.Base(gitRoot)
+
+	pathDesc := ""
+	if filterPath != "." {
+		pathDesc = fmt.Sprintf(" (%s)", filterPath)
 	}
 
-	return outputTable(results, ws)
+	pwdMarker := ""
+	if filterPath == pwdRel {
+		pwdMarker = " ← PWD"
+	}
+
+	fmt.Printf("%s%s%s\n", repoName, pathDesc, pwdMarker)
+	fmt.Println()
+
+	statusDesc := "active "
+	if listStatus != "" {
+		statusDesc = listStatus + " "
+	} else if listIncludeClosed {
+		statusDesc = ""
+	}
+
+	recursiveSuffix := ""
+	if listRecursive {
+		recursiveSuffix = " (recursive)"
+	}
+
+	fmt.Printf("Showing %d %sthreads%s\n", len(results), statusDesc, recursiveSuffix)
+	fmt.Println()
+
+	if len(results) == 0 {
+		if !listRecursive {
+			fmt.Println("Hint: use -r to include nested directories")
+		}
+		return nil
+	}
+
+	// Print table header
+	fmt.Printf("%-6s %-10s %-24s %s\n", "ID", "STATUS", "PATH", "NAME")
+	fmt.Printf("%-6s %-10s %-24s %s\n", "--", "------", "----", "----")
+
+	for _, t := range results {
+		pathDisplay := truncate(t.Path, 22)
+		marker := ""
+		if t.IsPwd {
+			marker = " ←"
+		}
+		fmt.Printf("%-6s %-10s %-24s %s%s\n", t.ID, t.Status, pathDisplay, t.Title, marker)
+	}
+
+	return nil
 }
 
-func outputJSON(results []threadInfo) error {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	return enc.Encode(results)
-}
+func outputPlain(results []threadInfo, gitRoot, filterPath, pwdRel string) error {
+	// Plain header: explicit context
+	pwd, _ := os.Getwd()
+	fmt.Printf("PWD: %s\n", pwd)
+	fmt.Printf("Git root: %s\n", gitRoot)
+	fmt.Printf("PWD (git-relative): %s\n", pwdRel)
+	fmt.Println()
 
-func outputTable(results []threadInfo, ws string) error {
-	// Build header description
-	var levelDesc string
-	var pathSuffix string
-
-	if listProject != "" && listCategory != "" {
-		levelDesc = "project-level"
-		pathSuffix = fmt.Sprintf(" (%s/%s)", listCategory, listProject)
-	} else if listCategory != "" {
-		levelDesc = "category-level"
-		pathSuffix = fmt.Sprintf(" (%s)", listCategory)
-	} else {
-		levelDesc = "workspace-level"
+	pathDesc := filterPath
+	if filterPath == "." {
+		pathDesc = "repo root"
 	}
 
 	statusDesc := "active"
@@ -211,34 +278,86 @@ func outputTable(results []threadInfo, ws string) error {
 
 	recursiveSuffix := ""
 	if listRecursive {
-		recursiveSuffix = " (including nested)"
+		recursiveSuffix = " (recursive)"
+	}
+
+	pwdSuffix := ""
+	if filterPath == pwdRel {
+		pwdSuffix = " ← PWD"
 	}
 
 	if statusDesc != "" {
-		fmt.Printf("Showing %d %s %s threads%s%s\n", len(results), statusDesc, levelDesc, pathSuffix, recursiveSuffix)
+		fmt.Printf("Showing %d %s threads in %s%s%s\n", len(results), statusDesc, pathDesc, recursiveSuffix, pwdSuffix)
 	} else {
-		fmt.Printf("Showing %d %s threads%s (all statuses)%s\n", len(results), levelDesc, pathSuffix, recursiveSuffix)
+		fmt.Printf("Showing %d threads in %s (all statuses)%s%s\n", len(results), pathDesc, recursiveSuffix, pwdSuffix)
 	}
 	fmt.Println()
 
 	if len(results) == 0 {
 		if !listRecursive {
-			fmt.Println("Hint: use -r to include nested categories/projects")
+			fmt.Println("Hint: use -r to include nested directories")
 		}
 		return nil
 	}
 
 	// Print table header
-	fmt.Printf("%-6s %-10s %-18s %-22s %s\n", "ID", "STATUS", "CATEGORY", "PROJECT", "NAME")
-	fmt.Printf("%-6s %-10s %-18s %-22s %s\n", "--", "------", "--------", "-------", "----")
+	fmt.Printf("%-6s %-10s %-24s %s\n", "ID", "STATUS", "PATH", "NAME")
+	fmt.Printf("%-6s %-10s %-24s %s\n", "--", "------", "----", "----")
 
 	for _, t := range results {
-		category := truncate(t.Category, 16)
-		project := truncate(t.Project, 20)
-		fmt.Printf("%-6s %-10s %-18s %-22s %s\n", t.ID, t.Status, category, project, t.Title)
+		pathDisplay := truncate(t.Path, 22)
+		pwdMarker := ""
+		if t.IsPwd {
+			pwdMarker = " ← PWD"
+		}
+		fmt.Printf("%-6s %-10s %-24s %s%s\n", t.ID, t.Status, pathDisplay, t.Title, pwdMarker)
 	}
 
 	return nil
+}
+
+func outputJSON(results []threadInfo, gitRoot, pwdRel string) error {
+	pwd, _ := os.Getwd()
+
+	type jsonOutput struct {
+		PWD         string       `json:"pwd"`
+		GitRoot     string       `json:"git_root"`
+		PwdRelative string       `json:"pwd_relative"`
+		Threads     []threadInfo `json:"threads"`
+	}
+
+	output := jsonOutput{
+		PWD:         pwd,
+		GitRoot:     gitRoot,
+		PwdRelative: pwdRel,
+		Threads:     results,
+	}
+
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(output)
+}
+
+func outputYAML(results []threadInfo, gitRoot, pwdRel string) error {
+	pwd, _ := os.Getwd()
+
+	type yamlOutput struct {
+		PWD         string       `yaml:"pwd"`
+		GitRoot     string       `yaml:"git_root"`
+		PwdRelative string       `yaml:"pwd_relative"`
+		Threads     []threadInfo `yaml:"threads"`
+	}
+
+	output := yamlOutput{
+		PWD:         pwd,
+		GitRoot:     gitRoot,
+		PwdRelative: pwdRel,
+		Threads:     results,
+	}
+
+	enc := yaml.NewEncoder(os.Stdout)
+	enc.SetIndent(2)
+	return enc.Encode(output)
 }
 
 func truncate(s string, max int) string {
@@ -247,4 +366,3 @@ func truncate(s string, max int) string {
 	}
 	return s[:max-1] + "…"
 }
-
