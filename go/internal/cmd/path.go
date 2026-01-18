@@ -39,9 +39,10 @@ func runPath(cmd *cobra.Command, args []string) error {
 	// Determine output format
 	var fmt_ output.Format
 	if pathJSON {
-		fmt_ = output.JSON
+		fmt_ = output.FormatJSON
 	} else {
-		fmt_ = output.ParseFormat(pathFormat).Resolve()
+		parsed, _ := output.ParseFormat(pathFormat)
+		fmt_ = parsed.Resolve()
 	}
 
 	ws := getWorkspace()
@@ -60,9 +61,9 @@ func runPath(cmd *cobra.Command, args []string) error {
 	relPath := workspace.PathRelativeToGitRoot(ws, file)
 
 	switch fmt_ {
-	case output.Fancy, output.Plain:
+	case output.FormatFancy, output.FormatPlain:
 		fmt.Println(absPath)
-	case output.JSON:
+	case output.FormatJSON:
 		out := pathOutput{
 			Path:         relPath,
 			PathAbsolute: absPath,
@@ -72,7 +73,7 @@ func runPath(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("JSON serialization failed: %v", err)
 		}
 		fmt.Println(string(data))
-	case output.YAML:
+	case output.FormatYAML:
 		out := pathOutput{
 			Path:         relPath,
 			PathAbsolute: absPath,

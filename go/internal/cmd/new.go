@@ -63,9 +63,10 @@ func runNew(cmd *cobra.Command, args []string) error {
 	// Determine output format
 	var fmt_ output.Format
 	if newJSON {
-		fmt_ = output.JSON
+		fmt_ = output.FormatJSON
 	} else {
-		fmt_ = output.ParseFormat(newFormat).Resolve()
+		parsed, _ := output.ParseFormat(newFormat)
+		fmt_ = parsed.Resolve()
 	}
 
 	gitRoot := getWorkspace()
@@ -170,14 +171,14 @@ func runNew(cmd *cobra.Command, args []string) error {
 	relPath := workspace.PathRelativeToGitRoot(gitRoot, threadPath)
 
 	switch fmt_ {
-	case output.Fancy, output.Plain:
+	case output.FormatFancy, output.FormatPlain:
 		fmt.Printf("Created thread in %s: %s\n", scope.LevelDesc, id)
 		fmt.Printf("  → %s\n", relPath)
 
 		if newBody == "" {
 			fmt.Fprintln(os.Stderr, "Hint: Add body with: echo \"content\" | threads body", id, "--set")
 		}
-	case output.JSON:
+	case output.FormatJSON:
 		out := newOutput{
 			ID:           id,
 			Path:         relPath,
@@ -188,7 +189,7 @@ func runNew(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("JSON serialization failed: %v", err)
 		}
 		fmt.Println(string(data))
-	case output.YAML:
+	case output.FormatYAML:
 		out := newOutput{
 			ID:           id,
 			Path:         relPath,
@@ -210,7 +211,7 @@ func runNew(cmd *cobra.Command, args []string) error {
 		if err := git.AutoCommit(gitRoot, threadPath, msg); err != nil {
 			return err
 		}
-	} else if fmt_ == output.Fancy || fmt_ == output.Plain {
+	} else if fmt_ == output.FormatFancy || fmt_ == output.FormatPlain {
 		fmt.Printf("Note: Thread %s has uncommitted changes. Use 'threads commit %s' when ready.\n", id, id)
 	}
 

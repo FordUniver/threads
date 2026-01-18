@@ -41,9 +41,10 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	// Determine output format
 	var fmt_ output.Format
 	if validateJSON {
-		fmt_ = output.JSON
+		fmt_ = output.FormatJSON
 	} else {
-		fmt_ = output.ParseFormat(validateFormat).Resolve()
+		parsed, _ := output.ParseFormat(validateFormat)
+		fmt_ = parsed.Resolve()
 	}
 
 	ws := getWorkspace()
@@ -101,7 +102,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	// Output based on format
 	switch fmt_ {
-	case output.Fancy, output.Plain:
+	case output.FormatFancy, output.FormatPlain:
 		for _, r := range results {
 			if r.Valid {
 				fmt.Printf("OK: %s\n", r.Path)
@@ -109,7 +110,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 				fmt.Printf("WARN: %s: %s\n", r.Path, strings.Join(r.Issues, ", "))
 			}
 		}
-	case output.JSON:
+	case output.FormatJSON:
 		data := map[string]interface{}{
 			"total":   len(results),
 			"errors":  errorCount,
@@ -120,7 +121,7 @@ func runValidate(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("JSON serialization failed: %v", err)
 		}
 		fmt.Println(string(out))
-	case output.YAML:
+	case output.FormatYAML:
 		data := map[string]interface{}{
 			"total":   len(results),
 			"errors":  errorCount,
