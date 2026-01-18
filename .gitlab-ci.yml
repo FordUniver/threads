@@ -24,7 +24,7 @@ test:go:
   extends: .test_template
   image: golang:1.24
   before_script:
-    - apt-get update && apt-get install -y gawk make
+    - apt-get update && apt-get install -y gawk make jq
   script:
     - make test-go
 
@@ -33,7 +33,7 @@ test:python:
   extends: .test_template
   image: python:3.12
   before_script:
-    - apt-get update && apt-get install -y gawk make
+    - apt-get update && apt-get install -y gawk make jq
     - pip install uv
   script:
     - make test-python
@@ -43,7 +43,7 @@ test:perl:
   extends: .test_template
   image: perl:5.38
   before_script:
-    - apt-get update && apt-get install -y gawk make
+    - apt-get update && apt-get install -y gawk make jq
     - cpanm --notest YAML::Tiny
   script:
     - make test-perl
@@ -53,7 +53,7 @@ test:rust:
   extends: .test_template
   image: rust:1.82
   before_script:
-    - apt-get update && apt-get install -y gawk make
+    - apt-get update && apt-get install -y gawk make jq
   script:
     - make test-rust
 
@@ -62,7 +62,7 @@ test:swift:
   extends: .test_template
   image: swift:5.9
   before_script:
-    - apt-get update && apt-get install -y gawk make
+    - apt-get update && apt-get install -y gawk make jq
   script:
     - make test-swift
 
@@ -71,7 +71,7 @@ test:ruby:
   extends: .test_template
   image: ruby:3.3
   before_script:
-    - apt-get update && apt-get install -y gawk make
+    - apt-get update && apt-get install -y gawk make jq
   script:
     - make test-ruby
 
@@ -80,7 +80,7 @@ test:bun:
   extends: .test_template
   image: oven/bun:1.0
   before_script:
-    - apt-get update && apt-get install -y gawk make git
+    - apt-get update && apt-get install -y gawk make jq git
   script:
     - make test-bun
 
@@ -90,7 +90,7 @@ benchmark:go:
   image: golang:1.24
   needs: ["test:go"]
   before_script:
-    - apt-get update && apt-get install -y gawk make
+    - apt-get update && apt-get install -y gawk make jq
   script:
     - cd go && make build
     - ./test/benchmark.sh --quick --impl=go --output=markdown
