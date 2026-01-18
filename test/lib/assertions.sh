@@ -277,3 +277,114 @@ reset_counters() {
     _ORIGINAL_PWD=""
     unset WORKSPACE 2>/dev/null || true
 }
+
+# ====================================================================================
+# JSON/YAML Validation Assertions
+# ====================================================================================
+
+# Assert output is valid JSON
+# Usage: assert_json_valid "$output" ["description"]
+assert_json_valid() {
+    local output="$1"
+    local msg="${2:-JSON should be valid}"
+
+    if echo "$output" | jq . >/dev/null 2>&1; then
+        return 0
+    else
+        _fail "$msg: invalid JSON" "" "${output:0:200}"
+        return 1
+    fi
+}
+
+# Assert JSON field equals expected value
+# Usage: assert_json_field "$output" ".field" "expected"
+assert_json_field() {
+    local output="$1"
+    local field="$2"
+    local expected="$3"
+    local msg="${4:-JSON field $field}"
+    local actual
+
+    actual=$(echo "$output" | jq -r "$field" 2>/dev/null)
+    if [[ "$actual" == "$expected" ]]; then
+        return 0
+    else
+        _fail "$msg" "$expected" "$actual"
+        return 1
+    fi
+}
+
+# Assert JSON has a field (not null)
+# Usage: assert_json_has_field "$output" ".field"
+assert_json_has_field() {
+    local output="$1"
+    local field="$2"
+    local msg="${3:-JSON should have field $field}"
+
+    if echo "$output" | jq -e "$field" >/dev/null 2>&1; then
+        return 0
+    else
+        _fail "$msg"
+        return 1
+    fi
+}
+
+# Assert JSON field is not empty string
+# Usage: assert_json_field_not_empty "$output" ".field"
+assert_json_field_not_empty() {
+    local output="$1"
+    local field="$2"
+    local msg="${3:-JSON field $field should not be empty}"
+    local value
+
+    value=$(echo "$output" | jq -r "$field" 2>/dev/null)
+    if [[ -n "$value" && "$value" != "null" ]]; then
+        return 0
+    else
+        _fail "$msg" "non-empty" "$value"
+        return 1
+    fi
+}
+
+# Assert output is valid YAML (requires yq)
+# Usage: assert_yaml_valid "$output" ["description"]
+assert_yaml_valid() {
+    local output="$1"
+    local msg="${2:-YAML should be valid}"
+
+    # Check if yq is available
+    if ! command -v yq >/dev/null 2>&1; then
+        # Skip validation if yq not available
+        return 0
+    fi
+
+    if echo "$output" | yq . >/dev/null 2>&1; then
+        return 0
+    else
+        _fail "$msg: invalid YAML" "" "${output:0:200}"
+        return 1
+    fi
+}
+
+# Assert YAML field equals expected value (requires yq)
+# Usage: assert_yaml_field "$output" ".field" "expected"
+assert_yaml_field() {
+    local output="$1"
+    local field="$2"
+    local expected="$3"
+    local msg="${4:-YAML field $field}"
+    local actual
+
+    # Check if yq is available
+    if ! command -v yq >/dev/null 2>&1; then
+        return 0
+    fi
+
+    actual=$(echo "$output" | yq -r "$field" 2>/dev/null)
+    if [[ "$actual" == "$expected" ]]; then
+        return 0
+    else
+        _fail "$msg" "$expected" "$actual"
+        return 1
+    fi
+}

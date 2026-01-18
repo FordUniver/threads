@@ -265,3 +265,135 @@ EOF
 
     echo "$threads_dir/$filename"
 }
+
+# ====================================================================================
+# Nested Git Repository Helpers (for boundary testing)
+# ====================================================================================
+
+# Create a nested git repository inside the test workspace
+# Usage: create_nested_git_repo "$TEST_WS/subdir"
+create_nested_git_repo() {
+    local path="$1"
+    mkdir -p "$path"
+    (
+        cd "$path" || exit 1
+        git init -q
+        git config user.email "nested@test.test"
+        git config user.name "Nested Test"
+        git commit -q -m "Initial nested repo" --allow-empty
+    )
+}
+
+# Create a nested git repo with .threads directory
+# Usage: create_nested_repo_with_threads "$TEST_WS/nested"
+create_nested_repo_with_threads() {
+    local path="$1"
+    create_nested_git_repo "$path"
+    mkdir -p "$path/.threads"
+}
+
+# Create thread at specific depth level
+# Usage: create_thread_at_depth 2 "abc123" "Thread Name" "active"
+# Creates at TEST_WS/level0/level1/.threads/
+create_thread_at_depth() {
+    local depth="$1"
+    local id="$2"
+    local name="$3"
+    local status="${4:-idea}"
+    local path="$TEST_WS"
+
+    for ((i=0; i<depth; i++)); do
+        path="$path/level$i"
+    done
+
+    mkdir -p "$path/.threads"
+    create_thread "$id" "$name" "$status" "" "$path"
+}
+
+# Create deeply nested directory structure with threads at each level
+# Usage: setup_deep_nested_workspace 3
+# Creates threads at TEST_WS, TEST_WS/level0, TEST_WS/level0/level1, TEST_WS/level0/level1/level2
+setup_deep_nested_workspace() {
+    local depth="${1:-3}"
+    setup_test_workspace
+
+    local path="$TEST_WS"
+    for ((i=0; i<depth; i++)); do
+        path="$path/level$i"
+        mkdir -p "$path/.threads"
+    done
+}
+
+# ====================================================================================
+# JSON/YAML Output Helpers
+# ====================================================================================
+
+# Extract field from JSON output using jq
+# Usage: value=$(get_json_field "$output" ".id")
+get_json_field() {
+    local output="$1"
+    local field="$2"
+    echo "$output" | jq -r "$field" 2>/dev/null
+}
+
+# Get array length from JSON output
+# Usage: count=$(get_json_array_length "$output" ".threads")
+get_json_array_length() {
+    local output="$1"
+    local field="${2:-.}"
+    echo "$output" | jq -r "$field | length" 2>/dev/null
+}
+
+# Check if JSON output contains a specific value in array
+# Usage: if json_array_contains "$output" ".threads[].id" "abc123"; then ...
+json_array_contains() {
+    local output="$1"
+    local selector="$2"
+    local value="$3"
+
+    local values
+    values=$(echo "$output" | jq -r "$selector" 2>/dev/null)
+    [[ "$values" == *"$value"* ]]
+}
+
+# ====================================================================================
+# Path Resolution Helpers
+# ====================================================================================
+
+# Get the git root of the test workspace
+# Usage: root=$(get_git_root)
+get_git_root() {
+    git -C "$TEST_WS" rev-parse --show-toplevel 2>/dev/null
+}
+
+# Convert absolute path to git-root-relative path
+# Usage: rel_path=$(to_git_relative "$abs_path")
+to_git_relative() {
+    local abs_path="$1"
+    local git_root
+    git_root=$(get_git_root)
+
+    if [[ "$abs_path" == "$git_root"* ]]; then
+        echo "${abs_path#$git_root/}"
+    else
+        echo "$abs_path"
+    fi
+}
+
+# Verify path exists and is inside git root
+# Usage: if path_in_git_root "$path"; then ...
+path_in_git_root() {
+    local path="$1"
+    local git_root
+    git_root=$(get_git_root)
+    local abs_path
+
+    # Resolve to absolute path
+    if [[ "$path" = /* ]]; then
+        abs_path="$path"
+    else
+        abs_path="$TEST_WS/$path"
+    fi
+
+    [[ "$abs_path" == "$git_root"* ]]
+}
