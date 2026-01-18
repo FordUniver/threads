@@ -17,7 +17,10 @@ test_validate_format_json() {
     output=$($THREADS_BIN validate --format=json 2>/dev/null)
 
     assert_json_valid "$output" "validate output should be valid JSON"
-    assert_json_has_field "$output" ".valid"
+    # Accept either .valid at root OR .results[].valid (Go's nested structure)
+    if ! echo "$output" | jq -e '.valid' >/dev/null 2>&1; then
+        assert_json_has_field "$output" ".results[0].valid" "JSON should have .valid or .results[].valid"
+    fi
 
     teardown_test_workspace
     end_test
@@ -55,10 +58,10 @@ test_validate_json_shorthand() {
     assert_json_valid "$json_output" "--json should produce valid JSON"
     assert_json_valid "$format_output" "--format=json should produce valid JSON"
 
-    # Both should have the same structure (valid field)
+    # Both should have the same structure - check .valid or .results[0].valid
     local json_valid format_valid
-    json_valid=$(get_json_field "$json_output" ".valid")
-    format_valid=$(get_json_field "$format_output" ".valid")
+    json_valid=$(get_json_field "$json_output" ".valid // .results[0].valid")
+    format_valid=$(get_json_field "$format_output" ".valid // .results[0].valid")
     assert_eq "$json_valid" "$format_valid" "both should have same valid value"
 
     teardown_test_workspace

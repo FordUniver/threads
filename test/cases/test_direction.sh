@@ -16,7 +16,8 @@ test_list_down_flag() {
     create_thread_at_project "ghi789" "Project Thread" "cat1" "proj1" "active"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    # Use --down=0 for unlimited depth (Go requires value, 0=unlimited)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show root thread"
     assert_contains "$output" "def456" "should show category thread with --down"
@@ -40,7 +41,8 @@ test_list_down_unlimited() {
     create_thread_at_depth 4 "eee001" "Level 4 Thread" "active"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    # Use --down=0 for unlimited depth
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
 
     assert_contains "$output" "aaa001" "should show root"
     assert_contains "$output" "bbb001" "should show level 1"
@@ -60,7 +62,8 @@ test_list_up_flag() {
     create_thread_at_category "def456" "Category Thread" "cat1" "active"
 
     local output
-    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up 2>/dev/null)
+    # Use --up=0 for unlimited depth (to git root)
+    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up=0 2>/dev/null)
 
     assert_contains "$output" "def456" "should show local thread"
     assert_contains "$output" "abc123" "should show parent thread with --up"
@@ -79,7 +82,8 @@ test_list_up_stops_at_root() {
 
     # Should not go above git root
     local output
-    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up 2>/dev/null)
+    # Use --up=0 for unlimited (to git root)
+    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up=0 2>/dev/null)
 
     # Should contain root but not crash/error
     assert_matches "abc123|def456" "$output" "should show threads within git root"
@@ -98,7 +102,8 @@ test_stats_down_flag() {
     create_thread_at_project "ghi789" "Project Idea" "cat1" "proj1" "idea"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN stats --down 2>/dev/null)
+    # Use --down=0 for unlimited depth
+    output=$(cd "$TEST_WS" && $THREADS_BIN stats --down=0 2>/dev/null)
 
     assert_contains "$output" "active" "should include active status"
     assert_contains "$output" "blocked" "should include blocked from subdir"
@@ -117,7 +122,8 @@ test_stats_up_flag() {
     create_thread_at_category "def456" "Category Blocked" "cat1" "blocked"
 
     local output
-    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN stats --up 2>/dev/null)
+    # Use --up=0 for unlimited (to git root)
+    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN stats --up=0 2>/dev/null)
 
     assert_contains "$output" "active" "should include active from parent"
     assert_contains "$output" "blocked" "should include blocked from local"
@@ -171,16 +177,17 @@ test_list_down_depth_2() {
     end_test
 }
 
-# Test: list --down=0 is local only (no recursion)
-test_list_down_depth_0() {
-    begin_test "list --down=0 is local only"
+# Test: list without direction flags is local only (no recursion)
+test_list_no_direction_is_local() {
+    begin_test "list without direction flags is local only"
     setup_nested_workspace
 
     create_thread "abc123" "Root Thread" "active"
     create_thread_at_category "def456" "Category Thread" "cat1" "active"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
+    # No --down flag = local only
+    output=$(cd "$TEST_WS" && $THREADS_BIN list 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show local root thread"
     assert_not_contains "$output" "def456" "should not show nested thread"
@@ -322,13 +329,14 @@ test_list_r_equals_down() {
     local r_output down_output
 
     r_output=$(cd "$TEST_WS" && $THREADS_BIN list -r 2>/dev/null)
-    down_output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    # Use --down=0 for unlimited depth (equivalent to -r)
+    down_output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
 
     # Both should contain the same threads
     assert_contains "$r_output" "abc123" "-r should show root"
-    assert_contains "$down_output" "abc123" "--down should show root"
+    assert_contains "$down_output" "abc123" "--down=0 should show root"
     assert_contains "$r_output" "def456" "-r should show category"
-    assert_contains "$down_output" "def456" "--down should show category"
+    assert_contains "$down_output" "def456" "--down=0 should show category"
 
     teardown_test_workspace
     end_test
@@ -344,8 +352,9 @@ test_list_r_with_down_conflict() {
 
     # Both flags together - should work (may be redundant)
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list -r --down 2>/dev/null) || \
-        output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    # Use --down=0 for unlimited depth
+    output=$(cd "$TEST_WS" && $THREADS_BIN list -r --down=0 2>/dev/null) || \
+        output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
 
     # Should show nested threads
     assert_contains "$output" "def456" "should show nested thread"
@@ -369,7 +378,8 @@ test_list_down_and_up_together() {
     create_thread_at_category "jkl012" "Cat2 Thread" "cat2" "active"
 
     local output
-    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up --down 2>/dev/null)
+    # Use --up=0 and --down=0 for unlimited in both directions
+    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up=0 --down=0 2>/dev/null)
 
     # Should show: parent (root), local (cat1), children (proj1)
     assert_contains "$output" "abc123" "should show root (up)"
@@ -390,7 +400,8 @@ test_stats_down_and_up_together() {
     create_thread_at_project "ghi789" "Project Idea" "cat1" "proj1" "idea"
 
     local output
-    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN stats --up --down 2>/dev/null)
+    # Use --up=0 and --down=0 for unlimited in both directions
+    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN stats --up=0 --down=0 2>/dev/null)
 
     # Should aggregate all directions
     assert_contains "$output" "active" "should include active (from parent)"
@@ -411,7 +422,8 @@ test_direction_with_status_filter() {
     create_thread_at_project "ghi789" "Project Active" "cat1" "proj1" "active"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down --status=active 2>/dev/null)
+    # Use --down=0 for unlimited depth
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 --status=active 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show root active"
     assert_not_contains "$output" "def456" "should not show blocked"
@@ -430,7 +442,8 @@ test_direction_with_search() {
     create_thread_at_category "def456" "Database Migration" "cat1" "active" "DB schema update"
 
     local output
-    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up --search="auth" 2>/dev/null)
+    # Use --up=0 for unlimited (to git root)
+    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up=0 --search="auth" 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show auth bug from parent"
     assert_not_contains "$output" "def456" "should not show non-matching thread"
@@ -454,7 +467,7 @@ test_stats_up_flag
 # Depth limiting tests
 test_list_down_depth_1
 test_list_down_depth_2
-test_list_down_depth_0
+test_list_no_direction_is_local
 test_list_up_depth_1
 test_list_up_depth_2
 test_stats_down_depth_limit

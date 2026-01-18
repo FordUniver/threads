@@ -17,7 +17,7 @@ test_down_stops_at_nested_git() {
     create_thread "def456" "Nested Thread" "active" "" "$TEST_WS/nested-repo"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show root thread"
     assert_not_contains "$output" "def456" "should not show thread in nested git repo"
@@ -35,7 +35,7 @@ test_up_stops_at_git_root() {
     create_thread_at_category "def456" "Category Thread" "cat1" "active"
 
     local output
-    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up 2>/dev/null)
+    output=$(cd "$TEST_WS/cat1" && $THREADS_BIN list --up=0 2>/dev/null)
     local exit_code=$?
 
     # Should succeed and find parent thread but not go above git root
@@ -60,7 +60,7 @@ test_nested_repo_invisible() {
     create_thread "ghi789" "Subdir Thread" "active" "" "$TEST_WS/subdir"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show root thread"
     assert_contains "$output" "ghi789" "should show regular subdir thread"
@@ -81,7 +81,7 @@ test_parent_past_root_invisible() {
     # The test workspace IS the git root, so there's nothing above it
     # Just verify that --up doesn't crash when at root
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --up 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --up=0 2>/dev/null)
     local exit_code=$?
 
     assert_eq "0" "$exit_code" "should succeed at git root"
@@ -105,7 +105,7 @@ test_no_git_bound_down_enters() {
     create_thread "def456" "Nested Thread" "active" "" "$TEST_WS/nested-repo"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down --no-git-bound-down 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 --no-git-bound-down 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show root thread"
     assert_contains "$output" "def456" "should show nested repo thread with --no-git-bound-down"
@@ -129,7 +129,7 @@ test_no_git_bound_up_crosses() {
     create_thread "ghi789" "Deep Nested Thread" "active" "" "$TEST_WS/nested-repo/subdir"
 
     local output
-    output=$(cd "$TEST_WS/nested-repo/subdir" && $THREADS_BIN list --up --no-git-bound-up 2>/dev/null)
+    output=$(cd "$TEST_WS/nested-repo/subdir" && $THREADS_BIN list --up=0 --no-git-bound-up 2>/dev/null)
 
     # Should be able to see threads above the nested repo's root
     assert_contains "$output" "ghi789" "should show local thread"
@@ -151,8 +151,8 @@ test_no_git_bound_both() {
     create_thread "def456" "Nested Thread" "active" "" "$TEST_WS/nested-repo"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down --no-git-bound 2>/dev/null) || \
-        output=$(cd "$TEST_WS" && $THREADS_BIN list --down --no-git-bound-down 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 --no-git-bound 2>/dev/null) || \
+        output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 --no-git-bound-down 2>/dev/null)
 
     # Should traverse into nested repos
     assert_contains "$output" "abc123" "should show root"
@@ -173,12 +173,12 @@ test_stats_respects_boundaries() {
 
     # Default: should not see blocked from nested repo
     local output_default
-    output_default=$(cd "$TEST_WS" && $THREADS_BIN stats --down 2>/dev/null)
+    output_default=$(cd "$TEST_WS" && $THREADS_BIN stats --down=0 2>/dev/null)
     assert_contains "$output_default" "active" "should show active"
 
     # With boundary override: should see blocked
     local output_override
-    output_override=$(cd "$TEST_WS" && $THREADS_BIN stats --down --no-git-bound-down 2>/dev/null) || \
+    output_override=$(cd "$TEST_WS" && $THREADS_BIN stats --down=0 --no-git-bound-down 2>/dev/null) || \
         output_override=$(cd "$TEST_WS" && $THREADS_BIN stats -r 2>/dev/null)
 
     # At minimum, command should not crash
@@ -255,14 +255,14 @@ test_deeply_nested_repos() {
 
     # Default: should only see root
     local output_default
-    output_default=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    output_default=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
     assert_contains "$output_default" "abc123" "should show root"
     assert_not_contains "$output_default" "def456" "should not show outer"
     assert_not_contains "$output_default" "ghi789" "should not show inner"
 
     # With override: should see all
     local output_override
-    output_override=$(cd "$TEST_WS" && $THREADS_BIN list --down --no-git-bound-down 2>/dev/null)
+    output_override=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 --no-git-bound-down 2>/dev/null)
     assert_contains "$output_override" "abc123" "should show root"
     assert_contains "$output_override" "def456" "should show outer with override"
     assert_contains "$output_override" "ghi789" "should show inner with override"
@@ -283,7 +283,7 @@ test_nested_repo_no_threads_dir() {
     create_thread "abc123" "Root Thread" "active"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down --no-git-bound-down 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 --no-git-bound-down 2>/dev/null)
 
     # Should not crash, should still show root thread
     assert_contains "$output" "abc123" "should show root"
@@ -305,7 +305,7 @@ test_submodule_handling() {
 
     # Submodules should be treated like nested repos
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show root"
     assert_not_contains "$output" "def456" "should not traverse into submodule by default"
@@ -332,7 +332,7 @@ test_worktree_handling() {
     create_thread "def456" "Worktree Thread" "active" "" "$TEST_WS/worktree-like"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
 
     # Should show root, behavior with worktree-like dir is implementation-specific
     assert_contains "$output" "abc123" "should show root"
