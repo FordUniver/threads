@@ -15,14 +15,14 @@ struct ListCmd: ParsableCommand {
     static var configuration = CommandConfiguration(
         commandName: "list",
         abstract: "List threads",
-        aliases: ["ls"],
         discussion: """
             List threads at the specified level.
 
             By default shows active threads at the current level only.
             Use -r to include nested categories/projects.
             Use --include-closed to include resolved/terminal threads.
-            """
+            """,
+        aliases: ["ls"]
     )
 
     @Flag(name: .shortAndLong, help: "Include nested categories/projects")
