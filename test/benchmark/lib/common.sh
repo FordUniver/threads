@@ -11,10 +11,6 @@ RESULTS_DIR="$BENCH_DIR/../results"
 declare -A IMPL_PATHS
 declare -A IMPL_CMDS
 
-# Shell (baseline)
-IMPL_PATHS["shell"]="$REPO_DIR/shell/threads"
-IMPL_CMDS["shell"]="$REPO_DIR/shell/threads"
-
 # Go (compiled)
 IMPL_PATHS["go"]="$REPO_DIR/go/threads"
 IMPL_CMDS["go"]="$REPO_DIR/go/threads"
@@ -44,7 +40,7 @@ IMPL_PATHS["bun"]="$REPO_DIR/bun/bin/threads"
 IMPL_CMDS["bun"]="$REPO_DIR/bun/bin/threads"
 
 # Default implementations to test
-DEFAULT_IMPLS="shell go python perl rust swift ruby bun"
+DEFAULT_IMPLS="go python perl rust swift ruby bun"
 
 # Verify implementations exist and work
 # Args: impl names (space-separated) or empty for all
