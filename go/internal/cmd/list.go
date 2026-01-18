@@ -23,8 +23,9 @@ var (
 )
 
 var listCmd = &cobra.Command{
-	Use:   "list [path]",
-	Short: "List threads",
+	Use:     "list [path]",
+	Aliases: []string{"ls"},
+	Short:   "List threads",
 	Long: `List threads at the specified level.
 
 By default shows active threads at the current level only.
@@ -247,20 +248,3 @@ func truncate(s string, max int) string {
 	return s[:max-1] + "…"
 }
 
-// lsCmd is an alias for listCmd
-var lsCmd = &cobra.Command{
-	Use:   "ls [path]",
-	Short: "List threads (alias for list)",
-	Long:  listCmd.Long,
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runList,
-}
-
-func init() {
-	// Share flags with listCmd
-	lsCmd.Flags().BoolVarP(&listRecursive, "recursive", "r", false, "Include nested categories/projects")
-	lsCmd.Flags().BoolVar(&listIncludeClosed, "include-closed", false, "Include resolved/terminal threads")
-	lsCmd.Flags().StringVarP(&listSearch, "search", "s", "", "Search name/title/desc (substring)")
-	lsCmd.Flags().StringVar(&listStatus, "status", "", "Filter by status (comma-separated)")
-	lsCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
-}

@@ -14,6 +14,7 @@ struct ThreadInfo: Codable {
 struct ListCmd: ParsableCommand {
     static var configuration = CommandConfiguration(
         commandName: "list",
+        aliases: ["ls"],
         abstract: "List threads",
         discussion: """
             List threads at the specified level.
