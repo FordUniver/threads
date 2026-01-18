@@ -81,10 +81,16 @@ def cmd_list(
 
     # Determine search direction: --down/-d takes priority, then -r as alias
     has_down = down is not None or recursive
-    down_depth = down if down is not None else -1
+    # Convention: 0 means unlimited (matches Go), -1 is internal unlimited, N>0 is specific depth
+    down_depth = -1  # unlimited by default
+    if down is not None and down > 0:
+        down_depth = down
 
     has_up = up is not None
-    up_depth = up if up is not None else -1
+    # Convention: 0 means unlimited (to git root), -1 is internal unlimited, N>0 is specific depth
+    up_depth = -1  # unlimited by default
+    if up is not None and up > 0:
+        up_depth = up
 
     # Build FindOptions
     options = FindOptions.new()
@@ -390,10 +396,16 @@ def cmd_stats(
 
     # Determine search direction
     has_down = down is not None or recursive
-    down_depth = down if down is not None else -1
+    # Convention: 0 means unlimited (matches Go), -1 is internal unlimited, N>0 is specific depth
+    down_depth = -1  # unlimited by default
+    if down is not None and down > 0:
+        down_depth = down
 
     has_up = up is not None
-    up_depth = up if up is not None else -1
+    # Convention: 0 means unlimited (to git root), -1 is internal unlimited, N>0 is specific depth
+    up_depth = -1  # unlimited by default
+    if up is not None and up > 0:
+        up_depth = up
 
     # Build FindOptions
     options = FindOptions.new()

@@ -4,7 +4,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { Thread, extractIDFromPath, extractNameFromPath, baseStatus, isTerminal, isValidStatus, ALL_STATUSES } from '../src/thread';
-import { findWorkspace, findAllThreads, inferScope, parseThreadPath, generateID, slugify, findByRef } from '../src/workspace';
+import { findWorkspace, findAllThreads, inferScope, parseThreadPath, generateID, slugify, findByRef, findThreadsWithOptions, findGitRoot, FindOptions } from '../src/workspace';
 import { insertLogEntry, addNote, removeByHash, editByHash, addTodoItem, setTodoChecked, countMatchingItems, replaceSection, appendToSection } from '../src/section';
 import { formatDate, formatTime, getErrorMessage } from '../src/utils';
 import * as git from '../src/git';
@@ -91,7 +91,7 @@ async function cmdList(args: string[]): Promise<void> {
   const { flags, positional } = parseFlags(args);
 
   // Validate flags
-  const validFlags = ['search', 's', 'status', 'r', 'recursive', 'include-closed', 'json'];
+  const validFlags = ['search', 's', 'status', 'r', 'recursive', 'include-closed', 'json', 'down', 'd', 'up', 'u'];
   for (const flag in flags) {
     if (!validFlags.includes(flag)) {
       console.error(`Unknown option: ${flag}`);
@@ -100,6 +100,12 @@ async function cmdList(args: string[]): Promise<void> {
   }
 
   const ws = getWorkspace();
+  let gitRoot: string;
+  try {
+    gitRoot = findGitRoot();
+  } catch {
+    gitRoot = ws;
+  }
 
   let pathFilter = positional[0] || '';
   let listCategory = '';
@@ -110,10 +116,52 @@ async function cmdList(args: string[]): Promise<void> {
   const listIncludeClosed = !!flags['include-closed'];
   const listJSON = !!flags.json;
 
-  // If path filter provided, extract category/project from it
+  // Parse --down/-d and --up/-u flags
+  // Semantics: 0 = unlimited, N > 0 = N levels, undefined = not set (no recursion)
+  let downDepth: number | undefined;
+  let upDepth: number | undefined;
+
+  // Handle --down or -d
+  const downFlag = flags.down ?? flags.d;
+  if (downFlag !== undefined) {
+    if (typeof downFlag === 'string') {
+      downDepth = parseInt(downFlag, 10);
+      if (isNaN(downDepth)) {
+        console.error(`Error: invalid --down value: ${downFlag}`);
+        process.exit(1);
+      }
+    } else if (downFlag === true) {
+      // --down without value = unlimited (0)
+      downDepth = 0;
+    }
+  }
+
+  // Handle --up or -u
+  const upFlag = flags.up ?? flags.u;
+  if (upFlag !== undefined) {
+    if (typeof upFlag === 'string') {
+      upDepth = parseInt(upFlag, 10);
+      if (isNaN(upDepth)) {
+        console.error(`Error: invalid --up value: ${upFlag}`);
+        process.exit(1);
+      }
+    } else if (upFlag === true) {
+      // --up without value = unlimited (0)
+      upDepth = 0;
+    }
+  }
+
+  // -r/--recursive is an alias for --down=0 (unlimited depth)
+  if (listRecursive && downDepth === undefined) {
+    downDepth = 0;
+  }
+
+  // Determine start path for direction-based search
+  let startPath = process.cwd();
   if (pathFilter) {
     const fullPath = path.join(ws, pathFilter);
     if (fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()) {
+      startPath = fullPath;
       const parts = pathFilter.split('/').slice(0, 2);
       listCategory = parts[0];
       if (parts.length > 1) {
@@ -125,8 +173,23 @@ async function cmdList(args: string[]): Promise<void> {
     }
   }
 
-  // Find all threads
-  const threads = findAllThreads(ws);
+  // Determine if we're using direction-based search
+  const hasDirectionFlags = downDepth !== undefined || upDepth !== undefined;
+
+  // Find threads
+  let threads: string[];
+  if (hasDirectionFlags) {
+    const options: FindOptions = {};
+    if (downDepth !== undefined) {
+      options.down = downDepth;
+    }
+    if (upDepth !== undefined) {
+      options.up = upDepth;
+    }
+    threads = findThreadsWithOptions(startPath, gitRoot, options);
+  } else {
+    threads = findAllThreads(ws);
+  }
 
   interface ThreadInfo {
     id: string;
@@ -152,18 +215,19 @@ async function cmdList(args: string[]): Promise<void> {
     const status = t.status;
     const base = baseStatus(status);
 
-    // Category filter
-    if (listCategory && category !== listCategory) {
-      continue;
-    }
+    // When NOT using direction flags, apply path-based filtering
+    if (!hasDirectionFlags) {
+      // Category filter
+      if (listCategory && category !== listCategory) {
+        continue;
+      }
 
-    // Project filter
-    if (listProject && project !== listProject) {
-      continue;
-    }
+      // Project filter
+      if (listProject && project !== listProject) {
+        continue;
+      }
 
-    // Non-recursive: only threads at current hierarchy level
-    if (!listRecursive) {
+      // Non-recursive: only threads at current hierarchy level
       if (listProject) {
         // At project level, show all threads here
       } else if (listCategory) {
@@ -253,17 +317,38 @@ async function cmdList(args: string[]): Promise<void> {
     statusDesc = '';
   }
 
-  const recursiveSuffix = listRecursive ? ' (including nested)' : '';
+  // Build direction suffix
+  let directionSuffix = '';
+  if (hasDirectionFlags) {
+    const parts: string[] = [];
+    if (downDepth !== undefined) {
+      if (downDepth === 0) {
+        parts.push('recursive');
+      } else {
+        parts.push(`down ${downDepth}`);
+      }
+    }
+    if (upDepth !== undefined) {
+      if (upDepth === 0) {
+        parts.push('up');
+      } else {
+        parts.push(`up ${upDepth}`);
+      }
+    }
+    if (parts.length > 0) {
+      directionSuffix = ` (${parts.join(', ')})`;
+    }
+  }
 
   if (statusDesc) {
-    console.log(`Showing ${results.length} ${statusDesc} ${levelDesc} threads${pathSuffix}${recursiveSuffix}`);
+    console.log(`Showing ${results.length} ${statusDesc} ${levelDesc} threads${pathSuffix}${directionSuffix}`);
   } else {
-    console.log(`Showing ${results.length} ${levelDesc} threads${pathSuffix} (all statuses)${recursiveSuffix}`);
+    console.log(`Showing ${results.length} ${levelDesc} threads${pathSuffix} (all statuses)${directionSuffix}`);
   }
   console.log();
 
   if (results.length === 0) {
-    if (!listRecursive) {
+    if (!hasDirectionFlags) {
       console.log('Hint: use -r to include nested categories/projects');
     }
     return;
@@ -1308,16 +1393,64 @@ async function cmdGit(args: string[]): Promise<void> {
 async function cmdStats(args: string[]): Promise<void> {
   const { flags, positional } = parseFlags(args);
   const ws = getWorkspace();
+  let gitRoot: string;
+  try {
+    gitRoot = findGitRoot();
+  } catch {
+    gitRoot = ws;
+  }
 
   const statsRecursive = !!flags.r || !!flags.recursive;
+
+  // Parse --down/-d and --up/-u flags
+  // Semantics: 0 = unlimited, N > 0 = N levels, undefined = not set (no recursion)
+  let downDepth: number | undefined;
+  let upDepth: number | undefined;
+
+  // Handle --down or -d
+  const downFlag = flags.down ?? flags.d;
+  if (downFlag !== undefined) {
+    if (typeof downFlag === 'string') {
+      downDepth = parseInt(downFlag, 10);
+      if (isNaN(downDepth)) {
+        console.error(`Error: invalid --down value: ${downFlag}`);
+        process.exit(1);
+      }
+    } else if (downFlag === true) {
+      // --down without value = unlimited (0)
+      downDepth = 0;
+    }
+  }
+
+  // Handle --up or -u
+  const upFlag = flags.up ?? flags.u;
+  if (upFlag !== undefined) {
+    if (typeof upFlag === 'string') {
+      upDepth = parseInt(upFlag, 10);
+      if (isNaN(upDepth)) {
+        console.error(`Error: invalid --up value: ${upFlag}`);
+        process.exit(1);
+      }
+    } else if (upFlag === true) {
+      // --up without value = unlimited (0)
+      upDepth = 0;
+    }
+  }
+
+  // -r/--recursive is an alias for --down=0 (unlimited depth)
+  if (statsRecursive && downDepth === undefined) {
+    downDepth = 0;
+  }
 
   // Parse path filter
   let categoryFilter = '';
   let projectFilter = '';
+  let startPath = process.cwd();
   if (positional.length > 0) {
     const pathFilter = positional[0];
     const fullPath = path.join(ws, pathFilter);
     if (fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()) {
+      startPath = fullPath;
       const parts = pathFilter.split('/').slice(0, 2);
       categoryFilter = parts[0];
       if (parts.length > 1) {
@@ -1326,26 +1459,43 @@ async function cmdStats(args: string[]): Promise<void> {
     }
   }
 
-  // Find all threads
-  const threads = findAllThreads(ws);
+  // Determine if we're using direction-based search
+  const hasDirectionFlags = downDepth !== undefined || upDepth !== undefined;
+
+  // Find threads
+  let threads: string[];
+  if (hasDirectionFlags) {
+    const options: FindOptions = {};
+    if (downDepth !== undefined) {
+      options.down = downDepth;
+    }
+    if (upDepth !== undefined) {
+      options.up = upDepth;
+    }
+    threads = findThreadsWithOptions(startPath, gitRoot, options);
+  } else {
+    threads = findAllThreads(ws);
+  }
+
   const counts: Record<string, number> = {};
   let total = 0;
 
   for (const threadPath of threads) {
     const { category, project } = parseThreadPath(ws, threadPath);
 
-    // Category filter
-    if (categoryFilter && category !== categoryFilter) {
-      continue;
-    }
+    // When NOT using direction flags, apply path-based filtering
+    if (!hasDirectionFlags) {
+      // Category filter
+      if (categoryFilter && category !== categoryFilter) {
+        continue;
+      }
 
-    // Project filter
-    if (projectFilter && project !== projectFilter) {
-      continue;
-    }
+      // Project filter
+      if (projectFilter && project !== projectFilter) {
+        continue;
+      }
 
-    // Non-recursive: only threads at current hierarchy level
-    if (!statsRecursive) {
+      // Non-recursive: only threads at current hierarchy level
       if (projectFilter) {
         // At project level, count all
       } else if (categoryFilter) {
@@ -1387,14 +1537,35 @@ async function cmdStats(args: string[]): Promise<void> {
     levelDesc = 'workspace-level';
   }
 
-  const recursiveSuffix = statsRecursive ? ' (including nested)' : '';
+  // Build direction suffix
+  let directionSuffix = '';
+  if (hasDirectionFlags) {
+    const parts: string[] = [];
+    if (downDepth !== undefined) {
+      if (downDepth === 0) {
+        parts.push('recursive');
+      } else {
+        parts.push(`down ${downDepth}`);
+      }
+    }
+    if (upDepth !== undefined) {
+      if (upDepth === 0) {
+        parts.push('up');
+      } else {
+        parts.push(`up ${upDepth}`);
+      }
+    }
+    if (parts.length > 0) {
+      directionSuffix = ` (${parts.join(', ')})`;
+    }
+  }
 
-  console.log(`Stats for ${levelDesc} threads${pathSuffix}${recursiveSuffix}`);
+  console.log(`Stats for ${levelDesc} threads${pathSuffix}${directionSuffix}`);
   console.log();
 
   if (total === 0) {
     console.log('No threads found.');
-    if (!statsRecursive) {
+    if (!hasDirectionFlags) {
       console.log('Hint: use -r to include nested categories/projects');
     }
     return;

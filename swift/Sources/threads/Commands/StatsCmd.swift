@@ -4,19 +4,106 @@ import Foundation
 struct StatsCmd: ParsableCommand {
     static var configuration = CommandConfiguration(
         commandName: "stats",
-        abstract: "Show thread count by status"
+        abstract: "Show thread count by status",
+        discussion: """
+            Show thread statistics at the specified level.
+
+            By default shows stats for threads at the current level only.
+            Use -d/--down to include subdirectories, -u/--up to include parent directories.
+            Use -r as an alias for --down (unlimited depth).
+
+            Depth values: N levels, or 0 for unlimited.
+            """
     )
 
-    @Flag(name: .shortAndLong, help: "Include nested categories/projects")
+    @Option(name: .shortAndLong, help: "Search subdirectories (N levels, 0=unlimited)")
+    var down: Int?
+
+    @Flag(name: .shortAndLong, help: "Alias for --down (unlimited depth)")
     var recursive = false
+
+    @Option(name: .shortAndLong, help: "Search parent directories (N levels, 0=unlimited)")
+    var up: Int?
+
+    @Flag(name: .long, help: "Cross git boundaries when searching down")
+    var noGitBoundDown = false
+
+    @Flag(name: .long, help: "Cross git boundaries when searching up")
+    var noGitBoundUp = false
+
+    @Flag(name: .long, help: "Cross all git boundaries")
+    var noGitBound = false
 
     @Argument(help: "Path to show stats for")
     var path: String?
 
+    /// Describes the search direction for output display
+    struct SearchDirection {
+        var hasDown: Bool
+        var downDepth: Int  // -1 = unlimited, 0+ = specific depth
+        var hasUp: Bool
+        var upDepth: Int    // -1 = unlimited, 0+ = specific depth
+
+        func description() -> String {
+            var parts: [String] = []
+
+            if hasDown {
+                if downDepth < 0 {
+                    parts.append("recursive")
+                } else {
+                    parts.append("down \(downDepth)")
+                }
+            }
+
+            if hasUp {
+                if upDepth < 0 {
+                    parts.append("up")
+                } else {
+                    parts.append("up \(upDepth)")
+                }
+            }
+
+            if parts.isEmpty {
+                return ""
+            }
+            return " (\(parts.joined(separator: ", ")))"
+        }
+
+        var isSearching: Bool {
+            return hasDown || hasUp
+        }
+    }
+
     func run() throws {
         let ws = try getWorkspace()
 
-        // Parse path filter
+        // Determine effective git boundary flags
+        let effectiveNoGitBoundDown = noGitBound || noGitBoundDown
+        let effectiveNoGitBoundUp = noGitBound || noGitBoundUp
+
+        // Determine search direction: --down/-d takes priority, then -r as alias
+        let hasDown = down != nil || recursive
+        var downDepth = -1  // unlimited by default when enabled
+        if let d = down, d > 0 {
+            downDepth = d
+        }
+
+        let hasUp = up != nil
+        var upDepth = -1  // unlimited by default when enabled
+        if let u = up, u > 0 {
+            upDepth = u
+        }
+
+        // Track search direction for output
+        let searchDir = SearchDirection(
+            hasDown: hasDown,
+            downDepth: downDepth,
+            hasUp: hasUp,
+            upDepth: upDepth
+        )
+
+        // Determine start path
+        var startPath = ws
         var categoryFilter: String?
         var projectFilter: String?
 
@@ -24,6 +111,7 @@ struct StatsCmd: ParsableCommand {
             let fullPath = "\(ws)/\(pathFilter)"
             var isDir: ObjCBool = false
             if FileManager.default.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue {
+                startPath = fullPath
                 let parts = pathFilter.split(separator: "/", maxSplits: 1).map(String.init)
                 categoryFilter = parts[0]
                 if parts.count > 1 {
@@ -32,8 +120,23 @@ struct StatsCmd: ParsableCommand {
             }
         }
 
-        // Find all threads
-        let threads = try findAllThreads(ws)
+        // Build find options
+        var options = FindOptions()
+        options.noGitBoundDown = effectiveNoGitBoundDown
+        options.noGitBoundUp = effectiveNoGitBoundUp
+
+        if hasDown {
+            // Convert depth: -1 (unlimited) -> 0 in FindOptions convention
+            options.down = downDepth < 0 ? 0 : downDepth
+        }
+
+        if hasUp {
+            // Convert depth: -1 (unlimited) -> 0 in FindOptions convention
+            options.up = upDepth < 0 ? 0 : upDepth
+        }
+
+        // Find threads using options
+        let threads = findThreadsWithOptions(startPath, ws, options)
 
         var counts: [String: Int] = [:]
         var total = 0
@@ -41,28 +144,13 @@ struct StatsCmd: ParsableCommand {
         for threadPath in threads {
             let (cat, proj, _) = parseThreadPath(ws, threadPath)
 
-            // Category filter
-            if let catFilter = categoryFilter, cat != catFilter {
-                continue
-            }
-
-            // Project filter
-            if let projFilter = projectFilter, proj != projFilter {
-                continue
-            }
-
-            // Non-recursive: only threads at current hierarchy level
-            if !recursive {
-                if projectFilter != nil {
-                    // At project level, count all
-                } else if categoryFilter != nil {
-                    if proj != "-" {
-                        continue
-                    }
-                } else {
-                    if cat != "-" {
-                        continue
-                    }
+            // Category/project filter (when not searching directionally)
+            if !searchDir.isSearching {
+                if let catFilter = categoryFilter, cat != catFilter {
+                    continue
+                }
+                if let projFilter = projectFilter, proj != projFilter {
+                    continue
                 }
             }
 
@@ -90,18 +178,15 @@ struct StatsCmd: ParsableCommand {
             levelDesc = "workspace-level"
         }
 
-        var recursiveSuffix = ""
-        if recursive {
-            recursiveSuffix = " (including nested)"
-        }
+        let searchSuffix = searchDir.description()
 
-        print("Stats for \(levelDesc) threads\(pathSuffix)\(recursiveSuffix)")
+        print("Stats for \(levelDesc) threads\(pathSuffix)\(searchSuffix)")
         print()
 
         if total == 0 {
             print("No threads found.")
-            if !recursive {
-                print("Hint: use -r to include nested categories/projects")
+            if !searchDir.isSearching {
+                print("Hint: use -r to include nested directories, -u to search parents")
             }
             return
         }

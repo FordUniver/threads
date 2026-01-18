@@ -1,6 +1,185 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 import { extractIDFromPath, extractNameFromPath, Thread } from './thread';
+
+// FindOptions contains options for finding threads with direction and boundary controls.
+export interface FindOptions {
+  // down specifies subdirectory search depth. undefined = no recursion, 0 = unlimited, N = N levels
+  down?: number;
+  // up specifies parent directory search depth. undefined = no up search, 0 = unlimited (to git root), N = N levels
+  up?: number;
+  // noGitBoundDown allows crossing git boundaries when searching down
+  noGitBoundDown?: boolean;
+  // noGitBoundUp allows crossing git boundaries when searching up
+  noGitBoundUp?: boolean;
+}
+
+// Check if a directory is a git root (contains .git)
+function isGitRoot(dir: string): boolean {
+  try {
+    const gitPath = path.join(dir, '.git');
+    const stat = fs.statSync(gitPath);
+    return stat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+// Find the git root for the current directory
+export function findGitRoot(): string {
+  const result = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+    encoding: 'utf-8',
+  });
+  if (result.status !== 0) {
+    throw new Error('not in a git repository. threads requires a git repo to define scope');
+  }
+  return result.stdout.trim();
+}
+
+// Collect threads at a specific path (from its .threads directory)
+function collectThreadsAtPath(dir: string, threads: string[]): void {
+  const threadsDir = path.join(dir, '.threads');
+  if (!fs.existsSync(threadsDir)) {
+    return;
+  }
+  try {
+    const stat = fs.statSync(threadsDir);
+    if (!stat.isDirectory()) {
+      return;
+    }
+    const entries = fs.readdirSync(threadsDir);
+    for (const entry of entries) {
+      if (entry.endsWith('.md')) {
+        const fullPath = path.join(threadsDir, entry);
+        // Skip archive subdirectory
+        if (!fullPath.includes('/archive/')) {
+          threads.push(fullPath);
+        }
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+}
+
+// Find threads going down into subdirectories
+function findThreadsDown(
+  dir: string,
+  gitRoot: string,
+  threads: string[],
+  currentDepth: number,
+  maxDepth: number,
+  crossGitBoundaries: boolean
+): void {
+  // Check depth limit (-1 means unlimited)
+  if (maxDepth >= 0 && currentDepth >= maxDepth) {
+    return;
+  }
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const name = entry.name;
+
+    // Skip hidden directories
+    if (name.startsWith('.')) {
+      continue;
+    }
+
+    const subdir = path.join(dir, name);
+
+    // Check git boundary
+    if (!crossGitBoundaries && subdir !== gitRoot && isGitRoot(subdir)) {
+      continue;
+    }
+
+    // Collect threads at this level
+    collectThreadsAtPath(subdir, threads);
+
+    // Continue recursing
+    findThreadsDown(subdir, gitRoot, threads, currentDepth + 1, maxDepth, crossGitBoundaries);
+  }
+}
+
+// Find threads going up into parent directories
+function findThreadsUp(
+  dir: string,
+  gitRoot: string,
+  threads: string[],
+  currentDepth: number,
+  maxDepth: number,
+  crossGitBoundaries: boolean
+): void {
+  // Check depth limit (-1 means unlimited)
+  if (maxDepth >= 0 && currentDepth >= maxDepth) {
+    return;
+  }
+
+  const parent = path.dirname(dir);
+  if (parent === dir) {
+    return; // reached filesystem root
+  }
+
+  const absParent = path.resolve(parent);
+  const absGitRoot = path.resolve(gitRoot);
+
+  // Check git boundary: stop at git root unless crossing is allowed
+  if (!crossGitBoundaries && !absParent.startsWith(absGitRoot)) {
+    return;
+  }
+
+  // Collect threads at parent
+  collectThreadsAtPath(absParent, threads);
+
+  // Continue up
+  findThreadsUp(absParent, gitRoot, threads, currentDepth + 1, maxDepth, crossGitBoundaries);
+}
+
+// Find threads with direction and boundary controls.
+// This is the primary search function supporting --up, --down, and boundary flags.
+export function findThreadsWithOptions(startPath: string, gitRoot: string, options: FindOptions): string[] {
+  const threads: string[] = [];
+
+  const absStart = path.resolve(startPath);
+
+  // Always collect threads at start_path
+  collectThreadsAtPath(absStart, threads);
+
+  // Search down (subdirectories)
+  if (options.down !== undefined) {
+    // Convert: 0 = unlimited (-1 internally), N > 0 = N levels
+    const maxDepth = options.down === 0 ? -1 : options.down;
+    findThreadsDown(absStart, gitRoot, threads, 0, maxDepth, options.noGitBoundDown || false);
+  }
+
+  // Search up (parent directories)
+  if (options.up !== undefined) {
+    // Convert: 0 = unlimited (-1 internally), N > 0 = N levels
+    const maxDepth = options.up === 0 ? -1 : options.up;
+    findThreadsUp(absStart, gitRoot, threads, 0, maxDepth, options.noGitBoundUp || false);
+  }
+
+  // Sort and deduplicate
+  threads.sort();
+  const deduplicated: string[] = [];
+  for (let i = 0; i < threads.length; i++) {
+    if (i === 0 || threads[i] !== threads[i - 1]) {
+      deduplicated.push(threads[i]);
+    }
+  }
+
+  return deduplicated;
+}
 
 // Secure path containment check (prevents path traversal attacks)
 function isUnderWorkspace(filePath: string, workspace: string): boolean {

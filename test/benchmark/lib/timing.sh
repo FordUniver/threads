@@ -41,12 +41,14 @@ now_ns() {
 
 # Run benchmark with hyperfine
 # Args: name, command, iterations, warmup, json_output_file
+# Note: Commands run from BENCH_WORKSPACE directory (required for threads CLI)
 bench_hyperfine() {
     local name="$1"
     local cmd="$2"
     local iterations="${3:-100}"
     local warmup="${4:-3}"
     local json_file="${5:-}"
+    local ws="${BENCH_WORKSPACE:-$(pwd)}"
 
     local hf_args=(
         --warmup "$warmup"
@@ -58,19 +60,22 @@ bench_hyperfine() {
         hf_args+=(--export-json "$json_file")
     fi
 
-    hyperfine "${hf_args[@]}" "$cmd" 2>&1
+    # Run from workspace directory
+    hyperfine "${hf_args[@]}" "cd '$ws' && $cmd" 2>&1
 }
 
 # Run benchmark with manual timing
 # Args: name, command, iterations
 # Output: JSON-like result to stdout
+# Note: Commands run from BENCH_WORKSPACE directory (required for threads CLI)
 bench_manual() {
     local name="$1"
     local cmd="$2"
     local iterations="${3:-100}"
+    local ws="${BENCH_WORKSPACE:-$(pwd)}"
 
-    # Verify command works
-    if ! $cmd >/dev/null 2>&1; then
+    # Verify command works (run from workspace)
+    if ! (cd "$ws" && $cmd) >/dev/null 2>&1; then
         echo "FAILED: $name (command error)" >&2
         return 1
     fi
@@ -83,7 +88,7 @@ bench_manual() {
     for ((i=0; i<iterations; i++)); do
         local start end elapsed
         start=$(now_ns)
-        $cmd >/dev/null 2>&1
+        (cd "$ws" && $cmd) >/dev/null 2>&1
         end=$(now_ns)
         elapsed=$((end - start))
 

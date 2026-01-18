@@ -252,9 +252,9 @@ fn find_threads_down(
     max_depth: Option<usize>,
     cross_git_boundaries: bool,
 ) -> Result<(), String> {
-    // Check depth limit
+    // Check depth limit (None or Some(0) means unlimited, matching Go's convention)
     if let Some(max) = max_depth {
-        if current_depth >= max {
+        if max > 0 && current_depth >= max {
             return Ok(());
         }
     }
@@ -307,9 +307,9 @@ fn find_threads_up(
     max_depth: Option<usize>,
     cross_git_boundaries: bool,
 ) -> Result<(), String> {
-    // Check depth limit
+    // Check depth limit (None or Some(0) means unlimited, matching Go's convention)
     if let Some(max) = max_depth {
-        if current_depth >= max {
+        if max > 0 && current_depth >= max {
             return Ok(());
         }
     }

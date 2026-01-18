@@ -17,23 +17,58 @@ module Threads
         json_output = opts[:json]
         path_filter = opts[:path]
 
-        category_filter = nil
-        project_filter = nil
+        # Direction flags
+        down_set = opts[:down_set]
+        up_set = opts[:up_set]
+        down_val = opts[:down_val]
+        up_val = opts[:up_val]
+        no_git_bound = opts[:no_git_bound]
+        no_git_bound_down = opts[:no_git_bound_down] || no_git_bound
+        no_git_bound_up = opts[:no_git_bound_up] || no_git_bound
 
-        # Parse path filter
-        if path_filter && !path_filter.empty?
-          path_check = File.join(ws, path_filter)
-          if File.directory?(path_check)
-            parts = path_filter.split('/', 2)
-            category_filter = parts[0]
-            project_filter = parts[1] if parts.length > 1
-          else
-            # Treat as search filter
-            search = path_filter
-          end
+        # Determine if we're using direction-based search
+        has_down = down_set || recursive
+        has_up = up_set
+
+        # Compute depth values
+        down_depth = -1 # unlimited by default
+        down_depth = down_val if down_set && down_val && down_val > 0
+
+        up_depth = -1 # unlimited by default
+        up_depth = up_val if up_set && up_val && up_val > 0
+
+        # Resolve starting path
+        start_path = path_filter && !path_filter.empty? ? resolve_path(ws, path_filter) : Dir.pwd
+        filter_path = Workspace.parse_thread_relative_path(ws, start_path)
+
+        # Build FindOptions
+        options = FindOptions.new
+        options.no_git_bound_down = no_git_bound_down
+        options.no_git_bound_up = no_git_bound_up
+
+        if has_down
+          depth = down_depth < 0 ? 0 : down_depth
+          options.down = depth
         end
 
-        threads = Workspace.find_all_threads(ws)
+        if has_up
+          depth = up_depth < 0 ? 0 : up_depth
+          options.up = depth
+        end
+
+        # Track search direction for output
+        searching = has_down || has_up
+
+        # Find threads using options
+        threads = if searching
+                    Workspace.find_threads_with_options(start_path, ws, options)
+                  else
+                    # Local-only: just threads at start_path
+                    local_threads = []
+                    Workspace.collect_threads_at_path(start_path, local_threads)
+                    local_threads
+                  end
+
         results = []
 
         threads.each do |path|
@@ -43,27 +78,14 @@ module Threads
             next
           end
 
+          rel_path = Workspace.parse_thread_relative_path(ws, path)
           category, project, name = Workspace.parse_thread_path(ws, path)
           status = t.status
           base_status = t.base_status
 
-          # Category filter
-          next if category_filter && category != category_filter
-
-          # Project filter
-          next if project_filter && project != project_filter
-
-          # Non-recursive: only threads at current hierarchy level
-          unless recursive
-            if project_filter
-              # At project level, show all
-            elsif category_filter
-              # At category level: only show category-level threads
-              next if project != '-'
-            else
-              # At workspace level: only show workspace-level threads
-              next if category != '-'
-            end
+          # Path filter: if not searching, only show threads at the specified level
+          unless searching
+            next if rel_path != filter_path
           end
 
           # Status filter
@@ -73,8 +95,8 @@ module Threads
               # Empty status value matches nothing
               next
             end
-            status_list = status_filter.split(',')
-            next unless status_list.include?(base_status)
+            status_list = status_filter.split(',').map(&:strip).map(&:downcase)
+            next unless status_list.include?(base_status.downcase)
           else
             # No status filter: apply default terminal filtering
             next if !include_closed && t.terminal?
@@ -105,7 +127,8 @@ module Threads
             project: project,
             name: name,
             title: title,
-            desc: t.desc || ''
+            desc: t.desc || '',
+            path: rel_path
           }
         end
 
@@ -114,7 +137,23 @@ module Threads
           return
         end
 
-        output_table(results, ws, category_filter, project_filter, status_filter, include_closed, recursive)
+        output_table_v2(results, ws, filter_path, status_filter, include_closed, has_down, down_depth, has_up, up_depth)
+      end
+
+      # Resolve path argument to absolute path
+      def resolve_path(ws, path_arg)
+        return Dir.pwd if path_arg.nil? || path_arg.empty? || path_arg == '.'
+
+        if path_arg.start_with?('./')
+          # PWD-relative
+          File.join(Dir.pwd, path_arg[2..])
+        elsif path_arg.start_with?('/')
+          # Absolute
+          path_arg
+        else
+          # Git-root-relative
+          File.join(ws, path_arg)
+        end
       end
 
       # Create new thread
@@ -724,6 +763,67 @@ module Threads
           category = truncate(t[:category], 16)
           project = truncate(t[:project], 20)
           puts format('%-6s %-10s %-18s %-22s %s', t[:id], t[:status], category, project, t[:title])
+        end
+      end
+
+      # Build search direction description
+      def search_direction_desc(has_down, down_depth, has_up, up_depth)
+        parts = []
+
+        if has_down
+          if down_depth < 0
+            parts << 'recursive'
+          else
+            parts << "down #{down_depth}"
+          end
+        end
+
+        if has_up
+          if up_depth < 0
+            parts << 'up'
+          else
+            parts << "up #{up_depth}"
+          end
+        end
+
+        return '' if parts.empty?
+        " (#{parts.join(', ')})"
+      end
+
+      # Output table format (v2 with direction support)
+      def output_table_v2(results, ws, filter_path, status_filter, include_closed, has_down, down_depth, has_up, up_depth)
+        path_desc = filter_path == '.' ? 'repo root' : filter_path
+        searching = has_down || has_up
+
+        status_desc = if status_filter && !status_filter.empty?
+                        status_filter
+                      elsif include_closed
+                        ''
+                      else
+                        'active'
+                      end
+
+        search_suffix = search_direction_desc(has_down, down_depth, has_up, up_depth)
+
+        if !status_desc.empty?
+          puts "Showing #{results.length} #{status_desc} threads in #{path_desc}#{search_suffix}"
+        else
+          puts "Showing #{results.length} threads in #{path_desc} (all statuses)#{search_suffix}"
+        end
+        puts
+
+        if results.empty?
+          puts 'Hint: use -r to include nested directories, -u to search parents' unless searching
+          return
+        end
+
+        # Print table header
+        puts format('%-6s %-10s %-24s %s', 'ID', 'STATUS', 'PATH', 'NAME')
+        puts format('%-6s %-10s %-24s %s', '--', '------', '----', '----')
+
+        results.each do |t|
+          path_display = truncate(t[:path], 22)
+          puts format('%-6s %-10s %-24s %s', t[:id], t[:status], path_display, t[:title])
         end
       end
     end

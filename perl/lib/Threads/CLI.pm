@@ -97,10 +97,20 @@ HELP
 sub cmd_list {
     my ($class, @args) = @_;
 
-    my %opts = (recursive => 0, search => undef, status => undef, include_closed => 0, json => 0);
+    my %opts = (
+        recursive      => 0,
+        down           => undef,  # undef = not set, integer = depth (0 = unlimited)
+        up             => undef,  # undef = not set, integer = depth (0 = unlimited)
+        search         => undef,
+        status         => undef,
+        include_closed => 0,
+        json           => 0,
+    );
     local @ARGV = @args;
     GetOptions(
         'r|recursive'     => \$opts{recursive},
+        'd|down=i'        => \$opts{down},
+        'u|up=i'          => \$opts{up},
         's|search=s'      => \$opts{search},
         'status=s'        => \$opts{status},
         'include-closed'  => \$opts{include_closed},
@@ -110,12 +120,29 @@ sub cmd_list {
     my $path = shift @ARGV // '.';
     my ($threads_dir, $cat, $proj, $level) = infer_scope($path);
 
+    # Determine effective down/up depths:
+    # - If --down is set, use it (0 = unlimited)
+    # - If -r is set (without --down), treat as --down=0 (unlimited)
+    # - Otherwise, no down search
+    my $down_depth = undef;
+    if (defined $opts{down}) {
+        $down_depth = $opts{down};  # 0 = unlimited, N = N levels
+    } elsif ($opts{recursive}) {
+        $down_depth = 0;  # -r is alias for --down=0 (unlimited)
+    }
+
+    my $up_depth = $opts{up};  # undef = not set, 0 = unlimited, N = N levels
+
     my @files = find_all_threads(
         category         => $cat,
         project          => $proj,
-        recursive        => $opts{recursive},
+        down_depth       => $down_depth,
+        up_depth         => $up_depth,
         include_terminal => 1,  # Always load all threads
     );
+
+    # Are we doing any direction search?
+    my $is_searching = defined($down_depth) || defined($up_depth);
 
     # Load threads and filter
     my @threads;
@@ -126,8 +153,8 @@ sub cmd_list {
         # Extract category/project from path
         my ($t_cat, $t_proj) = _extract_scope($file);
 
-        # Filter by scope if not recursive
-        unless ($opts{recursive}) {
+        # Filter by scope if not searching (local only)
+        unless ($is_searching) {
             next if $cat eq '-' && $t_cat ne '-';
             next if $cat ne '-' && $proj eq '-' && $t_proj ne '-';
         }
@@ -226,17 +253,36 @@ sub cmd_path {
 sub cmd_stats {
     my ($class, @args) = @_;
 
-    my $recursive = 0;
+    my %opts = (
+        recursive => 0,
+        down      => undef,
+        up        => undef,
+    );
     local @ARGV = @args;
-    GetOptions('r|recursive' => \$recursive);
+    GetOptions(
+        'r|recursive' => \$opts{recursive},
+        'd|down=i'    => \$opts{down},
+        'u|up=i'      => \$opts{up},
+    ) or return 1;
 
     my $path = shift @ARGV // '.';
     my ($threads_dir, $cat, $proj, $level) = infer_scope($path);
 
+    # Determine effective down/up depths (same logic as list)
+    my $down_depth = undef;
+    if (defined $opts{down}) {
+        $down_depth = $opts{down};
+    } elsif ($opts{recursive}) {
+        $down_depth = 0;
+    }
+
+    my $up_depth = $opts{up};
+
     my @files = find_all_threads(
         category         => $cat,
         project          => $proj,
-        recursive        => $recursive,
+        down_depth       => $down_depth,
+        up_depth         => $up_depth,
         include_terminal => 1,
     );
 

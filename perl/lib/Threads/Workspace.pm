@@ -121,32 +121,49 @@ sub find_thread {
 }
 
 # Find all threads with optional filtering
+# Supports Phase 3/4 direction flags:
+#   down_depth: undef = no down search, 0 = unlimited, N = N levels
+#   up_depth:   undef = no up search, 0 = unlimited (to git root), N = N levels
 sub find_all_threads {
     my %opts = @_;
-    my $recursive = $opts{recursive} // 0;
     my $scope_cat = $opts{category};
     my $scope_proj = $opts{project};
     my $include_terminal = $opts{include_terminal} // 0;
+    my $down_depth = $opts{down_depth};  # undef, 0 (unlimited), or N
+    my $up_depth = $opts{up_depth};      # undef, 0 (unlimited), or N
+
+    # Legacy support: 'recursive' maps to down_depth=0
+    if ($opts{recursive} && !defined $down_depth) {
+        $down_depth = 0;
+    }
 
     my $ws = workspace_root();
+    my %seen;
     my @files;
 
-    if ($recursive) {
-        # Search all three levels
-        push @files, _glob_thread_files($ws, '*.md');
-        push @files, glob("$ws/*/.threads/*.md");
-        push @files, glob("$ws/*/*/.threads/*.md");
-    } elsif (defined $scope_cat && $scope_cat ne '-') {
+    # Determine start path based on scope
+    my $start_path;
+    if (defined $scope_cat && $scope_cat ne '-') {
         if (defined $scope_proj && $scope_proj ne '-') {
-            # Project level only
-            push @files, glob("$ws/$scope_cat/$scope_proj/.threads/*.md");
+            $start_path = "$ws/$scope_cat/$scope_proj";
         } else {
-            # Category level only
-            push @files, glob("$ws/$scope_cat/.threads/*.md");
+            $start_path = "$ws/$scope_cat";
         }
     } else {
-        # Workspace level only
-        push @files, _glob_thread_files($ws, '*.md');
+        $start_path = $ws;
+    }
+
+    # Always collect threads at start path
+    _collect_threads_at_path($start_path, \@files, \%seen);
+
+    # Search down (subdirectories) if requested
+    if (defined $down_depth) {
+        _find_threads_down($start_path, $ws, \@files, \%seen, 0, $down_depth);
+    }
+
+    # Search up (parent directories) if requested
+    if (defined $up_depth) {
+        _find_threads_up($start_path, $ws, \@files, \%seen, 0, $up_depth);
     }
 
     # Filter by terminal status unless include_terminal
@@ -154,7 +171,83 @@ sub find_all_threads {
         @files = grep { !_is_terminal_status($_) } @files;
     }
 
-    return @files;
+    return sort @files;
+}
+
+# Collect thread files from a .threads directory at the given path
+sub _collect_threads_at_path {
+    my ($dir, $files, $seen) = @_;
+    my $threads_dir = "$dir/.threads";
+    return unless -d $threads_dir;
+
+    my @found = glob("$threads_dir/*.md");
+    for my $f (@found) {
+        next if $seen->{$f}++;
+        push @$files, $f;
+    }
+}
+
+# Recursively find threads going DOWN into subdirectories
+sub _find_threads_down {
+    my ($dir, $ws, $files, $seen, $current_depth, $max_depth) = @_;
+
+    # Check depth limit: max_depth=0 means unlimited, N means stop at N
+    if ($max_depth > 0 && $current_depth >= $max_depth) {
+        return;
+    }
+
+    opendir(my $dh, $dir) or return;
+    my @entries = readdir($dh);
+    closedir($dh);
+
+    for my $entry (@entries) {
+        next if $entry =~ /^\./;  # Skip hidden dirs
+        my $subdir = "$dir/$entry";
+        next unless -d $subdir;
+
+        # Stop at nested git repos (git boundary)
+        if (-d "$subdir/.git") {
+            next;
+        }
+
+        # Collect threads at this level
+        _collect_threads_at_path($subdir, $files, $seen);
+
+        # Continue recursing
+        _find_threads_down($subdir, $ws, $files, $seen, $current_depth + 1, $max_depth);
+    }
+}
+
+# Find threads going UP into parent directories
+sub _find_threads_up {
+    my ($dir, $ws, $files, $seen, $current_depth, $max_depth) = @_;
+
+    # Check depth limit: max_depth=0 means unlimited (to git root), N means N levels
+    if ($max_depth > 0 && $current_depth >= $max_depth) {
+        return;
+    }
+
+    # Get parent directory
+    my $parent = File::Spec->catdir($dir, '..');
+    $parent = abs_path($parent);
+    return unless defined $parent && -d $parent;
+
+    # Stop at workspace root boundary (don't go above it)
+    my $ws_real = abs_path($ws) // $ws;
+    my $parent_real = abs_path($parent) // $parent;
+
+    # Check if parent is still within or at the workspace
+    my $rel = File::Spec->abs2rel($parent_real, $ws_real);
+    if ($rel =~ /^\.\./) {
+        # Parent is outside workspace, stop
+        return;
+    }
+
+    # Collect threads at parent
+    _collect_threads_at_path($parent, $files, $seen);
+
+    # Continue up
+    _find_threads_up($parent, $ws, $files, $seen, $current_depth + 1, $max_depth);
 }
 
 # Glob for thread files at workspace level

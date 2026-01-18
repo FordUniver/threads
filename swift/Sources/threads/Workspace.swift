@@ -338,3 +338,168 @@ enum WorkspaceError: Error, LocalizedError {
         }
     }
 }
+
+// MARK: - Direction-based thread finding
+
+/// Options for finding threads with direction and boundary controls
+struct FindOptions {
+    /// Down depth: nil = no recursion, 0 = unlimited, N = N levels
+    var down: Int?
+    /// Up depth: nil = no up search, 0 = unlimited, N = N levels
+    var up: Int?
+    /// Cross git boundaries when searching down
+    var noGitBoundDown: Bool = false
+    /// Cross git boundaries when searching up
+    var noGitBoundUp: Bool = false
+
+    /// Returns true if down searching is enabled
+    var hasDown: Bool { down != nil }
+
+    /// Returns true if up searching is enabled
+    var hasUp: Bool { up != nil }
+
+    /// Returns the effective down depth: -1 for unlimited, 0 for no search, N for N levels
+    var downDepth: Int {
+        guard let d = down else { return 0 }
+        return d == 0 ? -1 : d  // 0 means unlimited
+    }
+
+    /// Returns the effective up depth: -1 for unlimited, 0 for no search, N for N levels
+    var upDepth: Int {
+        guard let u = up else { return 0 }
+        return u == 0 ? -1 : u  // 0 means unlimited
+    }
+}
+
+/// Check if a directory is a git root (contains .git)
+func isGitRoot(_ path: String) -> Bool {
+    let gitPath = (path as NSString).appendingPathComponent(".git")
+    var isDir: ObjCBool = false
+    return FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDir)
+}
+
+/// Collect thread files from a .threads directory at the given path
+func collectThreadsAtPath(_ dir: String, _ threads: inout [String]) {
+    let fm = FileManager.default
+    let threadsDir = (dir as NSString).appendingPathComponent(".threads")
+
+    var isDir: ObjCBool = false
+    guard fm.fileExists(atPath: threadsDir, isDirectory: &isDir), isDir.boolValue else {
+        return
+    }
+
+    guard let files = try? fm.contentsOfDirectory(atPath: threadsDir) else {
+        return
+    }
+
+    for file in files where file.hasSuffix(".md") {
+        let fullPath = (threadsDir as NSString).appendingPathComponent(file)
+        if !fullPath.contains("/archive/") {
+            threads.append(fullPath)
+        }
+    }
+}
+
+/// Recursively find threads going down into subdirectories
+func findThreadsDown(_ dir: String, _ ws: String, _ threads: inout [String],
+                     currentDepth: Int, maxDepth: Int, crossGitBoundaries: Bool) {
+    // Check depth limit (-1 means unlimited)
+    if maxDepth >= 0 && currentDepth >= maxDepth {
+        return
+    }
+
+    let fm = FileManager.default
+    guard let entries = try? fm.contentsOfDirectory(atPath: dir) else {
+        return
+    }
+
+    for entry in entries {
+        // Skip hidden directories
+        if entry.hasPrefix(".") {
+            continue
+        }
+
+        let subdir = (dir as NSString).appendingPathComponent(entry)
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: subdir, isDirectory: &isDir), isDir.boolValue else {
+            continue
+        }
+
+        // Check git boundary
+        if !crossGitBoundaries && subdir != ws && isGitRoot(subdir) {
+            continue
+        }
+
+        // Collect threads at this level
+        collectThreadsAtPath(subdir, &threads)
+
+        // Continue recursing
+        findThreadsDown(subdir, ws, &threads,
+                       currentDepth: currentDepth + 1,
+                       maxDepth: maxDepth,
+                       crossGitBoundaries: crossGitBoundaries)
+    }
+}
+
+/// Find threads going up into parent directories
+func findThreadsUp(_ dir: String, _ ws: String, _ threads: inout [String],
+                   currentDepth: Int, maxDepth: Int, crossGitBoundaries: Bool) {
+    // Check depth limit (-1 means unlimited)
+    if maxDepth >= 0 && currentDepth >= maxDepth {
+        return
+    }
+
+    let parent = (dir as NSString).deletingLastPathComponent
+    if parent == dir || parent.isEmpty {
+        return  // reached filesystem root
+    }
+
+    let absParent = (parent as NSString).standardizingPath
+    let absWs = (ws as NSString).standardizingPath
+
+    // Check git boundary: stop at workspace root unless crossing is allowed
+    if !crossGitBoundaries && !absParent.hasPrefix(absWs) {
+        return
+    }
+
+    // Collect threads at parent
+    collectThreadsAtPath(absParent, &threads)
+
+    // Continue up
+    findThreadsUp(absParent, ws, &threads,
+                 currentDepth: currentDepth + 1,
+                 maxDepth: maxDepth,
+                 crossGitBoundaries: crossGitBoundaries)
+}
+
+/// Find threads with direction and boundary controls
+func findThreadsWithOptions(_ startPath: String, _ ws: String, _ options: FindOptions) -> [String] {
+    var threads: [String] = []
+
+    let absStart = (startPath as NSString).standardizingPath
+
+    // Always collect threads at start_path
+    collectThreadsAtPath(absStart, &threads)
+
+    // Search down (subdirectories)
+    if options.hasDown {
+        let maxDepth = options.downDepth
+        findThreadsDown(absStart, ws, &threads,
+                       currentDepth: 0,
+                       maxDepth: maxDepth,
+                       crossGitBoundaries: options.noGitBoundDown)
+    }
+
+    // Search up (parent directories)
+    if options.hasUp {
+        let maxDepth = options.upDepth
+        findThreadsUp(absStart, ws, &threads,
+                     currentDepth: 0,
+                     maxDepth: maxDepth,
+                     crossGitBoundaries: options.noGitBoundUp)
+    }
+
+    // Sort and deduplicate
+    threads.sort()
+    return Array(Set(threads)).sorted()
+}

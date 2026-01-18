@@ -5,6 +5,38 @@ require 'pathname'
 require 'securerandom'
 
 module Threads
+  # Options for finding threads with direction and boundary controls
+  class FindOptions
+    attr_accessor :down, :up, :no_git_bound_down, :no_git_bound_up
+
+    def initialize
+      @down = nil  # nil = no down search, Integer = depth (0=unlimited)
+      @up = nil    # nil = no up search, Integer = depth (0=unlimited)
+      @no_git_bound_down = false
+      @no_git_bound_up = false
+    end
+
+    def has_down?
+      !@down.nil?
+    end
+
+    def has_up?
+      !@up.nil?
+    end
+
+    # Returns depth limit, -1 for unlimited
+    def down_depth
+      return 0 unless has_down?
+      @down == 0 ? -1 : @down
+    end
+
+    # Returns depth limit, -1 for unlimited
+    def up_depth
+      return 0 unless has_up?
+      @up == 0 ? -1 : @up
+    end
+  end
+
   # Workspace utilities for finding and navigating thread directories
   module Workspace
     class << self
@@ -62,6 +94,133 @@ module Threads
         end
 
         threads.sort
+      end
+
+      # Check if a directory is a git root (contains .git)
+      def git_root?(path)
+        git_path = File.join(path, '.git')
+        File.exist?(git_path) && (File.directory?(git_path) || File.file?(git_path))
+      end
+
+      # Find git root for a path using git command
+      def find_git_root_for_path(path)
+        Dir.chdir(path) do
+          output = `git rev-parse --show-toplevel 2>/dev/null`.strip
+          return output unless output.empty?
+        end
+        nil
+      rescue
+        nil
+      end
+
+      # Find threads with direction and boundary options
+      def find_threads_with_options(start_path, git_root, options)
+        threads = []
+
+        abs_start = File.expand_path(start_path)
+
+        # Always collect threads at start_path
+        collect_threads_at_path(abs_start, threads)
+
+        # Search down (subdirectories)
+        if options.has_down?
+          max_depth = options.down_depth
+          find_threads_down(abs_start, git_root, threads, 0, max_depth, options.no_git_bound_down)
+        end
+
+        # Search up (parent directories)
+        if options.has_up?
+          max_depth = options.up_depth
+          find_threads_up(abs_start, git_root, threads, 0, max_depth, options.no_git_bound_up)
+        end
+
+        # Sort and deduplicate
+        threads.uniq.sort
+      end
+
+      # Collect threads from .threads directory at the given path
+      def collect_threads_at_path(dir, threads)
+        threads_dir = File.join(dir, '.threads')
+        return unless File.directory?(threads_dir)
+
+        Dir.glob(File.join(threads_dir, '*.md')).each do |path|
+          next if path.include?('/archive/')
+          threads << path
+        end
+      end
+
+      # Recursively find threads going down into subdirectories
+      def find_threads_down(dir, git_root, threads, current_depth, max_depth, cross_git_boundaries)
+        # Check depth limit (-1 means unlimited)
+        return if max_depth >= 0 && current_depth >= max_depth
+
+        begin
+          entries = Dir.entries(dir)
+        rescue Errno::EACCES, Errno::ENOENT
+          return
+        end
+
+        entries.each do |name|
+          next if name.start_with?('.')
+          subdir = File.join(dir, name)
+          next unless File.directory?(subdir)
+
+          # Check git boundary
+          if !cross_git_boundaries && subdir != git_root && git_root?(subdir)
+            next
+          end
+
+          # Collect threads at this level
+          collect_threads_at_path(subdir, threads)
+
+          # Continue recursing
+          find_threads_down(subdir, git_root, threads, current_depth + 1, max_depth, cross_git_boundaries)
+        end
+      end
+
+      # Find threads going up into parent directories
+      def find_threads_up(dir, git_root, threads, current_depth, max_depth, cross_git_boundaries)
+        # Check depth limit (-1 means unlimited)
+        return if max_depth >= 0 && current_depth >= max_depth
+
+        parent = File.dirname(dir)
+        return if parent == dir # reached root
+
+        abs_parent = File.expand_path(parent)
+        abs_git_root = File.expand_path(git_root)
+
+        # Check git boundary: stop at git root unless crossing is allowed
+        unless cross_git_boundaries
+          return unless abs_parent.start_with?(abs_git_root)
+        end
+
+        # Collect threads at parent
+        collect_threads_at_path(abs_parent, threads)
+
+        # Continue up
+        find_threads_up(abs_parent, git_root, threads, current_depth + 1, max_depth, cross_git_boundaries)
+      end
+
+      # Parse thread path to get git-relative path
+      def parse_thread_relative_path(git_root, thread_path)
+        abs_git_root = File.expand_path(git_root)
+        abs_path = File.expand_path(thread_path)
+
+        # Get path relative to git root
+        rel = abs_path.sub("#{abs_git_root}/", '')
+        return '.' if rel == abs_path
+
+        # Extract the directory containing .threads
+        # Pattern: <path>/.threads/file.md -> return <path>
+        dir = File.dirname(rel)
+        if dir.end_with?('/.threads')
+          parent = File.dirname(dir)
+          return '.' if parent == '.' || parent.empty?
+          return parent
+        end
+        return '.' if dir == '.threads'
+
+        '.'
       end
 
       # Generate unique 6-char hex ID
