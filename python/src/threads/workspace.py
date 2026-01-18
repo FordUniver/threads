@@ -1,220 +1,274 @@
-"""Workspace and path resolution."""
+"""Workspace utilities: git root detection, path resolution, thread finding."""
 
-import os
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-
-from .storage import load_thread
 
 
 @dataclass
 class Scope:
-    """Resolved scope for thread operations."""
+    """Represents thread placement information. Path is relative to git root."""
 
-    threads_dir: Path
-    category: str | None  # None = workspace level
-    project: str | None  # None = category level
-    level_desc: str  # Human-readable description
+    threads_dir: Path  # path to .threads directory (absolute)
+    path: str  # path relative to git root (e.g., "src/models", "." for root)
+    level_desc: str  # human-readable description
 
 
 def get_workspace() -> Path:
-    """Get workspace path from WORKSPACE environment variable."""
-    ws = os.environ.get("WORKSPACE", "")
-    if not ws:
-        raise RuntimeError("WORKSPACE environment variable not set")
-    path = Path(ws)
-    if not path.is_dir():
-        raise RuntimeError(f"WORKSPACE directory does not exist: {ws}")
-    return path
+    """Find the git repository root from current directory.
+
+    Returns the git root path.
+    Raises ValueError if not in a git repository.
+    """
+    return find_git_root()
 
 
-def infer_scope(path: str | None, workspace: Path | None = None) -> Scope:
-    """Infer scope from a path specification.
+def find_git_root() -> Path:
+    """Find the git repository root using 'git rev-parse --show-toplevel'."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        root = result.stdout.strip()
+        if not root:
+            raise ValueError("Git root is empty")
+        return Path(root)
+    except subprocess.CalledProcessError:
+        raise ValueError(
+            "Not in a git repository. threads requires a git repo to define scope."
+        )
+
+
+def find_git_root_for_path(path: Path) -> Path:
+    """Find the git root for a specific path."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return Path(result.stdout.strip())
+    except subprocess.CalledProcessError:
+        raise ValueError(f"Not in a git repository at: {path}")
+
+
+def is_git_root(path: Path) -> bool:
+    """Check if a directory contains a .git folder."""
+    return (path / ".git").is_dir()
+
+
+def infer_scope(path_arg: str | None, git_root: Path | None = None) -> Scope:
+    """Determine the threads directory and scope from a path specification.
+
+    Path resolution rules:
+    - None or "": PWD
+    - ".": PWD (explicit)
+    - "./X/Y": PWD-relative
+    - "/X/Y": Absolute
+    - "X/Y" (no leading ./ or /): Git-root-relative
 
     Args:
-        path: Path notation - "." for workspace, "admin" for category, "admin/ssot" for project,
-              or None to infer from cwd.
-        workspace: Workspace root (detected if not provided).
+        path_arg: Path specification (optional)
+        git_root: Git root path (will be detected if not provided)
 
     Returns:
-        Scope with threads_dir, category, project, and level_desc.
+        Scope object with threads_dir, path, and level_desc
     """
-    if workspace is None:
-        workspace = get_workspace()
+    if git_root is None:
+        git_root = find_git_root()
 
-    # Handle explicit "." for workspace
-    if path == ".":
-        return Scope(
-            threads_dir=workspace / ".threads",
-            category=None,
-            project=None,
-            level_desc="workspace-level thread",
-        )
+    pwd = Path.cwd()
 
-    # Handle None - infer from cwd
-    if path is None:
-        cwd = Path.cwd().resolve()
-        workspace_resolved = workspace.resolve()
-        try:
-            rel = cwd.relative_to(workspace_resolved)
-        except ValueError:
-            # cwd outside workspace
-            return Scope(
-                threads_dir=workspace / ".threads",
-                category=None,
-                project=None,
-                level_desc="workspace-level thread",
-            )
-
-        parts = rel.parts
-        if not parts:
-            return Scope(
-                threads_dir=workspace / ".threads",
-                category=None,
-                project=None,
-                level_desc="workspace-level thread",
-            )
-        elif len(parts) == 1:
-            return Scope(
-                threads_dir=workspace / parts[0] / ".threads",
-                category=parts[0],
-                project=None,
-                level_desc=f"category-level thread ({parts[0]})",
-            )
-        else:
-            return Scope(
-                threads_dir=workspace / parts[0] / parts[1] / ".threads",
-                category=parts[0],
-                project=parts[1],
-                level_desc=f"project-level thread ({parts[0]}/{parts[1]})",
-            )
-
-    # Handle explicit path
-    # Try as absolute path first, always resolve for symlink safety
-    if Path(path).is_absolute():
-        abs_path = Path(path).resolve()
-    elif (workspace / path).is_dir():
-        abs_path = (workspace / path).resolve()
-    elif Path(path).is_dir():
-        abs_path = Path(path).resolve()
+    if path_arg is None or path_arg == "":
+        # No path argument: use PWD
+        target_path = pwd
+    elif path_arg == ".":
+        # Explicit ".": use PWD
+        target_path = pwd
+    elif path_arg.startswith("./"):
+        # PWD-relative path: ./X/Y
+        rel = path_arg[2:]
+        target_path = pwd / rel
+    elif path_arg.startswith("/"):
+        # Absolute path
+        target_path = Path(path_arg)
     else:
-        raise ValueError(f"Path not found: {path}")
+        # Git-root-relative path: X/Y
+        target_path = git_root / path_arg
 
-    workspace_resolved = workspace.resolve()
+    # Resolve to absolute for consistent comparison
+    target_path = target_path.resolve()
+    git_root_resolved = git_root.resolve()
+
+    # Check if directory exists
+    if not target_path.is_dir():
+        raise ValueError(f"Path not found or not a directory: {target_path}")
+
+    # Verify target is within the git repo
     try:
-        rel = abs_path.relative_to(workspace_resolved)
+        target_path.relative_to(git_root_resolved)
     except ValueError:
-        raise ValueError(f"Path must be within workspace: {path}")
-
-    parts = rel.parts
-    if not parts:
-        return Scope(
-            threads_dir=workspace / ".threads",
-            category=None,
-            project=None,
-            level_desc="workspace-level thread",
-        )
-    elif len(parts) == 1:
-        return Scope(
-            threads_dir=workspace / parts[0] / ".threads",
-            category=parts[0],
-            project=None,
-            level_desc=f"category-level thread ({parts[0]})",
-        )
-    else:
-        return Scope(
-            threads_dir=workspace / parts[0] / parts[1] / ".threads",
-            category=parts[0],
-            project=parts[1],
-            level_desc=f"project-level thread ({parts[0]}/{parts[1]})",
+        raise ValueError(
+            f"Path must be within git repository: {target_path} (git root: {git_root})"
         )
 
+    # Check if target is inside a nested git repo
+    if target_path != git_root_resolved:
+        check_path = target_path
+        while check_path != git_root_resolved:
+            if is_git_root(check_path):
+                raise ValueError(
+                    f"Path is inside a nested git repository at: {check_path}. "
+                    "Use --no-git-bound to cross git boundaries."
+                )
+            check_path = check_path.parent
 
-def parse_thread_path(file_path: Path, workspace: Path) -> tuple[str | None, str | None]:
-    """Extract category and project from thread file path.
+    # Compute path relative to git root
+    try:
+        rel_path = str(target_path.relative_to(git_root_resolved))
+    except ValueError:
+        rel_path = "."
 
-    Returns:
-        (category, project) where None means workspace/category level respectively.
+    if rel_path == "" or rel_path == ".":
+        rel_path = "."
+
+    # Build description
+    level_desc = "repo root" if rel_path == "." else rel_path
+
+    # Build threads directory path
+    threads_dir = target_path / ".threads"
+
+    return Scope(
+        threads_dir=threads_dir,
+        path=rel_path,
+        level_desc=level_desc,
+    )
+
+
+def parse_thread_path(file_path: Path, git_root: Path) -> str:
+    """Extract the git-relative path component from a thread file path.
+
+    Returns the path relative to git root (e.g., "src/models").
     """
+    git_root_resolved = git_root.resolve()
+    path_resolved = file_path.resolve()
+
+    # Get path relative to git root
     try:
-        rel = file_path.resolve().relative_to(workspace.resolve())
+        rel = str(path_resolved.relative_to(git_root_resolved))
     except ValueError:
-        return None, None
+        return "."
 
-    # Pattern: .threads/xxx.md -> workspace level
-    # Pattern: cat/.threads/xxx.md -> category level
-    # Pattern: cat/proj/.threads/xxx.md -> project level
-    parts = rel.parts
+    # Extract the directory containing .threads
+    # Pattern: <path>/.threads/file.md -> return <path>
+    parent = str(Path(rel).parent)
+    if parent.endswith("/.threads"):
+        grandparent = str(Path(parent).parent)
+        return "." if grandparent in ("", ".") else grandparent
+    if parent == ".threads":
+        return "."
 
-    if len(parts) == 2 and parts[0] == ".threads":
-        return None, None
-    elif len(parts) == 3 and parts[1] == ".threads":
-        return parts[0], None
-    elif len(parts) == 4 and parts[2] == ".threads":
-        return parts[0], parts[1]
-
-    return None, None
+    return "."
 
 
-def find_thread_by_ref(ref: str, workspace: Path | None = None) -> Path:
-    """Find a thread by ID or name reference.
+def path_relative_to_git_root(git_root: Path, path: Path) -> str:
+    """Return the path relative to git root for display purposes."""
+    git_root_resolved = git_root.resolve()
+    path_resolved = path.resolve()
+
+    try:
+        rel = str(path_resolved.relative_to(git_root_resolved))
+        return "." if rel == "" else rel
+    except ValueError:
+        return str(path)
+
+
+def pwd_relative_to_git_root(git_root: Path) -> str:
+    """Return the current working directory relative to git root."""
+    return path_relative_to_git_root(git_root, Path.cwd())
+
+
+def find_thread_by_ref(ref: str, git_root: Path | None = None) -> Path:
+    """Find a thread by ID or name (with fuzzy matching).
 
     Args:
-        ref: 6-char hex ID or substring of thread name.
-        workspace: Workspace root.
+        ref: Thread reference (ID or name)
+        git_root: Git root path (detected if not provided)
 
     Returns:
-        Path to thread file.
+        Path to the thread file
 
     Raises:
-        ValueError: If thread not found or ambiguous.
+        ValueError: If thread not found or ambiguous
     """
-    from .storage import find_threads
+    from .storage import find_threads, load_thread
 
-    if workspace is None:
-        workspace = get_workspace()
+    if git_root is None:
+        git_root = get_workspace()
 
-    # Fast path: try glob by ID prefix
+    threads = find_threads(git_root)
+
+    # Fast path: exact ID match (6-char hex)
     if re.match(r"^[0-9a-f]{6}$", ref):
-        matches = []
-        for pattern in [
-            f".threads/{ref}-*.md",
-            f"*/.threads/{ref}-*.md",
-            f"*/*/.threads/{ref}-*.md",
-        ]:
-            matches.extend(workspace.glob(pattern))
+        for path in threads:
+            if path.stem.startswith(ref + "-"):
+                return path
 
-        if len(matches) == 1:
-            return matches[0]
-        elif len(matches) > 1:
-            raise ValueError(f"Ambiguous ID prefix: {ref}")
+    # Slow path: name matching
+    ref_lower = ref.lower()
+    substring_matches: list[Path] = []
 
-    # Slow path: search by name
-    all_threads = find_threads(workspace)
-    substring_matches: list[tuple[str, str, Path]] = []
+    for path in threads:
+        name = extract_name_from_path(path)
 
-    for path in all_threads:
-        thread = load_thread(path)
-        thread_id = thread.id or "????"
-
-        # Extract slug from filename (e.g., "abc123-my-thread.md" → "my-thread")
-        filename = path.stem  # Remove .md
-        slug = filename[7:] if len(filename) > 7 and filename[6] == "-" else filename
-
-        # Exact match by name or slug
-        if thread.name == ref or slug == ref:
+        # Exact name match
+        if name == ref:
             return path
 
-        # Substring match (case-insensitive) against both name and slug
-        ref_lower = ref.lower()
-        if ref_lower in thread.name.lower() or ref_lower in slug.lower():
-            substring_matches.append((thread_id, thread.name, path))
+        # Substring match (case-insensitive)
+        if ref_lower in name.lower():
+            substring_matches.append(path)
 
     if len(substring_matches) == 1:
-        return substring_matches[0][2]
-    elif len(substring_matches) > 1:
-        matches_str = "\n".join(f"  {tid}  {name}" for tid, name, _ in substring_matches)
-        raise ValueError(f"Ambiguous reference '{ref}' matches {len(substring_matches)} threads:\n{matches_str}")
+        return substring_matches[0]
+
+    if len(substring_matches) > 1:
+        ids = [
+            f"{path.stem[:6]} ({extract_name_from_path(path)})"
+            for path in substring_matches
+        ]
+        raise ValueError(
+            f"Ambiguous reference '{ref}' matches {len(substring_matches)} threads: "
+            + ", ".join(ids)
+        )
 
     raise ValueError(f"Thread not found: {ref}")
+
+
+def extract_name_from_path(path: Path) -> str:
+    """Extract the name portion from a thread filename.
+
+    Filename format: <6-char-id>-<name>.md
+    Returns the name portion.
+    """
+    stem = path.stem
+    if len(stem) > 7 and stem[6] == "-":
+        return stem[7:]
+    return stem
+
+
+def extract_id_from_path(path: Path) -> str | None:
+    """Extract the ID portion from a thread filename.
+
+    Filename format: <6-char-id>-<name>.md
+    Returns the ID if valid, None otherwise.
+    """
+    stem = path.stem
+    if len(stem) >= 6 and re.match(r"^[0-9a-f]{6}$", stem[:6]):
+        return stem[:6]
+    return None

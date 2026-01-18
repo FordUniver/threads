@@ -28,8 +28,12 @@ var newCmd = &cobra.Command{
 	Short: "Create a new thread",
 	Long: `Create a new thread at the specified level.
 
-If path is omitted, the level is inferred from the current directory.
-Use "." for workspace level.`,
+Path resolution:
+  (none)  → PWD (current directory)
+  .       → PWD (explicit)
+  ./X/Y   → PWD-relative
+  /X/Y    → Absolute
+  X/Y     → Git-root-relative`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runNew,
 }
@@ -43,20 +47,16 @@ func init() {
 }
 
 func runNew(cmd *cobra.Command, args []string) error {
-	ws := getWorkspace()
+	gitRoot := getWorkspace()
 
-	var path, title string
+	var pathArg, title string
 	if len(args) == 2 {
-		path = args[0]
+		pathArg = args[0]
 		title = args[1]
 	} else {
 		title = args[0]
-		// Infer path from cwd
-		cwd, err := os.Getwd()
-		if err != nil {
-			return err
-		}
-		path = cwd
+		// No path argument, will use PWD
+		pathArg = ""
 	}
 
 	if title == "" {
@@ -89,14 +89,14 @@ func runNew(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Determine scope
-	scope, err := workspace.InferScope(ws, path)
+	// Determine scope using new path resolution
+	scope, err := workspace.InferScope(gitRoot, pathArg)
 	if err != nil {
 		return err
 	}
 
 	// Generate ID
-	id, err := workspace.GenerateID(ws)
+	id, err := workspace.GenerateID(gitRoot)
 	if err != nil {
 		return err
 	}
@@ -145,8 +145,9 @@ func runNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("writing thread file: %w", err)
 	}
 
-	relPath, _ := filepath.Rel(ws, threadPath)
-	fmt.Printf("Created %s: %s\n", scope.LevelDesc, id)
+	// Display path relative to git root
+	relPath := workspace.PathRelativeToGitRoot(gitRoot, threadPath)
+	fmt.Printf("Created thread in %s: %s\n", scope.LevelDesc, id)
 	fmt.Printf("  → %s\n", relPath)
 
 	if newBody == "" {
@@ -157,9 +158,9 @@ func runNew(cmd *cobra.Command, args []string) error {
 	if newCommit {
 		msg := newMsg
 		if msg == "" {
-			msg = git.GenerateCommitMessage(ws, []string{threadPath})
+			msg = git.GenerateCommitMessage(gitRoot, []string{threadPath})
 		}
-		if err := git.AutoCommit(ws, threadPath, msg); err != nil {
+		if err := git.AutoCommit(gitRoot, threadPath, msg); err != nil {
 			return err
 		}
 	} else {

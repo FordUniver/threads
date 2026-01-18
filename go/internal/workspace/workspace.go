@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -20,174 +21,268 @@ var (
 	hexIDRe       = regexp.MustCompile(`^[0-9a-f]{6}$`)
 )
 
-// isUnderWorkspace checks if path is contained within workspace using proper path comparison
-func isUnderWorkspace(path, workspace string) bool {
-	rel, err := filepath.Rel(workspace, path)
-	if err != nil {
-		return false
-	}
-	return !strings.HasPrefix(rel, "..")
-}
-
-// Find returns the workspace root from $WORKSPACE
+// Find returns the git repository root from current directory.
+// Returns an error if not in a git repository.
 func Find() (string, error) {
-	ws := os.Getenv("WORKSPACE")
-	if ws == "" {
-		return "", fmt.Errorf("WORKSPACE environment variable not set")
-	}
-	ws = filepath.Clean(ws)
-	if _, err := os.Stat(ws); os.IsNotExist(err) {
-		return "", fmt.Errorf("WORKSPACE directory does not exist: %s", ws)
-	}
-	return ws, nil
+	return FindGitRoot()
 }
 
-// FindAllThreads returns all thread file paths in the workspace
-func FindAllThreads(ws string) ([]string, error) {
+// FindGitRoot uses git rev-parse --show-toplevel to find the repository root.
+func FindGitRoot() (string, error) {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("not in a git repository. threads requires a git repo to define scope")
+	}
+
+	root := strings.TrimSpace(string(output))
+	if root == "" {
+		return "", fmt.Errorf("git root is empty")
+	}
+
+	return root, nil
+}
+
+// FindGitRootForPath finds the git root for a specific path.
+func FindGitRootForPath(path string) (string, error) {
+	cmd := exec.Command("git", "-C", path, "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("not in a git repository at: %s", path)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+// IsGitRoot checks if a directory contains a .git folder.
+func IsGitRoot(path string) bool {
+	info, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil && info.IsDir()
+}
+
+// FindAllThreads returns all thread file paths within the git root.
+// Scans recursively, respecting git boundaries (stops at nested git repos).
+func FindAllThreads(gitRoot string) ([]string, error) {
 	var threads []string
-
-	patterns := []string{
-		filepath.Join(ws, ".threads", "*.md"),
-		filepath.Join(ws, "*", ".threads", "*.md"),
-		filepath.Join(ws, "*", "*", ".threads", "*.md"),
+	if err := findThreadsRecursive(gitRoot, gitRoot, &threads); err != nil {
+		return nil, err
 	}
-
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			return nil, err
-		}
-		for _, m := range matches {
-			// Skip archive directories
-			if strings.Contains(m, "/archive/") {
-				continue
-			}
-			threads = append(threads, m)
-		}
-	}
-
 	sort.Strings(threads)
 	return threads, nil
 }
 
-// Scope represents thread placement information
-type Scope struct {
-	ThreadsDir string // path to .threads directory
-	Category   string // category name or "-" for workspace level
-	Project    string // project name or "-" for category/workspace level
-	LevelDesc  string // human-readable description
-}
-
-// InferScope determines the threads directory and level from a path
-func InferScope(ws, path string) (*Scope, error) {
-	// Handle explicit "." for workspace level
-	if path == "." {
-		return &Scope{
-			ThreadsDir: filepath.Join(ws, ".threads"),
-			Category:   "-",
-			Project:    "-",
-			LevelDesc:  "workspace-level thread",
-		}, nil
-	}
-
-	var absPath string
-
-	// Resolve to absolute path
-	if filepath.IsAbs(path) {
-		absPath = path
-	} else if info, err := os.Stat(filepath.Join(ws, path)); err == nil && info.IsDir() {
-		absPath = filepath.Join(ws, path)
-	} else if info, err := os.Stat(path); err == nil && info.IsDir() {
-		absPath, _ = filepath.Abs(path)
-	} else {
-		return nil, fmt.Errorf("path not found: %s", path)
-	}
-
-	// Must be within workspace
-	if !isUnderWorkspace(absPath, ws) {
-		return &Scope{
-			ThreadsDir: filepath.Join(ws, ".threads"),
-			Category:   "-",
-			Project:    "-",
-			LevelDesc:  "workspace-level thread",
-		}, nil
-	}
-
-	rel := strings.TrimPrefix(absPath, ws)
-	rel = strings.TrimPrefix(rel, string(filepath.Separator))
-
-	if rel == "" {
-		return &Scope{
-			ThreadsDir: filepath.Join(ws, ".threads"),
-			Category:   "-",
-			Project:    "-",
-			LevelDesc:  "workspace-level thread",
-		}, nil
-	}
-
-	parts := strings.SplitN(rel, string(filepath.Separator), 3)
-	category := parts[0]
-	project := "-"
-
-	if len(parts) >= 2 && parts[1] != "" {
-		project = parts[1]
-	}
-
-	if project == "-" {
-		return &Scope{
-			ThreadsDir: filepath.Join(ws, category, ".threads"),
-			Category:   category,
-			Project:    "-",
-			LevelDesc:  fmt.Sprintf("category-level thread (%s)", category),
-		}, nil
-	}
-
-	return &Scope{
-		ThreadsDir: filepath.Join(ws, category, project, ".threads"),
-		Category:   category,
-		Project:    project,
-		LevelDesc:  fmt.Sprintf("project-level thread (%s/%s)", category, project),
-	}, nil
-}
-
-// ParseThreadPath extracts category, project, and name from a thread file path
-func ParseThreadPath(ws, path string) (category, project, name string) {
-	rel := strings.TrimPrefix(path, ws)
-	rel = strings.TrimPrefix(rel, string(filepath.Separator))
-
-	filename := filepath.Base(path)
-	filename = strings.TrimSuffix(filename, ".md")
-
-	// Extract name, stripping ID prefix if present
-	name = thread.ExtractNameFromPath(path)
-	if name == "" {
-		name = filename
-	}
-
-	// Check if workspace-level
-	if strings.HasPrefix(rel, ".threads/") {
-		return "-", "-", name
-	}
-
-	// Extract category and project from path like: category/project/.threads/name.md
-	parts := strings.Split(rel, string(filepath.Separator))
-	if len(parts) >= 2 {
-		category = parts[0]
-		if parts[1] == ".threads" {
-			project = "-"
-		} else if len(parts) >= 3 {
-			project = parts[1]
+// findThreadsRecursive recursively finds .threads directories and collects thread files.
+// Stops at nested git repositories (directories containing .git).
+func findThreadsRecursive(dir, gitRoot string, threads *[]string) error {
+	// Check for .threads directory here
+	threadsDir := filepath.Join(dir, ".threads")
+	if info, err := os.Stat(threadsDir); err == nil && info.IsDir() {
+		entries, err := os.ReadDir(threadsDir)
+		if err == nil {
+			for _, entry := range entries {
+				if entry.IsDir() {
+					continue
+				}
+				if strings.HasSuffix(entry.Name(), ".md") {
+					path := filepath.Join(threadsDir, entry.Name())
+					// Skip archive subdirectory
+					if !strings.Contains(path, "/archive/") {
+						*threads = append(*threads, path)
+					}
+				}
+			}
 		}
 	}
 
-	return category, project, name
+	// Recurse into subdirectories
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil // Silently skip unreadable directories
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		name := entry.Name()
+
+		// Skip hidden directories (except we already handled .threads)
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+
+		subdir := filepath.Join(dir, name)
+
+		// Stop at nested git repos (unless it's the root itself)
+		if subdir != gitRoot && IsGitRoot(subdir) {
+			continue
+		}
+
+		findThreadsRecursive(subdir, gitRoot, threads)
+	}
+
+	return nil
 }
 
-// GenerateID creates a unique 6-character hex ID
-func GenerateID(ws string) (string, error) {
+// Scope represents thread placement information.
+// Path is relative to git root.
+type Scope struct {
+	ThreadsDir string // path to .threads directory (absolute)
+	Path       string // path relative to git root (e.g., "src/models", "." for root)
+	LevelDesc  string // human-readable description
+}
+
+// InferScope determines the threads directory and scope from a path specification.
+//
+// Path resolution rules:
+// - "" or empty: PWD
+// - ".": PWD (explicit)
+// - "./X/Y": PWD-relative
+// - "/X/Y": Absolute
+// - "X/Y" (no leading ./ or /): Git-root-relative
+func InferScope(gitRoot, pathArg string) (*Scope, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("cannot get current directory: %w", err)
+	}
+
+	var targetPath string
+
+	switch {
+	case pathArg == "" || pathArg == ".":
+		// No path argument or explicit ".": use PWD
+		targetPath = pwd
+
+	case strings.HasPrefix(pathArg, "./"):
+		// PWD-relative path: ./X/Y
+		rel := strings.TrimPrefix(pathArg, "./")
+		targetPath = filepath.Join(pwd, rel)
+
+	case strings.HasPrefix(pathArg, "/"):
+		// Absolute path
+		targetPath = pathArg
+
+	default:
+		// Git-root-relative path: X/Y
+		targetPath = filepath.Join(gitRoot, pathArg)
+	}
+
+	// Clean and resolve path
+	targetPath = filepath.Clean(targetPath)
+
+	// Check if directory exists
+	if info, err := os.Stat(targetPath); err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("path not found or not a directory: %s", targetPath)
+	}
+
+	// Get absolute paths for comparison
+	absTarget, err := filepath.Abs(targetPath)
+	if err != nil {
+		absTarget = targetPath
+	}
+	absGitRoot, err := filepath.Abs(gitRoot)
+	if err != nil {
+		absGitRoot = gitRoot
+	}
+
+	// Verify target is within the git repo
+	if !strings.HasPrefix(absTarget, absGitRoot) {
+		return nil, fmt.Errorf("path must be within git repository: %s (git root: %s)",
+			targetPath, gitRoot)
+	}
+
+	// Check if target is inside a nested git repo
+	if absTarget != absGitRoot {
+		checkPath := absTarget
+		for checkPath != absGitRoot {
+			if IsGitRoot(checkPath) {
+				return nil, fmt.Errorf("path is inside a nested git repository at: %s. Use --no-git-bound to cross git boundaries",
+					checkPath)
+			}
+			checkPath = filepath.Dir(checkPath)
+		}
+	}
+
+	// Compute path relative to git root
+	relPath, err := filepath.Rel(absGitRoot, absTarget)
+	if err != nil || relPath == "" {
+		relPath = "."
+	}
+	if relPath == "." {
+		// Explicitly use "." for root
+	}
+
+	// Build description
+	levelDesc := relPath
+	if relPath == "." {
+		levelDesc = "repo root"
+	}
+
+	// Build threads directory path
+	threadsDir := filepath.Join(absTarget, ".threads")
+
+	return &Scope{
+		ThreadsDir: threadsDir,
+		Path:       relPath,
+		LevelDesc:  levelDesc,
+	}, nil
+}
+
+// ParseThreadPath extracts the git-relative path component from a thread file path.
+// Returns the path relative to git root (e.g., "src/models").
+func ParseThreadPath(gitRoot, threadPath string) string {
+	absGitRoot, _ := filepath.Abs(gitRoot)
+	absPath, _ := filepath.Abs(threadPath)
+
+	// Get path relative to git root
+	rel, err := filepath.Rel(absGitRoot, absPath)
+	if err != nil {
+		return "."
+	}
+
+	// Extract the directory containing .threads
+	// Pattern: <path>/.threads/file.md -> return <path>
+	dir := filepath.Dir(rel)
+	if strings.HasSuffix(dir, "/.threads") {
+		parent := filepath.Dir(dir)
+		if parent == "." || parent == "" {
+			return "."
+		}
+		return parent
+	}
+	if dir == ".threads" {
+		return "."
+	}
+
+	return "."
+}
+
+// PathRelativeToGitRoot returns the path relative to git root for display purposes.
+func PathRelativeToGitRoot(gitRoot, path string) string {
+	absGitRoot, _ := filepath.Abs(gitRoot)
+	absPath, _ := filepath.Abs(path)
+
+	rel, err := filepath.Rel(absGitRoot, absPath)
+	if err != nil || rel == "" {
+		return "."
+	}
+	return rel
+}
+
+// PWDRelativeToGitRoot returns the current working directory relative to git root.
+func PWDRelativeToGitRoot(gitRoot string) (string, error) {
+	pwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return PathRelativeToGitRoot(gitRoot, pwd), nil
+}
+
+// GenerateID creates a unique 6-character hex ID.
+func GenerateID(gitRoot string) (string, error) {
 	existing := make(map[string]bool)
 
-	threads, err := FindAllThreads(ws)
+	threads, err := FindAllThreads(gitRoot)
 	if err != nil {
 		return "", err
 	}
@@ -213,7 +308,7 @@ func GenerateID(ws string) (string, error) {
 	return "", fmt.Errorf("could not generate unique ID after 10 attempts")
 }
 
-// Slugify converts a title to kebab-case filename
+// Slugify converts a title to kebab-case filename.
 func Slugify(title string) string {
 	// Convert to lowercase
 	s := strings.ToLower(title)
@@ -230,9 +325,9 @@ func Slugify(title string) string {
 	return s
 }
 
-// FindByRef locates a thread by ID or name (with fuzzy matching)
-func FindByRef(ws, ref string) (string, error) {
-	threads, err := FindAllThreads(ws)
+// FindByRef locates a thread by ID or name (with fuzzy matching).
+func FindByRef(gitRoot, ref string) (string, error) {
+	threads, err := FindAllThreads(gitRoot)
 	if err != nil {
 		return "", err
 	}

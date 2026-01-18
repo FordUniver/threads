@@ -13,7 +13,7 @@ pub struct MoveArgs {
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// New path (category or category/project)
+    /// New path (git-root-relative, ./pwd-relative, or absolute)
     new_path: String,
 
     /// Commit after moving
@@ -25,13 +25,13 @@ pub struct MoveArgs {
     m: Option<String>,
 }
 
-pub fn run(args: MoveArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: MoveArgs, git_root: &Path) -> Result<(), String> {
     // Find source thread
-    let src_file = workspace::find_by_ref(ws, &args.id)?;
+    let src_file = workspace::find_by_ref(git_root, &args.id)?;
 
     // Resolve destination scope
-    let scope = workspace::infer_scope(ws, &args.new_path)
-        .map_err(|_| format!("invalid path: {}", args.new_path))?;
+    let scope = workspace::infer_scope(git_root, Some(&args.new_path))
+        .map_err(|e| format!("invalid path '{}': {}", args.new_path, e))?;
 
     // Ensure dest .threads/ exists
     fs::create_dir_all(&scope.threads_dir)
@@ -50,25 +50,18 @@ pub fn run(args: MoveArgs, ws: &Path) -> Result<(), String> {
         ));
     }
 
-    fs::rename(&src_file, &dest_file)
-        .map_err(|e| format!("moving file: {}", e))?;
+    fs::rename(&src_file, &dest_file).map_err(|e| format!("moving file: {}", e))?;
 
-    let rel_dest = dest_file
-        .strip_prefix(ws)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| dest_file.to_string_lossy().to_string());
+    let rel_dest = workspace::path_relative_to_git_root(git_root, &dest_file);
 
     println!("Moved to {}", scope.level_desc);
     println!("  → {}", rel_dest);
 
     // Commit if requested
     if args.commit {
-        let rel_src = src_file
-            .strip_prefix(ws)
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| src_file.to_string_lossy().to_string());
+        let rel_src = workspace::path_relative_to_git_root(git_root, &src_file);
 
-        git::add(ws, &[&rel_src, &rel_dest])?;
+        git::add(git_root, &[&rel_src, &rel_dest])?;
 
         let msg = args.m.unwrap_or_else(|| {
             format!(
@@ -78,7 +71,7 @@ pub fn run(args: MoveArgs, ws: &Path) -> Result<(), String> {
             )
         });
 
-        git::commit(ws, &[rel_src, rel_dest], &msg)?;
+        git::commit(git_root, &[rel_src, rel_dest], &msg)?;
 
         eprintln!("Note: Changes are local. Push with 'git push' when ready.");
     } else {

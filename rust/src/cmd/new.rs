@@ -12,8 +12,12 @@ use crate::workspace;
 #[derive(Args)]
 pub struct NewArgs {
     /// [path] title - Path is optional, title is required
-    /// If one argument: treated as title (path inferred from cwd)
-    /// If two arguments: first is path, second is title
+    /// Path resolution:
+    ///   (none)  → PWD (current directory)
+    ///   .       → PWD (explicit)
+    ///   ./X/Y   → PWD-relative
+    ///   /X/Y    → Absolute
+    ///   X/Y     → Git-root-relative
     #[arg(required = true, num_args = 1..=2)]
     args: Vec<String>,
 
@@ -38,7 +42,7 @@ pub struct NewArgs {
     m: Option<String>,
 }
 
-pub fn run(args: NewArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
     // Validate status early
     if !thread::is_valid_status(&args.status) {
         return Err(format!(
@@ -48,14 +52,11 @@ pub fn run(args: NewArgs, ws: &Path) -> Result<(), String> {
     }
 
     // Parse positional args: either [title] or [path, title]
-    let (path, title) = if args.args.len() == 2 {
-        (args.args[0].clone(), args.args[1].clone())
+    let (path_arg, title) = if args.args.len() == 2 {
+        (Some(args.args[0].as_str()), args.args[1].clone())
     } else if args.args.len() == 1 {
-        // Single arg is title, infer path from cwd
-        let path = std::env::current_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| ".".to_string());
-        (path, args.args[0].clone())
+        // Single arg is title, no path specified (will use PWD)
+        (None, args.args[0].clone())
     } else {
         return Err("title is required".to_string());
     };
@@ -82,11 +83,11 @@ pub fn run(args: NewArgs, ws: &Path) -> Result<(), String> {
         args.body.clone()
     };
 
-    // Determine scope
-    let scope = workspace::infer_scope(ws, &path)?;
+    // Determine scope using new path resolution
+    let scope = workspace::infer_scope(git_root, path_arg)?;
 
     // Generate ID
-    let id = workspace::generate_id(ws)?;
+    let id = workspace::generate_id(git_root)?;
 
     // Ensure threads directory exists
     fs::create_dir_all(&scope.threads_dir)
@@ -127,15 +128,12 @@ pub fn run(args: NewArgs, ws: &Path) -> Result<(), String> {
     content.push_str(&format!("- **{}** Created thread.\n", timestamp));
 
     // Write file
-    fs::write(&thread_path, &content)
-        .map_err(|e| format!("writing thread file: {}", e))?;
+    fs::write(&thread_path, &content).map_err(|e| format!("writing thread file: {}", e))?;
 
-    let rel_path = thread_path
-        .strip_prefix(ws)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| thread_path.to_string_lossy().to_string());
+    // Display path relative to git root
+    let rel_path = workspace::path_relative_to_git_root(git_root, &thread_path);
 
-    println!("Created {}: {}", scope.level_desc, id);
+    println!("Created thread in {}: {}", scope.level_desc, id);
     println!("  → {}", rel_path);
 
     if body.is_empty() {
@@ -145,9 +143,9 @@ pub fn run(args: NewArgs, ws: &Path) -> Result<(), String> {
     // Commit if requested
     if args.commit {
         let msg = args.m.unwrap_or_else(|| {
-            git::generate_commit_message(ws, &[thread_path.to_string_lossy().to_string()])
+            git::generate_commit_message(git_root, &[thread_path.to_string_lossy().to_string()])
         });
-        git::auto_commit(ws, &thread_path, &msg)?;
+        git::auto_commit(git_root, &thread_path, &msg)?;
     } else {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",

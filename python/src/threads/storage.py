@@ -217,19 +217,55 @@ def save_thread(thread: Thread) -> None:
     os.rename(temp_path, thread.file_path)  # Atomic on POSIX
 
 
-def find_threads(workspace: Path) -> list[Path]:
-    """Find all thread files in workspace."""
-    threads = []
-    # Check workspace, category, and project levels using glob patterns
-    patterns = [
-        ".threads/*.md",
-        "*/.threads/*.md",
-        "*/*/.threads/*.md",
-    ]
-    for pattern in patterns:
-        threads.extend(workspace.glob(pattern))
+def _is_git_root(path: Path) -> bool:
+    """Check if a directory contains a .git folder."""
+    return (path / ".git").is_dir()
 
-    # Filter out archive directories
-    threads = [t for t in threads if "/archive/" not in str(t)]
 
+def _find_threads_recursive(
+    dir_path: Path, git_root: Path, threads: list[Path]
+) -> None:
+    """Recursively find .threads directories and collect thread files.
+
+    Stops at nested git repositories (directories containing .git).
+    """
+    # Check for .threads directory here
+    threads_dir = dir_path / ".threads"
+    if threads_dir.is_dir():
+        for entry in threads_dir.iterdir():
+            if entry.is_file() and entry.suffix == ".md":
+                # Skip archive subdirectory
+                if "/archive/" not in str(entry):
+                    threads.append(entry)
+
+    # Recurse into subdirectories
+    try:
+        for entry in dir_path.iterdir():
+            if not entry.is_dir():
+                continue
+
+            name = entry.name
+
+            # Skip hidden directories (except we already handled .threads)
+            if name.startswith("."):
+                continue
+
+            # Stop at nested git repos (unless it's the root itself)
+            if entry != git_root and _is_git_root(entry):
+                continue
+
+            _find_threads_recursive(entry, git_root, threads)
+    except PermissionError:
+        pass  # Silently skip unreadable directories
+
+
+def find_threads(git_root: Path) -> list[Path]:
+    """Find all thread files in git repository.
+
+    Scans recursively, respecting git boundaries (stops at nested git repos).
+    """
+    threads: list[Path] = []
+    _find_threads_recursive(git_root, git_root, threads)
+
+    # Sort by modification time (most recent first)
     return sorted(threads, key=lambda p: p.stat().st_mtime, reverse=True)

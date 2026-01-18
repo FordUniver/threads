@@ -7,30 +7,35 @@ from pathlib import Path
 from ..git import git_add, git_commit, is_modified, get_file_status
 from ..models import LogEntry, Thread, validate_status
 from ..storage import find_threads, load_thread, save_thread
-from ..workspace import find_thread_by_ref, get_workspace, infer_scope, parse_thread_path
+from ..workspace import (
+    find_thread_by_ref,
+    get_workspace,
+    infer_scope,
+    path_relative_to_git_root,
+)
 
 
-def auto_commit(file: Path, message: str, workspace: Path) -> None:
+def auto_commit(file: Path, message: str, git_root: Path) -> None:
     """Stage and commit a file (push is opt-in)."""
     try:
-        git_add(file, workspace)
-        git_commit(message, workspace)
+        git_add(file, git_root)
+        git_commit(message, git_root)
     except Exception as e:
         print(f"ERROR: git operation failed: {e}", file=sys.stderr)
         raise
 
 
-def auto_commit_remove(rel_path: Path, message: str, workspace: Path) -> None:
+def auto_commit_remove(rel_path: Path, message: str, git_root: Path) -> None:
     """Stage removal and commit (push is opt-in)."""
     try:
-        git_add(rel_path, workspace)
-        git_commit(message, workspace)
+        git_add(rel_path, git_root)
+        git_commit(message, git_root)
     except Exception as e:
         print(f"ERROR: git operation failed: {e}", file=sys.stderr)
         raise
 
 
-def generate_commit_message(files: list[Path], workspace: Path) -> str:
+def generate_commit_message(files: list[Path], git_root: Path) -> str:
     """Generate commit message for thread changes."""
     added = []
     modified = []
@@ -38,7 +43,7 @@ def generate_commit_message(files: list[Path], workspace: Path) -> str:
 
     for file in files:
         name = file.stem
-        status = get_file_status(file, workspace)
+        status = get_file_status(file, git_root)
         if status == "added":
             added.append(name)
         elif status == "deleted":
@@ -94,8 +99,8 @@ def cmd_status(
     # Validate status before proceeding
     validate_status(new_status)
 
-    workspace = get_workspace()
-    file_path = find_thread_by_ref(ref, workspace)
+    git_root = get_workspace()
+    file_path = find_thread_by_ref(ref, git_root)
     thread = load_thread(file_path)
 
     old_status = thread.status
@@ -107,15 +112,15 @@ def cmd_status(
     if do_commit:
         if message is None:
             message = f"threads: update {file_path.stem}"
-        auto_commit(file_path, message, workspace)
+        auto_commit(file_path, message, git_root)
     else:
         print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.", file=sys.stderr)
 
 
 def cmd_resolve(ref: str, do_commit: bool = False, message: str | None = None) -> None:
     """Mark thread as resolved."""
-    workspace = get_workspace()
-    file_path = find_thread_by_ref(ref, workspace)
+    git_root = get_workspace()
+    file_path = find_thread_by_ref(ref, git_root)
     thread = load_thread(file_path)
 
     old_status = thread.status
@@ -129,7 +134,7 @@ def cmd_resolve(ref: str, do_commit: bool = False, message: str | None = None) -
     if do_commit:
         if message is None:
             message = f"threads: update {file_path.stem}"
-        auto_commit(file_path, message, workspace)
+        auto_commit(file_path, message, git_root)
     else:
         print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.", file=sys.stderr)
 
@@ -144,8 +149,8 @@ def cmd_reopen(
     # Validate status before proceeding
     validate_status(new_status)
 
-    workspace = get_workspace()
-    file_path = find_thread_by_ref(ref, workspace)
+    git_root = get_workspace()
+    file_path = find_thread_by_ref(ref, git_root)
     thread = load_thread(file_path)
 
     old_status = thread.status
@@ -159,7 +164,7 @@ def cmd_reopen(
     if do_commit:
         if message is None:
             message = f"threads: update {file_path.stem}"
-        auto_commit(file_path, message, workspace)
+        auto_commit(file_path, message, git_root)
     else:
         print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.", file=sys.stderr)
 
@@ -171,11 +176,11 @@ def cmd_move(
     message: str | None = None,
 ) -> None:
     """Move thread to a new location."""
-    workspace = get_workspace()
-    src_file = find_thread_by_ref(ref, workspace)
+    git_root = get_workspace()
+    src_file = find_thread_by_ref(ref, git_root)
 
-    # Resolve destination
-    scope = infer_scope(new_path, workspace)
+    # Resolve destination using new path resolution
+    scope = infer_scope(new_path, git_root)
 
     # Ensure dest .threads/ exists
     scope.threads_dir.mkdir(parents=True, exist_ok=True)
@@ -187,18 +192,19 @@ def cmd_move(
         raise ValueError(f"Thread already exists at destination: {dest_file}")
 
     src_file.rename(dest_file)
-    rel_dest = dest_file.relative_to(workspace)
+    rel_dest = path_relative_to_git_root(git_root, dest_file)
 
     print(f"Moved to {scope.level_desc}")
     print(f"  → {rel_dest}")
 
     if do_commit:
-        rel_src = src_file.relative_to(workspace)
-        git_add(rel_src, workspace)
-        git_add(dest_file, workspace)
+        rel_src = path_relative_to_git_root(git_root, src_file)
+        git_add(Path(rel_src), git_root)
+        git_add(dest_file, git_root)
         if message is None:
             message = f"threads: move {src_file.stem} to {scope.level_desc}"
-        git_commit(message, workspace)
+        git_commit(message, git_root)
+        print("Note: Changes are local. Push with 'git push' when ready.")
     else:
         print("Note: Use --commit to commit this move", file=sys.stderr)
 
@@ -210,21 +216,21 @@ def cmd_commit(
     auto_msg: bool = False,
 ) -> None:
     """Commit thread changes."""
-    workspace = get_workspace()
+    git_root = get_workspace()
     files: list[Path] = []
 
     if pending:
         # Collect all modified thread files
-        for path in find_threads(workspace):
-            if is_modified(path, workspace):
+        for path in find_threads(git_root):
+            if is_modified(path, git_root):
                 files.append(path)
     else:
         if not refs:
             raise ValueError("Provide thread IDs or use --pending")
 
         for ref in refs:
-            file_path = find_thread_by_ref(ref, workspace)
-            if not is_modified(file_path, workspace):
+            file_path = find_thread_by_ref(ref, git_root)
+            if not is_modified(file_path, git_root):
                 print(f"No changes in thread: {ref}")
                 continue
             files.append(file_path)
@@ -235,7 +241,7 @@ def cmd_commit(
 
     # Generate commit message if not provided
     if message is None:
-        message = generate_commit_message(files, workspace)
+        message = generate_commit_message(files, git_root)
         print(f"Generated message: {message}")
         if not auto_msg and sys.stdin.isatty():
             confirm = input("Proceed? [Y/n] ")
@@ -245,20 +251,21 @@ def cmd_commit(
 
     # Stage and commit
     for file in files:
-        git_add(file, workspace)
+        git_add(file, git_root)
 
-    git_commit(message, workspace)
+    git_commit(message, git_root)
     print(f"Committed {len(files)} thread(s).")
 
 
 def cmd_git() -> None:
     """Show pending thread changes."""
-    workspace = get_workspace()
+    git_root = get_workspace()
     modified = []
 
-    for path in find_threads(workspace):
-        if is_modified(path, workspace):
-            modified.append(path.relative_to(workspace))
+    for path in find_threads(git_root):
+        if is_modified(path, git_root):
+            rel = path_relative_to_git_root(git_root, path)
+            modified.append(rel)
 
     if not modified:
         print("No pending thread changes.")
@@ -277,11 +284,11 @@ def cmd_validate(path: str | None = None, recursive: bool = False) -> bool:
     """Validate thread files. Returns True if all valid."""
     from ..models import ALL_STATUSES
 
-    workspace = get_workspace()
+    git_root = get_workspace()
     errors = 0
 
     if path:
-        p = Path(path) if Path(path).is_absolute() else workspace / path
+        p = Path(path) if Path(path).is_absolute() else git_root / path
         if p.is_file():
             files = [p]
         elif p.is_dir():
@@ -294,12 +301,12 @@ def cmd_validate(path: str | None = None, recursive: bool = False) -> bool:
             raise ValueError(f"File not found: {path}")
     else:
         if recursive:
-            files = find_threads(workspace)
+            files = find_threads(git_root)
         else:
-            files = list(workspace.glob(".threads/*.md"))
+            files = list(git_root.glob(".threads/*.md"))
 
     for file in files:
-        rel_path = file.relative_to(workspace)
+        rel_path = path_relative_to_git_root(git_root, file)
         thread = load_thread(file)
 
         issues = []

@@ -7,16 +7,16 @@ from pathlib import Path
 
 from ..models import LogEntry, Thread, validate_status
 from ..storage import find_threads, save_thread, load_thread
-from ..workspace import find_thread_by_ref, get_workspace, infer_scope
+from ..workspace import find_thread_by_ref, get_workspace, infer_scope, path_relative_to_git_root
 
 
-def generate_id(workspace: Path) -> str:
+def generate_id(git_root: Path) -> str:
     """Generate a unique 6-char hex ID."""
     import secrets
 
     # Collect existing IDs
     existing_ids = set()
-    for path in find_threads(workspace):
+    for path in find_threads(git_root):
         filename = path.stem
         if re.match(r"^[0-9a-f]{6}-", filename):
             existing_ids.add(filename[:6])
@@ -56,17 +56,17 @@ def cmd_new(
     # Validate status before proceeding
     validate_status(status)
 
-    workspace = get_workspace()
+    git_root = get_workspace()
 
     # Warn if no description
     if not desc:
-        print("Warning: No --desc provided. Add one with: thread <id> update --desc \"...\"", file=sys.stderr)
+        print("Warning: No --desc provided. Add one with: threads update <id> --desc \"...\"", file=sys.stderr)
 
-    # Determine scope
-    scope = infer_scope(path, workspace)
+    # Determine scope using new path resolution
+    scope = infer_scope(path, git_root)
 
     # Generate ID and filename
-    tid = generate_id(workspace)
+    tid = generate_id(git_root)
     slug = slugify(title)
     if not slug:
         raise ValueError("Title produces empty slug")
@@ -102,18 +102,19 @@ def cmd_new(
 
     save_thread(thread)
 
-    rel_path = filepath.relative_to(workspace)
-    print(f"Created {scope.level_desc}: {tid}")
+    # Display path relative to git root
+    rel_path = path_relative_to_git_root(git_root, filepath)
+    print(f"Created thread in {scope.level_desc}: {tid}")
     print(f"  → {rel_path}")
 
     if not body:
-        print(f'Hint: Add body with: echo "content" | thread body {tid} --set', file=sys.stderr)
+        print(f'Hint: Add body with: echo "content" | threads body {tid} --set', file=sys.stderr)
 
     if do_commit:
         from .lifecycle import auto_commit
         if message is None:
             message = f"threads: add {tid}-{slug}"
-        auto_commit(filepath, message, workspace)
+        auto_commit(filepath, message, git_root)
     else:
         print(f"Note: Thread {tid} has uncommitted changes. Use 'threads commit {tid}' when ready.")
 
@@ -122,15 +123,15 @@ def cmd_new(
 
 def cmd_remove(ref: str, do_commit: bool = False, message: str | None = None) -> None:
     """Remove a thread."""
-    workspace = get_workspace()
-    file_path = find_thread_by_ref(ref, workspace)
+    git_root = get_workspace()
+    file_path = find_thread_by_ref(ref, git_root)
 
     thread = load_thread(file_path)
-    rel_path = file_path.relative_to(workspace)
+    rel_path = path_relative_to_git_root(git_root, file_path)
 
     # Check if tracked in git
     from ..git import is_tracked
-    was_tracked = is_tracked(file_path, workspace)
+    was_tracked = is_tracked(file_path, git_root)
 
     # Delete file
     file_path.unlink()
@@ -142,10 +143,10 @@ def cmd_remove(ref: str, do_commit: bool = False, message: str | None = None) ->
         from .lifecycle import auto_commit_remove
         if message is None:
             message = f"threads: remove '{thread.name}'"
-        auto_commit_remove(rel_path, message, workspace)
+        auto_commit_remove(Path(rel_path), message, git_root)
     else:
         print("Note: To commit this removal, run:")
-        print(f'  git -C "$WORKSPACE" add "{rel_path}" && git -C "$WORKSPACE" commit -m "threads: remove \'{thread.name}\'"')
+        print(f'  git add "{rel_path}" && git commit -m "threads: remove \'{thread.name}\'"')
 
 
 def cmd_update(
@@ -159,8 +160,8 @@ def cmd_update(
     if title is None and desc is None:
         raise ValueError("Specify --title and/or --desc")
 
-    workspace = get_workspace()
-    file_path = find_thread_by_ref(ref, workspace)
+    git_root = get_workspace()
+    file_path = find_thread_by_ref(ref, git_root)
     thread = load_thread(file_path)
 
     if title is not None:
@@ -178,6 +179,6 @@ def cmd_update(
         from .lifecycle import auto_commit
         if message is None:
             message = f"threads: update {file_path.stem}"
-        auto_commit(file_path, message, workspace)
+        auto_commit(file_path, message, git_root)
     else:
         print(f"Note: Thread {ref} has uncommitted changes. Use 'threads commit {ref}' when ready.")

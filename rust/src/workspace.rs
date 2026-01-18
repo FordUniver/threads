@@ -3,6 +3,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::LazyLock;
 
 use clap_complete::engine::CompletionCandidate;
@@ -10,276 +11,333 @@ use regex::Regex;
 
 use crate::thread;
 
-/// Check if a path is contained within a workspace directory.
-/// Uses canonicalization to resolve symlinks and ".." components,
-/// then uses Path::starts_with which is component-based (not string-based).
-fn is_contained_in(path: &Path, workspace: &Path) -> bool {
-    let resolved = match path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    let ws_resolved = match workspace.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-    resolved.starts_with(&ws_resolved)
-}
-
 // Cached regexes for workspace operations
-static ID_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[0-9a-f]{6}$").unwrap()
-});
+static ID_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{6}$").unwrap());
 
-static SLUGIFY_NON_ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"[^a-z0-9]+").unwrap()
-});
+static SLUGIFY_NON_ALNUM_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
 
-static SLUGIFY_MULTI_DASH_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"-+").unwrap()
-});
+static SLUGIFY_MULTI_DASH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-+").unwrap());
 
-/// Find the workspace root from $WORKSPACE
+/// Find the git repository root from current directory.
+/// Returns an error if not in a git repository.
 pub fn find() -> Result<PathBuf, String> {
-    let ws = env::var("WORKSPACE")
-        .map_err(|_| "WORKSPACE environment variable not set".to_string())?;
-    if ws.is_empty() {
-        return Err("WORKSPACE environment variable not set".to_string());
-    }
-    let path = PathBuf::from(&ws);
-    if !path.is_dir() {
-        return Err(format!("WORKSPACE directory does not exist: {}", ws));
-    }
-    Ok(path)
+    find_git_root()
 }
 
-/// Find all thread file paths in the workspace
-pub fn find_all_threads(ws: &Path) -> Result<Vec<PathBuf>, String> {
+/// Find the git repository root using `git rev-parse --show-toplevel`.
+pub fn find_git_root() -> Result<PathBuf, String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        return Err(
+            "Not in a git repository. threads requires a git repo to define scope.".to_string(),
+        );
+    }
+
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if root.is_empty() {
+        return Err("Git root is empty".to_string());
+    }
+
+    Ok(PathBuf::from(root))
+}
+
+/// Find the git root for a specific path.
+pub fn find_git_root_for_path(path: &Path) -> Result<PathBuf, String> {
+    let output = Command::new("git")
+        .args(["-C", &path.to_string_lossy(), "rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "Not in a git repository at: {}",
+            path.display()
+        ));
+    }
+
+    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(PathBuf::from(root))
+}
+
+/// Check if a path is inside a git repository.
+pub fn is_in_git_repo(path: &Path) -> bool {
+    find_git_root_for_path(path).is_ok()
+}
+
+/// Check if a directory is a git root (contains .git).
+pub fn is_git_root(path: &Path) -> bool {
+    path.join(".git").exists()
+}
+
+/// Find all thread file paths within the git root.
+/// Scans recursively, respecting git boundaries (stops at nested git repos).
+pub fn find_all_threads(git_root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut threads = Vec::new();
-
-    // Workspace level
-    if let Ok(entries) = fs::read_dir(ws.join(".threads")) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "md") {
-                if !path.to_string_lossy().contains("/archive/") {
-                    threads.push(path);
-                }
-            }
-        }
-    }
-
-    // Category and project level
-    if let Ok(categories) = fs::read_dir(ws) {
-        for cat_entry in categories.flatten() {
-            let cat_path = cat_entry.path();
-            if !cat_path.is_dir() {
-                continue;
-            }
-            let cat_name = cat_entry.file_name();
-            if cat_name.to_string_lossy().starts_with('.') {
-                continue;
-            }
-
-            // Category level threads
-            let cat_threads = cat_path.join(".threads");
-            if let Ok(entries) = fs::read_dir(&cat_threads) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map_or(false, |e| e == "md") {
-                        if !path.to_string_lossy().contains("/archive/") {
-                            threads.push(path);
-                        }
-                    }
-                }
-            }
-
-            // Project level
-            if let Ok(projects) = fs::read_dir(&cat_path) {
-                for proj_entry in projects.flatten() {
-                    let proj_path = proj_entry.path();
-                    if !proj_path.is_dir() {
-                        continue;
-                    }
-                    let proj_name = proj_entry.file_name();
-                    if proj_name.to_string_lossy().starts_with('.') {
-                        continue;
-                    }
-
-                    // Project level threads
-                    let proj_threads = proj_path.join(".threads");
-                    if let Ok(entries) = fs::read_dir(&proj_threads) {
-                        for entry in entries.flatten() {
-                            let path = entry.path();
-                            if path.extension().map_or(false, |e| e == "md") {
-                                if !path.to_string_lossy().contains("/archive/") {
-                                    threads.push(path);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
+    find_threads_recursive(git_root, git_root, &mut threads)?;
     threads.sort();
     Ok(threads)
 }
 
-/// Scope represents thread placement information
+/// Recursively find .threads directories and collect thread files.
+/// Stops at nested git repositories (directories containing .git).
+fn find_threads_recursive(
+    dir: &Path,
+    git_root: &Path,
+    threads: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    // Check for .threads directory here
+    let threads_dir = dir.join(".threads");
+    if threads_dir.is_dir() {
+        if let Ok(entries) = fs::read_dir(&threads_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |e| e == "md") {
+                    // Skip archive subdirectory
+                    if !path.to_string_lossy().contains("/archive/") {
+                        threads.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    // Recurse into subdirectories
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+
+            // Skip hidden directories (except we already handled .threads)
+            if name_str.starts_with('.') {
+                continue;
+            }
+
+            // Stop at nested git repos (unless it's the root itself)
+            if path != git_root && is_git_root(&path) {
+                continue;
+            }
+
+            find_threads_recursive(&path, git_root, threads)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Scope represents thread placement information.
+/// Path is relative to git root.
+#[derive(Debug, Clone)]
 pub struct Scope {
+    /// Path to the .threads directory (absolute)
     pub threads_dir: PathBuf,
-    #[allow(dead_code)]
-    pub category: String,
-    #[allow(dead_code)]
-    pub project: String,
+    /// Path relative to git root (e.g., "src/models", "." for root)
+    pub path: String,
+    /// Human-readable description
     pub level_desc: String,
 }
 
-/// Infer the threads directory and level from a path
-pub fn infer_scope(ws: &Path, path: &str) -> Result<Scope, String> {
-    // Handle explicit "." for workspace level
-    if path == "." {
-        return Ok(Scope {
-            threads_dir: ws.join(".threads"),
-            category: "-".to_string(),
-            project: "-".to_string(),
-            level_desc: "workspace-level thread".to_string(),
-        });
+/// Describes how a path was resolved for verbose output.
+#[derive(Debug, Clone)]
+pub struct PathResolution {
+    /// Original input (None if no path argument was given)
+    pub input: Option<String>,
+    /// How the path was resolved
+    pub resolved_via: String,
+    /// The PWD at resolution time
+    pub pwd: PathBuf,
+    /// The git root
+    pub git_root: PathBuf,
+}
+
+/// Infer the threads directory and scope from a path specification.
+///
+/// Path resolution rules:
+/// - None or empty: PWD
+/// - ".": PWD (explicit)
+/// - "./X/Y": PWD-relative
+/// - "/X/Y": Absolute
+/// - "X/Y" (no leading ./ or /): Git-root-relative
+pub fn infer_scope(git_root: &Path, path_arg: Option<&str>) -> Result<Scope, String> {
+    let pwd = env::current_dir().map_err(|e| format!("Cannot get current directory: {}", e))?;
+
+    let (target_path, _resolution_desc) = match path_arg {
+        None | Some("") => {
+            // No path argument: use PWD
+            (pwd.clone(), "pwd")
+        }
+        Some(".") => {
+            // Explicit ".": use PWD
+            (pwd.clone(), "pwd (explicit)")
+        }
+        Some(p) if p.starts_with("./") => {
+            // PWD-relative path: ./X/Y
+            let rel = p.strip_prefix("./").unwrap();
+            (pwd.join(rel), "pwd-relative")
+        }
+        Some(p) if p.starts_with('/') => {
+            // Absolute path
+            (PathBuf::from(p), "absolute")
+        }
+        Some(p) => {
+            // Git-root-relative path: X/Y
+            (git_root.join(p), "git-root-relative")
+        }
+    };
+
+    // Canonicalize for consistent comparison
+    let target_canonical = target_path
+        .canonicalize()
+        .unwrap_or_else(|_| target_path.clone());
+
+    let git_root_canonical = git_root
+        .canonicalize()
+        .unwrap_or_else(|_| git_root.to_path_buf());
+
+    // Verify target is within the git repo
+    if !target_canonical.starts_with(&git_root_canonical) {
+        return Err(format!(
+            "Path must be within git repository: {} (git root: {})",
+            target_path.display(),
+            git_root.display()
+        ));
     }
 
-    // Resolve to absolute path
-    let abs_path = if Path::new(path).is_absolute() {
-        PathBuf::from(path)
-    } else {
-        // Try as relative to workspace first
-        let ws_rel = ws.join(path);
-        if ws_rel.is_dir() {
-            ws_rel
-        } else {
-            // Try as relative to cwd
-            let cwd_rel = env::current_dir()
-                .map(|cwd| cwd.join(path))
-                .unwrap_or_else(|_| PathBuf::from(path));
-            if cwd_rel.is_dir() {
-                cwd_rel
+    // Check if target is inside a nested git repo
+    if target_canonical != git_root_canonical {
+        // Walk up from target to git_root, checking for nested .git
+        let mut check_path = target_canonical.clone();
+        while check_path != git_root_canonical {
+            if is_git_root(&check_path) {
+                return Err(format!(
+                    "Path is inside a nested git repository at: {}. Use --no-git-bound to cross git boundaries.",
+                    check_path.display()
+                ));
+            }
+            if let Some(parent) = check_path.parent() {
+                check_path = parent.to_path_buf();
             } else {
-                return Err(format!("path not found: {}", path));
+                break;
             }
         }
-    };
-
-    // Must be within workspace (use secure canonicalized path check)
-    if !is_contained_in(&abs_path, ws) {
-        return Ok(Scope {
-            threads_dir: ws.join(".threads"),
-            category: "-".to_string(),
-            project: "-".to_string(),
-            level_desc: "workspace-level thread".to_string(),
-        });
     }
 
-    // After is_contained_in succeeds, we can safely use strip_prefix on canonicalized paths
-    let abs_canonical = abs_path.canonicalize().unwrap_or(abs_path.clone());
-    let ws_canonical = ws.canonicalize().unwrap_or(ws.to_path_buf());
-    let rel = abs_canonical
-        .strip_prefix(&ws_canonical)
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|_| PathBuf::new());
+    // Compute path relative to git root
+    let rel_path = target_canonical
+        .strip_prefix(&git_root_canonical)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| ".".to_string());
 
-    if rel.as_os_str().is_empty() {
-        return Ok(Scope {
-            threads_dir: ws.join(".threads"),
-            category: "-".to_string(),
-            project: "-".to_string(),
-            level_desc: "workspace-level thread".to_string(),
-        });
-    }
-
-    let parts: Vec<_> = rel.components().collect();
-    let category = parts
-        .first()
-        .map(|c| c.as_os_str().to_string_lossy().to_string())
-        .unwrap_or_else(|| "-".to_string());
-
-    let project = if parts.len() >= 2 {
-        parts[1].as_os_str().to_string_lossy().to_string()
+    let rel_path = if rel_path.is_empty() {
+        ".".to_string()
     } else {
-        "-".to_string()
+        rel_path
     };
 
-    if project == "-" {
-        Ok(Scope {
-            threads_dir: ws.join(&category).join(".threads"),
-            category: category.clone(),
-            project: "-".to_string(),
-            level_desc: format!("category-level thread ({})", category),
-        })
+    // Build description
+    let level_desc = if rel_path == "." {
+        "repo root".to_string()
     } else {
-        Ok(Scope {
-            threads_dir: ws.join(&category).join(&project).join(".threads"),
-            category: category.clone(),
-            project: project.clone(),
-            level_desc: format!("project-level thread ({}/{})", category, project),
-        })
+        rel_path.clone()
+    };
+
+    // Build threads directory path
+    let threads_dir = target_canonical.join(".threads");
+
+    Ok(Scope {
+        threads_dir,
+        path: rel_path,
+        level_desc,
+    })
+}
+
+/// Parse thread path to extract the git-relative path component.
+/// Returns the path relative to git root (e.g., "src/models").
+pub fn parse_thread_path(git_root: &Path, thread_path: &Path) -> String {
+    let git_root_canonical = git_root
+        .canonicalize()
+        .unwrap_or_else(|_| git_root.to_path_buf());
+    let path_canonical = thread_path
+        .canonicalize()
+        .unwrap_or_else(|_| thread_path.to_path_buf());
+
+    // Get path relative to git root
+    let rel = if path_canonical.starts_with(&git_root_canonical) {
+        path_canonical
+            .strip_prefix(&git_root_canonical)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| thread_path.to_string_lossy().to_string())
+    } else {
+        thread_path.to_string_lossy().to_string()
+    };
+
+    // Extract the directory containing .threads
+    // Pattern: <path>/.threads/file.md -> return <path>
+    if let Some(idx) = rel.rfind("/.threads/") {
+        let path = &rel[..idx];
+        if path.is_empty() {
+            ".".to_string()
+        } else {
+            path.to_string()
+        }
+    } else if rel.starts_with(".threads/") {
+        ".".to_string()
+    } else {
+        ".".to_string()
     }
 }
 
-/// Parse thread path to extract category, project, and name
-pub fn parse_thread_path(ws: &Path, path: &Path) -> (String, String, String) {
-    // Use canonicalized paths for secure path containment check
-    let ws_canonical = ws.canonicalize().unwrap_or_else(|_| ws.to_path_buf());
+/// Get path relative to git root for display purposes.
+pub fn path_relative_to_git_root(git_root: &Path, path: &Path) -> String {
+    let git_root_canonical = git_root
+        .canonicalize()
+        .unwrap_or_else(|_| git_root.to_path_buf());
     let path_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
 
-    // Use Path::strip_prefix (component-based, not string-based) for secure relative path extraction
-    let rel = if path_canonical.starts_with(&ws_canonical) {
-        path_canonical
-            .strip_prefix(&ws_canonical)
+    if path_canonical.starts_with(&git_root_canonical) {
+        let rel = path_canonical
+            .strip_prefix(&git_root_canonical)
             .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|_| path.to_string_lossy().to_string())
-    } else {
-        path.to_string_lossy().to_string()
-    };
-
-    let filename = path
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let filename = filename.trim_end_matches(".md");
-
-    // Extract name, stripping ID prefix if present
-    let name = thread::extract_name_from_path(path);
-    let name = if name.is_empty() {
-        filename.to_string()
-    } else {
-        name
-    };
-
-    // Check if workspace-level
-    if rel.starts_with(".threads/") {
-        return ("-".to_string(), "-".to_string(), name);
-    }
-
-    // Extract category and project
-    let parts: Vec<&str> = rel.split('/').collect();
-    if parts.len() >= 2 {
-        let category = parts[0].to_string();
-        if parts[1] == ".threads" {
-            (category, "-".to_string(), name)
-        } else if parts.len() >= 3 {
-            let project = parts[1].to_string();
-            (category, project, name)
+            .unwrap_or_default();
+        if rel.is_empty() {
+            ".".to_string()
         } else {
-            (category, "-".to_string(), name)
+            rel
         }
     } else {
-        ("-".to_string(), "-".to_string(), name)
+        path.to_string_lossy().to_string()
     }
 }
 
-/// Generate a unique 6-character hex ID
-pub fn generate_id(ws: &Path) -> Result<String, String> {
-    let threads = find_all_threads(ws)?;
+/// Check if the current working directory is the same as the given path.
+pub fn is_pwd(path: &Path) -> bool {
+    if let Ok(pwd) = env::current_dir() {
+        let pwd_canonical = pwd.canonicalize().unwrap_or(pwd);
+        let path_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        pwd_canonical == path_canonical
+    } else {
+        false
+    }
+}
+
+/// Get the git-relative path for the current working directory.
+pub fn pwd_relative_to_git_root(git_root: &Path) -> Result<String, String> {
+    let pwd = env::current_dir().map_err(|e| format!("Cannot get current directory: {}", e))?;
+    Ok(path_relative_to_git_root(git_root, &pwd))
+}
+
+/// Generate a unique 6-character hex ID.
+pub fn generate_id(git_root: &Path) -> Result<String, String> {
+    let threads = find_all_threads(git_root)?;
     let mut existing = HashSet::new();
 
     for t in threads {
@@ -300,7 +358,7 @@ pub fn generate_id(ws: &Path) -> Result<String, String> {
     Err("could not generate unique ID after 10 attempts".to_string())
 }
 
-/// Convert a title to kebab-case filename
+/// Convert a title to kebab-case filename.
 pub fn slugify(title: &str) -> String {
     let s = title.to_lowercase();
     let s = SLUGIFY_NON_ALNUM_RE.replace_all(&s, "-");
@@ -308,9 +366,9 @@ pub fn slugify(title: &str) -> String {
     s.trim_matches('-').to_string()
 }
 
-/// Find a thread by ID or name (with fuzzy matching)
-pub fn find_by_ref(ws: &Path, ref_str: &str) -> Result<PathBuf, String> {
-    let threads = find_all_threads(ws)?;
+/// Find a thread by ID or name (with fuzzy matching).
+pub fn find_by_ref(git_root: &Path, ref_str: &str) -> Result<PathBuf, String> {
+    let threads = find_all_threads(git_root)?;
 
     // Fast path: exact ID match
     if ID_ONLY_RE.is_match(ref_str) {
@@ -370,14 +428,14 @@ mod hex {
     }
 }
 
-/// Completer for thread IDs - returns all thread IDs with names as descriptions
+/// Completer for thread IDs - returns all thread IDs with names as descriptions.
 pub fn complete_thread_ids(_current: &OsStr) -> Vec<CompletionCandidate> {
-    let ws = match find() {
-        Ok(ws) => ws,
+    let git_root = match find() {
+        Ok(root) => root,
         Err(_) => return vec![],
     };
 
-    let threads = match find_all_threads(&ws) {
+    let threads = match find_all_threads(&git_root) {
         Ok(t) => t,
         Err(_) => return vec![],
     };
@@ -390,4 +448,36 @@ pub fn complete_thread_ids(_current: &OsStr) -> Vec<CompletionCandidate> {
             Some(CompletionCandidate::new(id).help(Some(name.into())))
         })
         .collect()
+}
+
+// Legacy compatibility: these functions adapt old category/project-based code
+// to the new path-based model. They should be phased out as commands are updated.
+
+/// Legacy: Extract category from a thread path.
+/// Returns the first path component or "-" for root.
+#[deprecated(note = "Use parse_thread_path() instead")]
+pub fn extract_category(git_root: &Path, thread_path: &Path) -> String {
+    let rel = parse_thread_path(git_root, thread_path);
+    if rel == "." {
+        "-".to_string()
+    } else {
+        rel.split('/').next().unwrap_or("-").to_string()
+    }
+}
+
+/// Legacy: Extract project from a thread path.
+/// Returns the second path component or "-" if not present.
+#[deprecated(note = "Use parse_thread_path() instead")]
+pub fn extract_project(git_root: &Path, thread_path: &Path) -> String {
+    let rel = parse_thread_path(git_root, thread_path);
+    if rel == "." {
+        "-".to_string()
+    } else {
+        let parts: Vec<&str> = rel.split('/').collect();
+        if parts.len() >= 2 {
+            parts[1].to_string()
+        } else {
+            "-".to_string()
+        }
+    }
 }

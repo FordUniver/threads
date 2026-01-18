@@ -17,8 +17,15 @@ var (
 )
 
 var moveCmd = &cobra.Command{
-	Use:               "move <id> <new-path>",
-	Short:             "Move thread to new location",
+	Use:   "move <id> <new-path>",
+	Short: "Move thread to new location",
+	Long: `Move a thread to a new location.
+
+Path resolution for new-path:
+  .       → PWD (explicit)
+  ./X/Y   → PWD-relative
+  /X/Y    → Absolute
+  X/Y     → Git-root-relative`,
 	Args:              cobra.ExactArgs(2),
 	ValidArgsFunction: completeThreadIDs,
 	RunE:              runMove,
@@ -30,20 +37,20 @@ func init() {
 }
 
 func runMove(cmd *cobra.Command, args []string) error {
-	ws := getWorkspace()
+	gitRoot := getWorkspace()
 	ref := args[0]
 	newPath := args[1]
 
 	// Find source thread
-	srcFile, err := workspace.FindByRef(ws, ref)
+	srcFile, err := workspace.FindByRef(gitRoot, ref)
 	if err != nil {
 		return err
 	}
 
 	// Resolve destination scope
-	scope, err := workspace.InferScope(ws, newPath)
+	scope, err := workspace.InferScope(gitRoot, newPath)
 	if err != nil {
-		return fmt.Errorf("invalid path: %s", newPath)
+		return fmt.Errorf("invalid path '%s': %v", newPath, err)
 	}
 
 	// Ensure dest .threads/ exists
@@ -63,26 +70,24 @@ func runMove(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("moving file: %w", err)
 	}
 
-	relDest, _ := filepath.Rel(ws, destFile)
+	relDest := workspace.PathRelativeToGitRoot(gitRoot, destFile)
 	fmt.Printf("Moved to %s\n", scope.LevelDesc)
 	fmt.Printf("  → %s\n", relDest)
 
 	// Commit if requested
 	if moveCommit {
-		relSrc, _ := filepath.Rel(ws, srcFile)
-		if err := git.Add(ws, relSrc, relDest); err != nil {
+		relSrc := workspace.PathRelativeToGitRoot(gitRoot, srcFile)
+		if err := git.Add(gitRoot, relSrc, relDest); err != nil {
 			return err
 		}
 		msg := moveMsg
 		if msg == "" {
 			msg = fmt.Sprintf("threads: move %s to %s", filepath.Base(srcFile), scope.LevelDesc)
 		}
-		if err := git.Commit(ws, []string{relSrc, relDest}, msg); err != nil {
+		if err := git.Commit(gitRoot, []string{relSrc, relDest}, msg); err != nil {
 			return err
 		}
-		if err := git.Push(ws); err != nil {
-			fmt.Printf("WARNING: git push failed (commit succeeded): %v\n", err)
-		}
+		fmt.Println("Note: Changes are local. Push with 'git push' when ready.")
 	} else {
 		fmt.Println("Note: Use --commit to commit this move")
 	}
