@@ -25,7 +25,8 @@ var commitCmd = &cobra.Command{
 	Long: `Commit specific threads or all pending thread changes.
 
 Use --pending to commit all modified threads at once.`,
-	RunE: runCommit,
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runCommit,
 }
 
 func init() {

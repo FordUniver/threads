@@ -18,10 +18,11 @@ var (
 )
 
 var updateCmd = &cobra.Command{
-	Use:   "update <id>",
-	Short: "Update thread title/desc",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runUpdate,
+	Use:               "update <id>",
+	Short:             "Update thread title/desc",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runUpdate,
 }
 
 func init() {

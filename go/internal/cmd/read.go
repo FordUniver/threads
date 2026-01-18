@@ -10,10 +10,11 @@ import (
 )
 
 var readCmd = &cobra.Command{
-	Use:   "read <id>",
-	Short: "Read thread content",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRead,
+	Use:               "read <id>",
+	Short:             "Read thread content",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runRead,
 }
 
 func runRead(cmd *cobra.Command, args []string) error {

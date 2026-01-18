@@ -25,8 +25,9 @@ var bodyCmd = &cobra.Command{
 	Long: `Edit the Body section of a thread.
 
 Content is read from stdin. Use --set to replace or --append to add.`,
-	Args: cobra.ExactArgs(1),
-	RunE: runBody,
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runBody,
 }
 
 func init() {

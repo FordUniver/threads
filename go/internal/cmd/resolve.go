@@ -16,10 +16,11 @@ var (
 )
 
 var resolveCmd = &cobra.Command{
-	Use:   "resolve <id>",
-	Short: "Mark thread resolved",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runResolve,
+	Use:               "resolve <id>",
+	Short:             "Mark thread resolved",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runResolve,
 }
 
 func init() {

@@ -16,10 +16,11 @@ var (
 )
 
 var statusCmd = &cobra.Command{
-	Use:   "status <id> <new-status>",
-	Short: "Change thread status",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runStatus,
+	Use:               "status <id> <new-status>",
+	Short:             "Change thread status",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runStatus,
 }
 
 func init() {

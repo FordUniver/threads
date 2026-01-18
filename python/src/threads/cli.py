@@ -8,6 +8,24 @@ from typing import NoReturn
 import argcomplete
 
 
+def thread_id_completer(prefix, parsed_args, **kwargs):
+    """Complete thread IDs with their names as descriptions."""
+    try:
+        from .storage import find_threads, load_thread
+        from .workspace import get_workspace
+
+        ws = get_workspace()
+        threads = find_threads(ws)
+        completions = []
+        for path in threads:
+            thread = load_thread(path)
+            thread_id = thread.id or "????"
+            completions.append(thread_id)
+        return completions
+    except Exception:
+        return []
+
+
 class ArgumentParserExitCode1(argparse.ArgumentParser):
     """ArgumentParser that exits with code 1 instead of 2 for consistency with other implementations."""
 
@@ -105,22 +123,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     # read
     p_read = subparsers.add_parser("read", help="Read thread content")
-    p_read.add_argument("ref", help="Thread ID or name")
+    p_read.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
 
     # path
     p_path = subparsers.add_parser("path", help="Print thread file path")
-    p_path.add_argument("ref", help="Thread ID or name")
+    p_path.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
 
     # status
     p_status = subparsers.add_parser("status", help="Change thread status")
-    p_status.add_argument("ref", help="Thread ID or name")
+    p_status.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_status.add_argument("new_status", help="New status")
     p_status.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
     p_status.add_argument("-m", dest="message", help="Commit message")
 
     # update
     p_update = subparsers.add_parser("update", help="Update thread title/desc")
-    p_update.add_argument("ref", help="Thread ID or name")
+    p_update.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_update.add_argument("--title", help="New title")
     p_update.add_argument("--desc", help="New description")
     p_update.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
@@ -128,7 +146,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # body
     p_body = subparsers.add_parser("body", help="Edit body section (stdin)")
-    p_body.add_argument("ref", help="Thread ID or name")
+    p_body.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_body.add_argument("--set", action="store_const", const="set", dest="mode", default="set")
     p_body.add_argument("--append", action="store_const", const="append", dest="mode")
     p_body.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
@@ -136,7 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # note
     p_note = subparsers.add_parser("note", help="Manage notes")
-    p_note.add_argument("ref", help="Thread ID or name")
+    p_note.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_note.add_argument("action", choices=["add", "edit", "remove"], help="Action")
     p_note.add_argument("text_or_hash", help="Note text or hash")
     p_note.add_argument("new_text", nargs="?", help="New text for edit")
@@ -145,7 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # todo
     p_todo = subparsers.add_parser("todo", help="Manage todo items")
-    p_todo.add_argument("ref", help="Thread ID or name")
+    p_todo.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_todo.add_argument("action", choices=["add", "check", "complete", "done", "uncheck", "remove"])
     p_todo.add_argument("item_or_hash", help="Item text or hash")
     p_todo.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
@@ -153,45 +171,45 @@ def build_parser() -> argparse.ArgumentParser:
 
     # log
     p_log = subparsers.add_parser("log", help="Add log entry")
-    p_log.add_argument("ref", help="Thread ID or name")
+    p_log.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_log.add_argument("entry", nargs="?", help="Log entry text")
     p_log.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
     p_log.add_argument("-m", dest="message", help="Commit message")
 
     # resolve
     p_resolve = subparsers.add_parser("resolve", help="Mark thread resolved")
-    p_resolve.add_argument("ref", help="Thread ID or name")
+    p_resolve.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_resolve.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
     p_resolve.add_argument("-m", dest="message", help="Commit message")
 
     # reopen
     p_reopen = subparsers.add_parser("reopen", help="Reopen resolved thread")
-    p_reopen.add_argument("ref", help="Thread ID or name")
+    p_reopen.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_reopen.add_argument("--status", default="active", dest="new_status", help="New status")
     p_reopen.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
     p_reopen.add_argument("-m", dest="message", help="Commit message")
 
     # remove / rm
     p_remove = subparsers.add_parser("remove", help="Remove thread")
-    p_remove.add_argument("ref", help="Thread ID or name")
+    p_remove.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_remove.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
     p_remove.add_argument("-m", dest="message", help="Commit message")
 
     p_rm = subparsers.add_parser("rm", help="Remove thread (alias)")
-    p_rm.add_argument("ref", help="Thread ID or name")
+    p_rm.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_rm.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
     p_rm.add_argument("-m", dest="message", help="Commit message")
 
     # move
     p_move = subparsers.add_parser("move", help="Move thread to new location")
-    p_move.add_argument("ref", help="Thread ID or name")
+    p_move.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
     p_move.add_argument("new_path", help="Destination path")
     p_move.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
     p_move.add_argument("-m", dest="message", help="Commit message")
 
     # commit
     p_commit = subparsers.add_parser("commit", help="Commit thread changes")
-    p_commit.add_argument("refs", nargs="*", help="Thread IDs")
+    p_commit.add_argument("refs", nargs="*", help="Thread IDs").completer = thread_id_completer
     p_commit.add_argument("--pending", action="store_true", help="Commit all modified")
     p_commit.add_argument("-m", dest="message", help="Commit message")
     p_commit.add_argument("--auto", action="store_true", dest="auto_msg", help="Skip confirmation")

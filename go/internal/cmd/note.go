@@ -24,8 +24,9 @@ Actions:
   add <text>           Add a new note
   edit <hash> <text>   Edit a note by hash
   remove <hash>        Remove a note by hash`,
-	Args: cobra.MinimumNArgs(2),
-	RunE: runNote,
+	Args:              cobra.MinimumNArgs(2),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runNote,
 }
 
 func init() {

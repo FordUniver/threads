@@ -1,12 +1,14 @@
 use std::path::Path;
 
 use clap::Args;
+use clap_complete::engine::ArgValueCompleter;
 
 use crate::workspace;
 
 #[derive(Args)]
 pub struct PathArgs {
     /// Thread ID or name reference
+    #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 }
 

@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use clap::Args;
+use clap_complete::engine::ArgValueCompleter;
 
 use crate::git;
 use crate::thread::Thread;
@@ -10,6 +11,7 @@ use crate::workspace;
 #[derive(Args)]
 pub struct RemoveArgs {
     /// Thread ID or name reference
+    #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
     /// Commit after removing

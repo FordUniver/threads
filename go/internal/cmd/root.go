@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"git.zib.de/cspiegel/threads/internal/thread"
 	"git.zib.de/cspiegel/threads/internal/workspace"
 )
 
@@ -62,4 +63,28 @@ func init() {
 // getWorkspace returns the cached workspace path
 func getWorkspace() string {
 	return ws
+}
+
+// completeThreadIDs provides completion for thread ID arguments
+func completeThreadIDs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	ws, err := workspace.Find()
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	threads, err := workspace.FindAllThreads(ws)
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var completions []string
+	for _, path := range threads {
+		id := thread.ExtractIDFromPath(path)
+		name := thread.ExtractNameFromPath(path)
+		if id != "" {
+			completions = append(completions, fmt.Sprintf("%s\t%s", id, name))
+		}
+	}
+
+	return completions, cobra.ShellCompDirectiveNoFileComp
 }

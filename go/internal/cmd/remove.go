@@ -18,11 +18,12 @@ var (
 )
 
 var removeCmd = &cobra.Command{
-	Use:     "remove <id>",
-	Aliases: []string{"rm"},
-	Short:   "Remove thread entirely",
-	Args:    cobra.ExactArgs(1),
-	RunE:    runRemove,
+	Use:               "remove <id>",
+	Aliases:           []string{"rm"},
+	Short:             "Remove thread entirely",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runRemove,
 }
 
 func init() {

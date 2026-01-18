@@ -25,8 +25,9 @@ Actions:
   check <hash>   Mark item as checked
   uncheck <hash> Mark item as unchecked
   remove <hash>  Remove item`,
-	Args: cobra.MinimumNArgs(2),
-	RunE: runTodo,
+	Args:              cobra.MinimumNArgs(2),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runTodo,
 }
 
 func init() {

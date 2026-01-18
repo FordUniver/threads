@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use clap::Args;
+use clap_complete::engine::ArgValueCompleter;
 
 use crate::git;
 use crate::thread::{self, Thread};
@@ -9,6 +10,7 @@ use crate::workspace;
 #[derive(Args)]
 pub struct StatusArgs {
     /// Thread ID or name reference
+    #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
     /// New status

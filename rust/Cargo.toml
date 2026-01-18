@@ -6,7 +6,7 @@ description = "Thread management CLI for LLM workflows"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-clap_complete = "4"
+clap_complete = { version = "4", features = ["unstable-dynamic"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 chrono = "0.4"

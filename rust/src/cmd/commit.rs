@@ -2,6 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 use clap::Args;
+use clap_complete::engine::ArgValueCompleter;
 
 use crate::git;
 use crate::workspace;
@@ -9,6 +10,7 @@ use crate::workspace;
 #[derive(Args)]
 pub struct CommitArgs {
     /// Thread IDs to commit
+    #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     ids: Vec<String>,
 
     /// Commit all modified threads

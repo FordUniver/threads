@@ -18,11 +18,12 @@ var (
 )
 
 var logCmd = &cobra.Command{
-	Use:   "log <id> [entry]",
-	Short: "Add log entry",
-	Long:  `Add a timestamped entry to the Log section.`,
-	Args:  cobra.RangeArgs(1, 2),
-	RunE:  runLog,
+	Use:               "log <id> [entry]",
+	Short:             "Add log entry",
+	Long:              `Add a timestamped entry to the Log section.`,
+	Args:              cobra.RangeArgs(1, 2),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runLog,
 }
 
 func init() {

@@ -17,10 +17,11 @@ var (
 )
 
 var moveCmd = &cobra.Command{
-	Use:   "move <id> <new-path>",
-	Short: "Move thread to new location",
-	Args:  cobra.ExactArgs(2),
-	RunE:  runMove,
+	Use:               "move <id> <new-path>",
+	Short:             "Move thread to new location",
+	Args:              cobra.ExactArgs(2),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runMove,
 }
 
 func init() {

@@ -2,6 +2,7 @@ use std::io;
 use std::process;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::env::CompleteEnv;
 use clap_complete::{generate, Shell};
 
 mod cmd;
@@ -96,6 +97,9 @@ enum CompletionShell {
 }
 
 fn main() {
+    // Handle dynamic shell completions
+    CompleteEnv::with_factory(Cli::command).complete();
+
     // Use try_parse to catch errors and normalize exit code
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,

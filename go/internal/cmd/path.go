@@ -10,10 +10,11 @@ import (
 )
 
 var pathCmd = &cobra.Command{
-	Use:   "path <id>",
-	Short: "Print thread file path",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runPath,
+	Use:               "path <id>",
+	Short:             "Print thread file path",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runPath,
 }
 
 func runPath(cmd *cobra.Command, args []string) error {

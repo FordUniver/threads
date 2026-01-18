@@ -17,10 +17,11 @@ var (
 )
 
 var reopenCmd = &cobra.Command{
-	Use:   "reopen <id>",
-	Short: "Reopen resolved thread",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runReopen,
+	Use:               "reopen <id>",
+	Short:             "Reopen resolved thread",
+	Args:              cobra.ExactArgs(1),
+	ValidArgsFunction: completeThreadIDs,
+	RunE:              runReopen,
 }
 
 func init() {

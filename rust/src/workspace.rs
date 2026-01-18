@@ -1,9 +1,11 @@
 use std::collections::HashSet;
 use std::env;
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
+use clap_complete::engine::CompletionCandidate;
 use regex::Regex;
 
 use crate::thread;
@@ -366,4 +368,26 @@ mod hex {
     pub fn encode(bytes: [u8; 3]) -> String {
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }
+}
+
+/// Completer for thread IDs - returns all thread IDs with names as descriptions
+pub fn complete_thread_ids(_current: &OsStr) -> Vec<CompletionCandidate> {
+    let ws = match find() {
+        Ok(ws) => ws,
+        Err(_) => return vec![],
+    };
+
+    let threads = match find_all_threads(&ws) {
+        Ok(t) => t,
+        Err(_) => return vec![],
+    };
+
+    threads
+        .iter()
+        .filter_map(|path| {
+            let id = thread::extract_id_from_path(path)?;
+            let name = thread::extract_name_from_path(path);
+            Some(CompletionCandidate::new(id).help(Some(name.into())))
+        })
+        .collect()
 }
