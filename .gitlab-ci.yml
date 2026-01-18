@@ -1,5 +1,5 @@
 # GitLab CI/CD for threads CLI - Multi-language testing
-# Tests all 8 implementations on every push
+# Tests all 7 implementations on every push
 
 stages:
   - test
@@ -17,15 +17,6 @@ variables:
     paths:
       - test/results/
     expire_in: 1 week
-
-# Shell implementation (Bash)
-test:shell:
-  extends: .test_template
-  image: bash:5.2
-  before_script:
-    - apk add --no-cache coreutils grep gawk git make perl perl-yaml-tiny
-  script:
-    - make test-shell
 
 # Go implementation
 test:go:

@@ -1,15 +1,14 @@
 # threads CLI - Multi-language comparison study
 # Run tests and benchmarks across all implementations
 
-.PHONY: help test test-shell test-go test-python test-perl test-rust test-swift test-ruby test-bun test-all test-validate benchmark benchmark-quick benchmark-full clean
+.PHONY: help test test-go test-python test-perl test-rust test-swift test-ruby test-bun test-all test-validate benchmark benchmark-quick benchmark-full clean
 
 # Default target
 help:
 	@echo "threads CLI test and benchmark targets"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test          - Test shell implementation (default)"
-	@echo "  make test-shell    - Test shell implementation"
+	@echo "  make test          - Test Rust implementation (default)"
 	@echo "  make test-go       - Test Go implementation"
 	@echo "  make test-python   - Test Python implementation"
 	@echo "  make test-perl     - Test Perl implementation"
@@ -17,7 +16,7 @@ help:
 	@echo "  make test-swift    - Test Swift implementation"
 	@echo "  make test-ruby     - Test Ruby implementation"
 	@echo "  make test-bun      - Test Bun/TypeScript implementation"
-	@echo "  make test-all      - Test ALL 8 implementations"
+	@echo "  make test-all      - Test ALL 7 implementations"
 	@echo "  make test-validate - Verify tests pass individually (isolation check)"
 	@echo ""
 	@echo "Benchmarking:"
@@ -34,12 +33,8 @@ help:
 	@echo "Maintenance:"
 	@echo "  make clean         - Clean build artifacts"
 
-# Test shell (default)
-test: test-shell
-
-test-shell:
-	@echo "=== Testing Shell ==="
-	./test/run_tests.sh ./shell/threads
+# Test rust (default)
+test: test-rust
 
 test-go: build-go
 	@echo "=== Testing Go ==="
@@ -73,12 +68,10 @@ test-bun:
 test-all: build-all
 	@echo ""
 	@echo "=========================================="
-	@echo "Testing ALL 8 implementations"
+	@echo "Testing ALL 7 implementations"
 	@echo "=========================================="
 	@echo ""
-	@echo "=== Shell ===" && ./test/run_tests.sh ./shell/threads && \
-	echo "" && \
-	echo "=== Go ===" && ./test/run_tests.sh ./go/threads && \
+	@echo "=== Go ===" && ./test/run_tests.sh ./go/threads && \
 	echo "" && \
 	echo "=== Python ===" && ./test/run_tests.sh "uv run --quiet --directory ./python python -m threads" && \
 	echo "" && \
@@ -93,24 +86,30 @@ test-all: build-all
 	echo "=== Bun ===" && ./test/run_tests.sh ./bun/bin/threads && \
 	echo "" && \
 	echo "========================================" && \
-	echo "All 8 implementations passed!" && \
+	echo "All 7 implementations passed!" && \
 	echo "========================================"
 
 # Validate test isolation
-test-validate:
-	@echo "Validating test isolation for shell..."
-	./test/run_tests.sh --validate ./shell/threads
+test-validate: build-rust
+	@echo "Validating test isolation for rust..."
+	./test/run_tests.sh --validate ./rust/target/release/threads
 
-test-validate-all: build-go
+test-validate-all: build-all
 	@echo "Validating test isolation for ALL implementations..."
 	@echo ""
-	@echo "=== Shell ===" && ./test/run_tests.sh --validate ./shell/threads && \
-	echo "" && \
-	echo "=== Go ===" && ./test/run_tests.sh --validate ./go/threads && \
+	@echo "=== Go ===" && ./test/run_tests.sh --validate ./go/threads && \
 	echo "" && \
 	echo "=== Python ===" && ./test/run_tests.sh --validate "uv run --quiet --directory ./python python -m threads" && \
 	echo "" && \
-	echo "=== Perl ===" && ./test/run_tests.sh --validate "perl -I./perl/lib ./perl/bin/threads"
+	echo "=== Perl ===" && ./test/run_tests.sh --validate "perl -I./perl/lib ./perl/bin/threads" && \
+	echo "" && \
+	echo "=== Rust ===" && ./test/run_tests.sh --validate ./rust/target/release/threads && \
+	echo "" && \
+	echo "=== Swift ===" && ./test/run_tests.sh --validate ./swift/.build/release/threads && \
+	echo "" && \
+	echo "=== Ruby ===" && ./test/run_tests.sh --validate ./ruby/bin/threads && \
+	echo "" && \
+	echo "=== Bun ===" && ./test/run_tests.sh --validate ./bun/bin/threads
 
 # Benchmark all implementations
 benchmark: build-all
