@@ -3,7 +3,6 @@
 
 stages:
   - test
-  - benchmark
 
 variables:
   GIT_DEPTH: 1
@@ -83,23 +82,3 @@ test:bun:
     - apt-get update && apt-get install -y gawk make jq git
   script:
     - make test-bun
-
-# Benchmark (Go only - quick sanity check)
-benchmark:go:
-  stage: benchmark
-  image: golang:1.24
-  needs: ["test:go"]
-  before_script:
-    - apt-get update && apt-get install -y gawk make jq
-  script:
-    - make -C go build
-    - ./test/benchmark.sh --quick --impl=go --output=markdown
-  artifacts:
-    paths:
-      - test/results/
-    expire_in: 1 month
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    - when: manual
-      allow_failure: true
