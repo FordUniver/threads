@@ -92,7 +92,7 @@ benchmark:go:
   before_script:
     - apt-get update && apt-get install -y gawk make jq
   script:
-    - cd go && make build
+    - make -C go build
     - ./test/benchmark.sh --quick --impl=go --output=markdown
   artifacts:
     paths:
