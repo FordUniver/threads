@@ -1,14 +1,22 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
+	"git.zib.de/cspiegel/threads/internal/output"
 	"git.zib.de/cspiegel/threads/internal/thread"
 	"git.zib.de/cspiegel/threads/internal/workspace"
+)
+
+var (
+	validateFormat string
+	validateJSON   bool
 )
 
 var validateCmd = &cobra.Command{
@@ -18,7 +26,26 @@ var validateCmd = &cobra.Command{
 	RunE:  runValidate,
 }
 
+func init() {
+	validateCmd.Flags().StringVarP(&validateFormat, "format", "f", "fancy", "Output format (fancy, plain, json, yaml)")
+	validateCmd.Flags().BoolVar(&validateJSON, "json", false, "Output as JSON (shorthand for --format=json)")
+}
+
+type validationResult struct {
+	Path   string   `json:"path" yaml:"path"`
+	Valid  bool     `json:"valid" yaml:"valid"`
+	Issues []string `json:"issues" yaml:"issues"`
+}
+
 func runValidate(cmd *cobra.Command, args []string) error {
+	// Determine output format
+	var fmt_ output.Format
+	if validateJSON {
+		fmt_ = output.JSON
+	} else {
+		fmt_ = output.ParseFormat(validateFormat).Resolve()
+	}
+
 	ws := getWorkspace()
 	var files []string
 
@@ -38,7 +65,9 @@ func runValidate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	errors := 0
+	var results []validationResult
+	errorCount := 0
+
 	for _, file := range files {
 		relPath, _ := filepath.Rel(ws, file)
 		t, err := thread.Parse(file)
@@ -58,16 +87,54 @@ func runValidate(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		if len(issues) > 0 {
-			fmt.Printf("WARN: %s: %s\n", relPath, strings.Join(issues, ", "))
-			errors++
-		} else {
-			fmt.Printf("OK: %s\n", relPath)
+		valid := len(issues) == 0
+		if !valid {
+			errorCount++
 		}
+
+		results = append(results, validationResult{
+			Path:   relPath,
+			Valid:  valid,
+			Issues: issues,
+		})
 	}
 
-	if errors > 0 {
-		return fmt.Errorf("%d validation error(s)", errors)
+	// Output based on format
+	switch fmt_ {
+	case output.Fancy, output.Plain:
+		for _, r := range results {
+			if r.Valid {
+				fmt.Printf("OK: %s\n", r.Path)
+			} else {
+				fmt.Printf("WARN: %s: %s\n", r.Path, strings.Join(r.Issues, ", "))
+			}
+		}
+	case output.JSON:
+		data := map[string]interface{}{
+			"total":   len(results),
+			"errors":  errorCount,
+			"results": results,
+		}
+		out, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return fmt.Errorf("JSON serialization failed: %v", err)
+		}
+		fmt.Println(string(out))
+	case output.YAML:
+		data := map[string]interface{}{
+			"total":   len(results),
+			"errors":  errorCount,
+			"results": results,
+		}
+		out, err := yaml.Marshal(data)
+		if err != nil {
+			return fmt.Errorf("YAML serialization failed: %v", err)
+		}
+		fmt.Print(string(out))
+	}
+
+	if errorCount > 0 {
+		return fmt.Errorf("%d validation error(s)", errorCount)
 	}
 	return nil
 }

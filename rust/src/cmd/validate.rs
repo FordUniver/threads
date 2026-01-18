@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use clap::Args;
+use serde::Serialize;
 
+use crate::output::OutputFormat;
 use crate::thread::{self, Thread};
 use crate::workspace;
 
@@ -14,9 +16,30 @@ pub struct ValidateArgs {
     /// Include nested categories/projects
     #[arg(short = 'r', long)]
     recursive: bool,
+
+    /// Output format (auto-detects TTY for fancy vs plain)
+    #[arg(short = 'f', long, value_enum, default_value = "fancy")]
+    format: OutputFormat,
+
+    /// Output as JSON (shorthand for --format=json)
+    #[arg(long, conflicts_with = "format")]
+    json: bool,
+}
+
+#[derive(Serialize)]
+struct ValidationResult {
+    path: String,
+    valid: bool,
+    issues: Vec<String>,
 }
 
 pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
+    let format = if args.json {
+        OutputFormat::Json
+    } else {
+        args.format.resolve()
+    };
+
     let files = if !args.path.is_empty() {
         let target = &args.path;
         let abs_path = if Path::new(target).is_absolute() {
@@ -29,6 +52,7 @@ pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
         workspace::find_all_threads(ws)?
     };
 
+    let mut results = Vec::new();
     let mut errors = 0;
 
     for file in files {
@@ -55,11 +79,59 @@ pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
             }
         }
 
-        if !issues.is_empty() {
-            println!("WARN: {}: {}", rel_path, issues.join(", "));
+        let valid = issues.is_empty();
+        if !valid {
             errors += 1;
-        } else {
-            println!("OK: {}", rel_path);
+        }
+
+        results.push(ValidationResult {
+            path: rel_path,
+            valid,
+            issues,
+        });
+    }
+
+    match format {
+        OutputFormat::Fancy | OutputFormat::Plain => {
+            for r in &results {
+                if r.valid {
+                    println!("OK: {}", r.path);
+                } else {
+                    println!("WARN: {}: {}", r.path, r.issues.join(", "));
+                }
+            }
+        }
+        OutputFormat::Json => {
+            #[derive(Serialize)]
+            struct JsonOutput {
+                total: usize,
+                errors: usize,
+                results: Vec<ValidationResult>,
+            }
+            let output = JsonOutput {
+                total: results.len(),
+                errors,
+                results,
+            };
+            let json = serde_json::to_string_pretty(&output)
+                .map_err(|e| format!("JSON serialization failed: {}", e))?;
+            println!("{}", json);
+        }
+        OutputFormat::Yaml => {
+            #[derive(Serialize)]
+            struct YamlOutput {
+                total: usize,
+                errors: usize,
+                results: Vec<ValidationResult>,
+            }
+            let output = YamlOutput {
+                total: results.len(),
+                errors,
+                results,
+            };
+            let yaml = serde_yaml::to_string(&output)
+                .map_err(|e| format!("YAML serialization failed: {}", e))?;
+            print!("{}", yaml);
         }
     }
 

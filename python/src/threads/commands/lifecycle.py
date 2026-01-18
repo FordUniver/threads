@@ -280,12 +280,26 @@ def cmd_git() -> None:
     print(f'  git add {files_str} && git commit -m "threads: update" && git push')
 
 
-def cmd_validate(path: str | None = None, recursive: bool = False) -> bool:
+def cmd_validate(
+    path: str | None = None,
+    recursive: bool = False,
+    format_str: str = "fancy",
+    json_output: bool = False,
+) -> bool:
     """Validate thread files. Returns True if all valid."""
+    import json
+    import yaml
+
     from ..models import ALL_STATUSES
+    from ..output import OutputFormat, parse_format, resolve_format
+
+    # Determine output format
+    if json_output:
+        fmt = OutputFormat.JSON
+    else:
+        fmt = resolve_format(parse_format(format_str))
 
     git_root = get_workspace()
-    errors = 0
 
     if path:
         p = Path(path) if Path(path).is_absolute() else git_root / path
@@ -305,6 +319,9 @@ def cmd_validate(path: str | None = None, recursive: bool = False) -> bool:
         else:
             files = list(git_root.glob(".threads/*.md"))
 
+    results = []
+    error_count = 0
+
     for file in files:
         rel_path = path_relative_to_git_root(git_root, file)
         thread = load_thread(file)
@@ -317,10 +334,36 @@ def cmd_validate(path: str | None = None, recursive: bool = False) -> bool:
         elif thread.base_status() not in ALL_STATUSES:
             issues.append(f"invalid status '{thread.base_status()}'")
 
-        if issues:
-            print(f"WARN: {rel_path}: {', '.join(issues)}")
-            errors += 1
-        else:
-            print(f"OK: {rel_path}")
+        valid = len(issues) == 0
+        if not valid:
+            error_count += 1
 
-    return errors == 0
+        results.append({
+            "path": rel_path,
+            "valid": valid,
+            "issues": issues,
+        })
+
+    # Output based on format
+    if fmt in (OutputFormat.FANCY, OutputFormat.PLAIN):
+        for r in results:
+            if r["valid"]:
+                print(f"OK: {r['path']}")
+            else:
+                print(f"WARN: {r['path']}: {', '.join(r['issues'])}")
+    elif fmt == OutputFormat.JSON:
+        data = {
+            "total": len(results),
+            "errors": error_count,
+            "results": results,
+        }
+        print(json.dumps(data, indent=2))
+    elif fmt == OutputFormat.YAML:
+        data = {
+            "total": len(results),
+            "errors": error_count,
+            "results": results,
+        }
+        print(yaml.dump(data, default_flow_style=False, sort_keys=False), end="")
+
+    return error_count == 0

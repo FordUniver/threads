@@ -4,8 +4,10 @@ use std::path::Path;
 
 use chrono::Local;
 use clap::Args;
+use serde::Serialize;
 
 use crate::git;
+use crate::output::OutputFormat;
 use crate::thread;
 use crate::workspace;
 
@@ -40,9 +42,30 @@ pub struct NewArgs {
     /// Commit message
     #[arg(short = 'm', long)]
     m: Option<String>,
+
+    /// Output format (auto-detects TTY for fancy vs plain)
+    #[arg(short = 'f', long, value_enum, default_value = "fancy")]
+    format: OutputFormat,
+
+    /// Output as JSON (shorthand for --format=json)
+    #[arg(long, conflicts_with = "format")]
+    json: bool,
+}
+
+#[derive(Serialize)]
+struct NewOutput {
+    id: String,
+    path: String,
+    path_absolute: String,
 }
 
 pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
+    let format = if args.json {
+        OutputFormat::Json
+    } else {
+        args.format.resolve()
+    };
+
     // Validate status early
     if !thread::is_valid_status(&args.status) {
         return Err(format!(
@@ -133,11 +156,35 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
     // Display path relative to git root
     let rel_path = workspace::path_relative_to_git_root(git_root, &thread_path);
 
-    println!("Created thread in {}: {}", scope.level_desc, id);
-    println!("  → {}", rel_path);
+    match format {
+        OutputFormat::Fancy | OutputFormat::Plain => {
+            println!("Created thread in {}: {}", scope.level_desc, id);
+            println!("  → {}", rel_path);
 
-    if body.is_empty() {
-        eprintln!("Hint: Add body with: echo \"content\" | threads body {} --set", id);
+            if body.is_empty() {
+                eprintln!("Hint: Add body with: echo \"content\" | threads body {} --set", id);
+            }
+        }
+        OutputFormat::Json => {
+            let output = NewOutput {
+                id: id.clone(),
+                path: rel_path.clone(),
+                path_absolute: thread_path.to_string_lossy().to_string(),
+            };
+            let json = serde_json::to_string_pretty(&output)
+                .map_err(|e| format!("JSON serialization failed: {}", e))?;
+            println!("{}", json);
+        }
+        OutputFormat::Yaml => {
+            let output = NewOutput {
+                id: id.clone(),
+                path: rel_path.clone(),
+                path_absolute: thread_path.to_string_lossy().to_string(),
+            };
+            let yaml = serde_yaml::to_string(&output)
+                .map_err(|e| format!("YAML serialization failed: {}", e))?;
+            print!("{}", yaml);
+        }
     }
 
     // Commit if requested
@@ -146,7 +193,7 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
             git::generate_commit_message(git_root, &[thread_path.to_string_lossy().to_string()])
         });
         git::auto_commit(git_root, &thread_path, &msg)?;
-    } else {
+    } else if matches!(format, OutputFormat::Fancy | OutputFormat::Plain) {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
             id, id

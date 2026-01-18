@@ -317,9 +317,19 @@ def cmd_read(ref: str) -> None:
     print(file_path.read_text())
 
 
-def cmd_path(ref: str) -> None:
+def cmd_path(
+    ref: str,
+    format_str: str = "fancy",
+    json_output: bool = False,
+) -> None:
     """Print the absolute path of a thread file."""
     from ..workspace import find_thread_by_ref
+
+    # Determine output format
+    if json_output:
+        fmt = OutputFormat.JSON
+    else:
+        fmt = resolve_format(parse_format(format_str))
 
     git_root = get_workspace()
 
@@ -335,7 +345,23 @@ def cmd_path(ref: str) -> None:
         else:
             raise
 
-    print(file_path.resolve())
+    abs_path = file_path.resolve()
+    rel_path = parse_thread_path(file_path, git_root)
+
+    if fmt in (OutputFormat.FANCY, OutputFormat.PLAIN):
+        print(abs_path)
+    elif fmt == OutputFormat.JSON:
+        data = {
+            "path": rel_path,
+            "path_absolute": str(abs_path),
+        }
+        print(json.dumps(data, indent=2))
+    elif fmt == OutputFormat.YAML:
+        data = {
+            "path": rel_path,
+            "path_absolute": str(abs_path),
+        }
+        print(yaml.dump(data, default_flow_style=False, sort_keys=False), end="")
 
 
 def cmd_stats(

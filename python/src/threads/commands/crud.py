@@ -47,19 +47,32 @@ def cmd_new(
     body: str | None = None,
     do_commit: bool = False,
     message: str | None = None,
+    format_str: str = "fancy",
+    json_output: bool = False,
 ) -> str:
     """Create a new thread.
 
     Returns:
         The generated thread ID.
     """
+    import json
+    import yaml
+
+    from ..output import OutputFormat, parse_format, resolve_format
+
+    # Determine output format
+    if json_output:
+        fmt = OutputFormat.JSON
+    else:
+        fmt = resolve_format(parse_format(format_str))
+
     # Validate status before proceeding
     validate_status(status)
 
     git_root = get_workspace()
 
-    # Warn if no description
-    if not desc:
+    # Warn if no description (only in non-machine-readable formats)
+    if not desc and fmt in (OutputFormat.FANCY, OutputFormat.PLAIN):
         print("Warning: No --desc provided. Add one with: threads update <id> --desc \"...\"", file=sys.stderr)
 
     # Determine scope using new path resolution
@@ -104,18 +117,34 @@ def cmd_new(
 
     # Display path relative to git root
     rel_path = path_relative_to_git_root(git_root, filepath)
-    print(f"Created thread in {scope.level_desc}: {tid}")
-    print(f"  → {rel_path}")
 
-    if not body:
-        print(f'Hint: Add body with: echo "content" | threads body {tid} --set', file=sys.stderr)
+    if fmt in (OutputFormat.FANCY, OutputFormat.PLAIN):
+        print(f"Created thread in {scope.level_desc}: {tid}")
+        print(f"  → {rel_path}")
+
+        if not body:
+            print(f'Hint: Add body with: echo "content" | threads body {tid} --set', file=sys.stderr)
+    elif fmt == OutputFormat.JSON:
+        data = {
+            "id": tid,
+            "path": rel_path,
+            "path_absolute": str(filepath),
+        }
+        print(json.dumps(data, indent=2))
+    elif fmt == OutputFormat.YAML:
+        data = {
+            "id": tid,
+            "path": rel_path,
+            "path_absolute": str(filepath),
+        }
+        print(yaml.dump(data, default_flow_style=False, sort_keys=False), end="")
 
     if do_commit:
         from .lifecycle import auto_commit
         if message is None:
             message = f"threads: add {tid}-{slug}"
         auto_commit(filepath, message, git_root)
-    else:
+    elif fmt in (OutputFormat.FANCY, OutputFormat.PLAIN):
         print(f"Note: Thread {tid} has uncommitted changes. Use 'threads commit {tid}' when ready.")
 
     return tid

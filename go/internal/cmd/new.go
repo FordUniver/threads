@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"git.zib.de/cspiegel/threads/internal/git"
+	"git.zib.de/cspiegel/threads/internal/output"
 	"git.zib.de/cspiegel/threads/internal/thread"
 	"git.zib.de/cspiegel/threads/internal/workspace"
 )
@@ -21,7 +24,15 @@ var (
 	newBody   string
 	newCommit bool
 	newMsg    string
+	newFormat string
+	newJSON   bool
 )
+
+type newOutput struct {
+	ID           string `json:"id" yaml:"id"`
+	Path         string `json:"path" yaml:"path"`
+	PathAbsolute string `json:"path_absolute" yaml:"path_absolute"`
+}
 
 var newCmd = &cobra.Command{
 	Use:   "new [path] <title>",
@@ -44,9 +55,19 @@ func init() {
 	newCmd.Flags().StringVar(&newBody, "body", "", "Initial body content")
 	newCmd.Flags().BoolVar(&newCommit, "commit", false, "Commit after creating")
 	newCmd.Flags().StringVarP(&newMsg, "m", "m", "", "Commit message")
+	newCmd.Flags().StringVarP(&newFormat, "format", "f", "fancy", "Output format (fancy, plain, json, yaml)")
+	newCmd.Flags().BoolVar(&newJSON, "json", false, "Output as JSON (shorthand for --format=json)")
 }
 
 func runNew(cmd *cobra.Command, args []string) error {
+	// Determine output format
+	var fmt_ output.Format
+	if newJSON {
+		fmt_ = output.JSON
+	} else {
+		fmt_ = output.ParseFormat(newFormat).Resolve()
+	}
+
 	gitRoot := getWorkspace()
 
 	var pathArg, title string
@@ -147,11 +168,37 @@ func runNew(cmd *cobra.Command, args []string) error {
 
 	// Display path relative to git root
 	relPath := workspace.PathRelativeToGitRoot(gitRoot, threadPath)
-	fmt.Printf("Created thread in %s: %s\n", scope.LevelDesc, id)
-	fmt.Printf("  → %s\n", relPath)
 
-	if newBody == "" {
-		fmt.Fprintln(os.Stderr, "Hint: Add body with: echo \"content\" | threads body", id, "--set")
+	switch fmt_ {
+	case output.Fancy, output.Plain:
+		fmt.Printf("Created thread in %s: %s\n", scope.LevelDesc, id)
+		fmt.Printf("  → %s\n", relPath)
+
+		if newBody == "" {
+			fmt.Fprintln(os.Stderr, "Hint: Add body with: echo \"content\" | threads body", id, "--set")
+		}
+	case output.JSON:
+		out := newOutput{
+			ID:           id,
+			Path:         relPath,
+			PathAbsolute: threadPath,
+		}
+		data, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			return fmt.Errorf("JSON serialization failed: %v", err)
+		}
+		fmt.Println(string(data))
+	case output.YAML:
+		out := newOutput{
+			ID:           id,
+			Path:         relPath,
+			PathAbsolute: threadPath,
+		}
+		data, err := yaml.Marshal(out)
+		if err != nil {
+			return fmt.Errorf("YAML serialization failed: %v", err)
+		}
+		fmt.Print(string(data))
 	}
 
 	// Commit if requested
@@ -163,7 +210,7 @@ func runNew(cmd *cobra.Command, args []string) error {
 		if err := git.AutoCommit(gitRoot, threadPath, msg); err != nil {
 			return err
 		}
-	} else {
+	} else if fmt_ == output.Fancy || fmt_ == output.Plain {
 		fmt.Printf("Note: Thread %s has uncommitted changes. Use 'threads commit %s' when ready.\n", id, id)
 	}
 

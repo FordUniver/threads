@@ -132,6 +132,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_new.add_argument("--body", help="Initial body content")
     p_new.add_argument("--commit", action="store_true", dest="do_commit", help="Auto-commit")
     p_new.add_argument("-m", dest="message", help="Commit message")
+    p_new.add_argument("-f", "--format", choices=["fancy", "plain", "json", "yaml"], default="fancy", dest="format_str", help="Output format")
+    p_new.add_argument("--json", action="store_true", dest="json_output", help="JSON output (shorthand for --format=json)")
 
     # read
     p_read = subparsers.add_parser("read", help="Read thread content")
@@ -140,6 +142,8 @@ def build_parser() -> argparse.ArgumentParser:
     # path
     p_path = subparsers.add_parser("path", help="Print thread file path")
     p_path.add_argument("ref", help="Thread ID or name").completer = thread_id_completer
+    p_path.add_argument("-f", "--format", choices=["fancy", "plain", "json", "yaml"], default="fancy", dest="format_str", help="Output format")
+    p_path.add_argument("--json", action="store_true", dest="json_output", help="JSON output (shorthand for --format=json)")
 
     # status
     p_status = subparsers.add_parser("status", help="Change thread status")
@@ -245,6 +249,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_validate = subparsers.add_parser("validate", help="Validate thread files")
     p_validate.add_argument("path", nargs="?", help="Specific file or directory")
     p_validate.add_argument("-r", "--recursive", action="store_true", help="Validate recursively")
+    p_validate.add_argument("-f", "--format", choices=["fancy", "plain", "json", "yaml"], default="fancy", dest="format_str", help="Output format")
+    p_validate.add_argument("--json", action="store_true", dest="json_output", help="JSON output (shorthand for --format=json)")
 
     # completion
     p_completion = subparsers.add_parser("completion", help="Generate shell completion script")
@@ -326,6 +332,8 @@ def main() -> int:
                 body=args.body,
                 do_commit=args.do_commit,
                 message=args.message,
+                format_str=args.format_str,
+                json_output=args.json_output,
             )
 
         elif args.command == "read":
@@ -334,7 +342,7 @@ def main() -> int:
 
         elif args.command == "path":
             from .commands.query import cmd_path
-            cmd_path(args.ref)
+            cmd_path(args.ref, format_str=args.format_str, json_output=args.json_output)
 
         elif args.command == "status":
             from .commands.lifecycle import cmd_status
@@ -456,7 +464,12 @@ def main() -> int:
 
         elif args.command == "validate":
             from .commands.lifecycle import cmd_validate
-            if not cmd_validate(args.path, recursive=args.recursive):
+            if not cmd_validate(
+                args.path,
+                recursive=args.recursive,
+                format_str=args.format_str,
+                json_output=args.json_output,
+            ):
                 return 1
 
         elif args.command == "completion":
