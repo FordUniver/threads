@@ -7,6 +7,7 @@ _ORIGINAL_PWD=""
 
 # Create isolated test workspace
 # Sets TEST_WS and creates .threads/ directory
+# Initializes git repo (required by implementations)
 # Automatically registers EXIT trap for cleanup
 setup_test_workspace() {
     _ORIGINAL_PWD="$PWD"
@@ -15,6 +16,13 @@ setup_test_workspace() {
     export TEST_WS
     export WORKSPACE="$TEST_WS"
     cd "$TEST_WS" || exit 1
+
+    # Initialize git repo (implementations require git root)
+    git init -q
+    git config user.email "test@threads.test"
+    git config user.name "Test User"
+    git add .
+    git commit -q -m "Initial test workspace" --allow-empty
 
     # Auto-register cleanup trap (idempotent - safe to call multiple times)
     trap teardown_test_workspace EXIT
@@ -104,13 +112,7 @@ skip_test() {
 
 # Create test workspace with git repo initialized
 # Usage: setup_git_workspace
-# Sets up workspace and initializes git with test user config
+# Note: Now identical to setup_test_workspace (kept for backwards compatibility)
 setup_git_workspace() {
     setup_test_workspace
-    git -C "$TEST_WS" init -q
-    git -C "$TEST_WS" config user.email "test@threads.test"
-    git -C "$TEST_WS" config user.name "Test User"
-    # Initial commit so we have a valid HEAD
-    git -C "$TEST_WS" add .
-    git -C "$TEST_WS" commit -q -m "Initial test workspace" --allow-empty
 }
