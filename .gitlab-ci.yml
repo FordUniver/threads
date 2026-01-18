@@ -21,7 +21,7 @@ variables:
 # Go implementation
 test:go:
   extends: .test_template
-  image: golang:1.22
+  image: golang:1.24
   before_script:
     - apt-get update && apt-get install -y gawk make
   script:
