@@ -29,10 +29,10 @@ declare -A IMPL_PATHS=()
 
 # Go
 if [[ -f "$ROOT_DIR/go/go.mod" ]] && command -v go &>/dev/null; then
-    if (cd "$ROOT_DIR/go" && go build -o threads-bench . 2>/dev/null); then
+    if (cd "$ROOT_DIR/go" && go build -o threads-bench . 2>&1); then
         IMPLS+=(go) && IMPL_PATHS[go]="$ROOT_DIR/go/threads-bench"
     else
-        echo "  Note: Go build failed" >&2
+        echo "  Note: Go build failed (see above)" >&2
     fi
 fi
 
