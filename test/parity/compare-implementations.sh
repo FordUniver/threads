@@ -148,6 +148,34 @@ if [[ ${#IMPLS[@]} -lt 2 ]]; then
     exit 1
 fi
 
+# Verify each implementation can actually run (preflight check)
+echo -e "${BOLD}Preflight check: verifying implementations work${NC}"
+WORKING_IMPLS=()
+for impl in "${IMPLS[@]}"; do
+    impl_cmd="${IMPL_CMDS[$impl]}"
+    # Try running --help to verify the implementation works
+    if (cd "$WORKSPACE" && $impl_cmd --help >/dev/null 2>&1); then
+        WORKING_IMPLS+=("$impl")
+        echo -e "  ${GREEN}$impl: OK${NC}"
+    else
+        echo -e "  ${RED}$impl: FAILED (--help returned error)${NC}"
+        # Try to get error message
+        err=$((cd "$WORKSPACE" && $impl_cmd --help 2>&1) || true)
+        if [[ -n "$err" ]]; then
+            echo "    Error: $(echo "$err" | head -2 | tr '\n' ' ')"
+        fi
+    fi
+done
+IMPLS=("${WORKING_IMPLS[@]}")
+echo
+echo "Working implementations: ${#IMPLS[@]} - ${IMPLS[*]}"
+echo
+
+if [[ ${#IMPLS[@]} -lt 2 ]]; then
+    echo "ERROR: Need at least 2 working implementations for comparison"
+    exit 1
+fi
+
 # Output directory for comparison
 OUTPUT_DIR=$(mktemp -d "${TMPDIR:-/tmp}/threads-parity-output.XXXXXX")
 trap "rm -rf '$WORKSPACE' '$OUTPUT_DIR'" EXIT
@@ -168,22 +196,29 @@ compare_outputs() {
     local reference_impl="${IMPLS[0]}"
     local reference_cmd="${IMPL_CMDS[$reference_impl]}"
 
-    # Get reference output
+    # Get reference output (capture stderr to separate file for debugging)
     local reference_output="$OUTPUT_DIR/reference-$TOTAL_CHECKS.txt"
-    (cd "$WORKSPACE" && $reference_cmd "${cmd_args[@]}" 2>/dev/null) | normalize_output > "$reference_output"
+    local reference_stderr="$OUTPUT_DIR/reference-$TOTAL_CHECKS.err"
+    (cd "$WORKSPACE" && $reference_cmd "${cmd_args[@]}" 2>"$reference_stderr") | normalize_output > "$reference_output"
 
     local all_match=true
     for impl in "${IMPLS[@]:1}"; do
         local impl_cmd="${IMPL_CMDS[$impl]}"
         local impl_output="$OUTPUT_DIR/${impl}-$TOTAL_CHECKS.txt"
+        local impl_stderr="$OUTPUT_DIR/${impl}-$TOTAL_CHECKS.err"
 
-        (cd "$WORKSPACE" && $impl_cmd "${cmd_args[@]}" 2>/dev/null) | normalize_output > "$impl_output"
+        (cd "$WORKSPACE" && $impl_cmd "${cmd_args[@]}" 2>"$impl_stderr") | normalize_output > "$impl_output"
 
         if ! diff -q "$reference_output" "$impl_output" >/dev/null 2>&1; then
             all_match=false
             echo -e "  ${RED}MISMATCH: $reference_impl vs $impl${NC}"
             echo "  Diff (first 10 lines):"
             diff "$reference_output" "$impl_output" | head -10 | sed 's/^/    /'
+            # Show stderr if output is empty (implementation likely errored)
+            if [[ ! -s "$impl_output" ]] && [[ -s "$impl_stderr" ]]; then
+                echo -e "  ${YELLOW}$impl stderr:${NC}"
+                head -5 "$impl_stderr" | sed 's/^/    /'
+            fi
         fi
     done
 
@@ -249,21 +284,28 @@ compare_json_outputs() {
     local reference_impl="${IMPLS[0]}"
     local reference_cmd="${IMPL_CMDS[$reference_impl]}"
 
-    # Get reference thread IDs
+    # Get reference thread IDs (capture stderr for debugging)
+    local ref_stderr="$OUTPUT_DIR/ref-json-$TOTAL_CHECKS.err"
     local ref_ids
-    ref_ids=$((cd "$WORKSPACE" && $reference_cmd "${cmd_args[@]}" 2>/dev/null) | extract_ids_from_json)
+    ref_ids=$((cd "$WORKSPACE" && $reference_cmd "${cmd_args[@]}" 2>"$ref_stderr") | extract_ids_from_json)
 
     local all_match=true
     for impl in "${IMPLS[@]:1}"; do
         local impl_cmd="${IMPL_CMDS[$impl]}"
+        local impl_stderr="$OUTPUT_DIR/${impl}-json-$TOTAL_CHECKS.err"
         local impl_ids
-        impl_ids=$((cd "$WORKSPACE" && $impl_cmd "${cmd_args[@]}" 2>/dev/null) | extract_ids_from_json)
+        impl_ids=$((cd "$WORKSPACE" && $impl_cmd "${cmd_args[@]}" 2>"$impl_stderr") | extract_ids_from_json)
 
         if [[ "$ref_ids" != "$impl_ids" ]]; then
             all_match=false
             echo -e "  ${RED}MISMATCH: $reference_impl vs $impl (different thread IDs)${NC}"
             echo "  Reference IDs: $(echo "$ref_ids" | tr '\n' ' ')"
             echo "  $impl IDs: $(echo "$impl_ids" | tr '\n' ' ')"
+            # Show stderr if no IDs returned (implementation likely errored)
+            if [[ -z "$impl_ids" ]] && [[ -s "$impl_stderr" ]]; then
+                echo -e "  ${YELLOW}$impl stderr:${NC}"
+                head -5 "$impl_stderr" | sed 's/^/    /'
+            fi
         fi
     done
 
