@@ -3,6 +3,7 @@
 stages:
   - test
   - benchmark
+  - release
 
 variables:
   GIT_DEPTH: 1
@@ -66,3 +67,34 @@ benchmark:
     # Allow manual trigger on any branch
     - when: manual
       allow_failure: true
+
+# Release - build binaries and create GitLab release on tag push
+release:
+  stage: release
+  image: golang:1.24
+  before_script:
+    - apt-get update && apt-get install -y wget
+    - wget -qO /tmp/glab.tar.gz https://gitlab.com/gitlab-org/cli/-/releases/v1.52.0/downloads/glab_1.52.0_linux_amd64.tar.gz
+    - tar -xzf /tmp/glab.tar.gz -C /tmp
+    - mv /tmp/bin/glab /usr/local/bin/glab && chmod +x /usr/local/bin/glab
+  script:
+    - VERSION="${CI_COMMIT_TAG#v}"
+    - mkdir -p build
+    - cd go
+    # Build all platforms
+    - echo "Building darwin-arm64..."
+    - GOOS=darwin GOARCH=arm64 go build -ldflags "-s -w -X main.version=$VERSION" -o ../build/threads-darwin-arm64 ./cmd/threads
+    - echo "Building darwin-amd64..."
+    - GOOS=darwin GOARCH=amd64 go build -ldflags "-s -w -X main.version=$VERSION" -o ../build/threads-darwin-amd64 ./cmd/threads
+    - echo "Building linux-amd64..."
+    - GOOS=linux GOARCH=amd64 go build -ldflags "-s -w -X main.version=$VERSION" -o ../build/threads-linux-amd64 ./cmd/threads
+    - echo "Building linux-arm64..."
+    - GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X main.version=$VERSION" -o ../build/threads-linux-arm64 ./cmd/threads
+    - cd ..
+    # Generate checksums
+    - cd build && sha256sum threads-* > checksums.txt && cd ..
+    - cat build/checksums.txt
+    # Create release
+    - glab release create "$CI_COMMIT_TAG" --notes "Release $CI_COMMIT_TAG" build/threads-* build/checksums.txt
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/
