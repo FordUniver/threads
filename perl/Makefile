@@ -1,11 +1,11 @@
 PERL = perl
-PROVE = prove -l
+PROVE = prove -l -Ilocal/lib/perl5
 PERLCRITIC = perlcritic
 
 .PHONY: test install lint clean deps
 
 deps:
-	cpanm --installdeps .
+	cpanm -L ./local --installdeps .
 
 test:
 	$(PROVE) t/
@@ -18,7 +18,7 @@ lint:
 	$(PERLCRITIC) --stern lib/ bin/
 
 clean:
-	rm -rf blib _build cover_db
+	rm -rf blib _build cover_db local/
 
 dev-link:
 	ln -sf $(PWD)/bin/threads $(HOME)/.local/bin/threads-perl

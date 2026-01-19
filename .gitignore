@@ -32,3 +32,6 @@ swift/.swiftpm/
 # Ruby
 ruby/.bundle/
 ruby/vendor/
+
+# Perl
+perl/local/
