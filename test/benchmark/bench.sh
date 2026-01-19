@@ -119,7 +119,8 @@ REFERENCE_IMPL="${IMPLS[0]}"
 REFERENCE_PATH="${IMPL_PATHS[$REFERENCE_IMPL]}"
 
 # Get reference output (thread IDs only, sorted)
-WORKSPACE="$WORKSPACE" "$REFERENCE_PATH" list -r --json 2>/dev/null | jq -r '.threads[].id' | sort > "$VALIDATION_DIR/reference.txt"
+# Run from workspace dir so Go can find git root, and set WORKSPACE for other impls
+(cd "$WORKSPACE" && WORKSPACE="$WORKSPACE" "$REFERENCE_PATH" list -r --json 2>/dev/null) | jq -r '.threads[]?.id // empty' | sort > "$VALIDATION_DIR/reference.txt"
 REFERENCE_COUNT=$(wc -l < "$VALIDATION_DIR/reference.txt" | tr -d ' ')
 echo "  Reference ($REFERENCE_IMPL): $REFERENCE_COUNT threads"
 
@@ -129,7 +130,7 @@ for impl in "${IMPLS[@]}"; do
         continue
     fi
     impl_path="${IMPL_PATHS[$impl]}"
-    WORKSPACE="$WORKSPACE" "$impl_path" list -r --json 2>/dev/null | jq -r '.threads[].id' | sort > "$VALIDATION_DIR/${impl}.txt"
+    (cd "$WORKSPACE" && WORKSPACE="$WORKSPACE" "$impl_path" list -r --json 2>/dev/null) | jq -r '.threads[]?.id // empty' | sort > "$VALIDATION_DIR/${impl}.txt"
     impl_count=$(wc -l < "$VALIDATION_DIR/${impl}.txt" | tr -d ' ')
 
     if ! diff -q "$VALIDATION_DIR/reference.txt" "$VALIDATION_DIR/${impl}.txt" >/dev/null 2>&1; then
@@ -169,14 +170,14 @@ bench_operation() {
     local impl_path="${IMPL_PATHS[$impl]}"
     local total_ms=0
 
-    # Warmup (1 run)
-    WORKSPACE="$WORKSPACE" "$impl_path" "${args[@]}" >/dev/null 2>&1 || true
+    # Warmup (1 run) - run from workspace dir for Go, set WORKSPACE for others
+    (cd "$WORKSPACE" && WORKSPACE="$WORKSPACE" "$impl_path" "${args[@]}") >/dev/null 2>&1 || true
 
     # Timed runs
     local start end elapsed
     start=$(get_time_ms)
     for ((i = 0; i < ITERATIONS; i++)); do
-        WORKSPACE="$WORKSPACE" "$impl_path" "${args[@]}" >/dev/null 2>&1 || true
+        (cd "$WORKSPACE" && WORKSPACE="$WORKSPACE" "$impl_path" "${args[@]}") >/dev/null 2>&1 || true
     done
     end=$(get_time_ms)
 

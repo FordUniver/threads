@@ -20,6 +20,9 @@ echo "  Output: $OUTPUT_DIR"
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/.threads"
 
+# Initialize git repo (required for Go implementation which uses git root)
+git init -q "$OUTPUT_DIR"
+
 # Deterministic pseudo-random based on index (inline for speed)
 # Returns 0-99 based on input, deterministic
 # Usage: result=$(( (n * 7919 + 104729) % 100 ))
