@@ -108,7 +108,9 @@ benchmark:
     - job: test:bun
       optional: true
   before_script:
-    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc
+    - apt-get update && apt-get install -y python3 python3-pip perl ruby curl unzip bc
+    # Install uv (for Python)
+    - pip3 install uv
     # Install bun
     - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
     # Install Perl YAML::Tiny

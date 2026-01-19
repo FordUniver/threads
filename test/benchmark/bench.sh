@@ -28,18 +28,26 @@ declare -a IMPLS=()
 declare -A IMPL_PATHS=()
 
 # Go
-if [[ -f "$ROOT_DIR/go/go.mod" ]]; then
-    (cd "$ROOT_DIR/go" && go build -o threads-bench . 2>/dev/null) && IMPLS+=(go) && IMPL_PATHS[go]="$ROOT_DIR/go/threads-bench"
+if [[ -f "$ROOT_DIR/go/go.mod" ]] && command -v go &>/dev/null; then
+    if (cd "$ROOT_DIR/go" && go build -o threads-bench . 2>/dev/null); then
+        IMPLS+=(go) && IMPL_PATHS[go]="$ROOT_DIR/go/threads-bench"
+    else
+        echo "  Note: Go build failed" >&2
+    fi
 fi
 
 # Rust
-if [[ -f "$ROOT_DIR/rust/Cargo.toml" ]]; then
-    (cd "$ROOT_DIR/rust" && cargo build --release --quiet 2>/dev/null) && IMPLS+=(rust) && IMPL_PATHS[rust]="$ROOT_DIR/rust/target/release/threads"
+if [[ -f "$ROOT_DIR/rust/Cargo.toml" ]] && command -v cargo &>/dev/null; then
+    if (cd "$ROOT_DIR/rust" && cargo build --release --quiet 2>/dev/null); then
+        IMPLS+=(rust) && IMPL_PATHS[rust]="$ROOT_DIR/rust/target/release/threads"
+    else
+        echo "  Note: Rust build failed" >&2
+    fi
 fi
 
-# Python
-if [[ -f "$ROOT_DIR/python/threads.py" ]]; then
-    IMPLS+=(python) && IMPL_PATHS[python]="$ROOT_DIR/python/threads.py"
+# Python (requires uv)
+if [[ -f "$ROOT_DIR/python/bin/threads" ]] && command -v uv &>/dev/null; then
+    IMPLS+=(python) && IMPL_PATHS[python]="$ROOT_DIR/python/bin/threads"
 fi
 
 # Ruby
