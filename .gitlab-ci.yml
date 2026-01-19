@@ -77,6 +77,8 @@ release:
     - wget -qO /tmp/glab.tar.gz https://gitlab.com/gitlab-org/cli/-/releases/v1.52.0/downloads/glab_1.52.0_linux_amd64.tar.gz
     - tar -xzf /tmp/glab.tar.gz -C /tmp
     - mv /tmp/bin/glab /usr/local/bin/glab && chmod +x /usr/local/bin/glab
+    # Configure glab to use CI_JOB_TOKEN for git.zib.de
+    - glab auth login --hostname git.zib.de --token "$CI_JOB_TOKEN"
   script:
     - VERSION="${CI_COMMIT_TAG#v}"
     - mkdir -p build
