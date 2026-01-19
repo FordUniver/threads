@@ -27,47 +27,78 @@ fi
 declare -a IMPLS=()
 declare -A IMPL_PATHS=()
 
-# Go
+# Track build failures
+BUILD_FAILED=0
+
+# Go (required if go is available)
 if [[ -f "$ROOT_DIR/go/go.mod" ]] && command -v go &>/dev/null; then
-    if (cd "$ROOT_DIR/go" && go build -o threads-bench . 2>&1); then
+    echo "Building Go..."
+    if (cd "$ROOT_DIR/go" && go build -o threads-bench ./cmd/threads); then
         IMPLS+=(go) && IMPL_PATHS[go]="$ROOT_DIR/go/threads-bench"
     else
-        echo "  Note: Go build failed (see above)" >&2
+        echo "ERROR: Go build failed" >&2
+        BUILD_FAILED=1
     fi
 fi
 
-# Rust
+# Rust (optional - only if cargo available)
 if [[ -f "$ROOT_DIR/rust/Cargo.toml" ]] && command -v cargo &>/dev/null; then
-    if (cd "$ROOT_DIR/rust" && cargo build --release --quiet 2>/dev/null); then
+    echo "Building Rust..."
+    if (cd "$ROOT_DIR/rust" && cargo build --release --quiet); then
         IMPLS+=(rust) && IMPL_PATHS[rust]="$ROOT_DIR/rust/target/release/threads"
     else
-        echo "  Note: Rust build failed" >&2
+        echo "ERROR: Rust build failed" >&2
+        BUILD_FAILED=1
     fi
 fi
 
-# Python (requires uv)
+# Swift (optional - only if swift available)
+if [[ -f "$ROOT_DIR/swift/Package.swift" ]] && command -v swift &>/dev/null; then
+    echo "Building Swift..."
+    if (cd "$ROOT_DIR/swift" && swift build -c release --quiet); then
+        IMPLS+=(swift) && IMPL_PATHS[swift]="$ROOT_DIR/swift/.build/release/threads"
+    else
+        echo "ERROR: Swift build failed" >&2
+        BUILD_FAILED=1
+    fi
+fi
+
+# Python (required if uv available)
 if [[ -f "$ROOT_DIR/python/bin/threads" ]] && command -v uv &>/dev/null; then
     IMPLS+=(python) && IMPL_PATHS[python]="$ROOT_DIR/python/bin/threads"
+elif [[ -f "$ROOT_DIR/python/bin/threads" ]]; then
+    echo "ERROR: Python requires uv but not found" >&2
+    BUILD_FAILED=1
 fi
 
-# Ruby
+# Ruby (required)
 if [[ -f "$ROOT_DIR/ruby/bin/threads" ]]; then
     IMPLS+=(ruby) && IMPL_PATHS[ruby]="$ROOT_DIR/ruby/bin/threads"
+else
+    echo "ERROR: Ruby implementation not found" >&2
+    BUILD_FAILED=1
 fi
 
-# Perl
+# Perl (required)
 if [[ -f "$ROOT_DIR/perl/bin/threads" ]]; then
     IMPLS+=(perl) && IMPL_PATHS[perl]="$ROOT_DIR/perl/bin/threads"
+else
+    echo "ERROR: Perl implementation not found" >&2
+    BUILD_FAILED=1
 fi
 
-# Swift
-if [[ -f "$ROOT_DIR/swift/Package.swift" ]]; then
-    (cd "$ROOT_DIR/swift" && swift build -c release --quiet 2>/dev/null) && IMPLS+=(swift) && IMPL_PATHS[swift]="$ROOT_DIR/swift/.build/release/threads"
-fi
-
-# Bun
+# Bun (required)
 if [[ -f "$ROOT_DIR/bun/bin/threads" ]]; then
     IMPLS+=(bun) && IMPL_PATHS[bun]="$ROOT_DIR/bun/bin/threads"
+else
+    echo "ERROR: Bun implementation not found" >&2
+    BUILD_FAILED=1
+fi
+
+# Exit if any required build failed
+if [[ $BUILD_FAILED -ne 0 ]]; then
+    echo "Build failures detected, aborting benchmark" >&2
+    exit 1
 fi
 
 if [[ ${#IMPLS[@]} -eq 0 ]]; then
