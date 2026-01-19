@@ -91,11 +91,10 @@ test:bun:
   script:
     - make test-bun
 
-# Benchmark job - compares implementations on same hardware
-# Runs scripting languages (easy to set up) + Go (fast to build)
+# Benchmark job - compares all implementations on same hardware
 benchmark:
   stage: benchmark
-  image: golang:1.24
+  image: swift:5.9
   needs:
     - job: test:go
       optional: true
@@ -103,20 +102,26 @@ benchmark:
       optional: true
     - job: test:perl
       optional: true
+    - job: test:rust
+      optional: true
+    - job: test:swift
+      optional: true
     - job: test:ruby
       optional: true
     - job: test:bun
       optional: true
   before_script:
-    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc
-    # Install uv (for Python) via official installer
+    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc golang-go
+    # Install Rust
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && export PATH="$HOME/.cargo/bin:$PATH"
+    # Install uv (for Python)
     - curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
     # Install bun
     - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
     # Install Perl YAML::Tiny
     - cpan -T YAML::Tiny 2>/dev/null || true
   script:
-    - export PATH="$HOME/.local/bin:$PATH"
+    - export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
     - cd test/benchmark
     - chmod +x *.sh
     # Generate workspace with 1000 threads

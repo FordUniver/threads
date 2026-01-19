@@ -41,7 +41,7 @@ if [[ -f "$ROOT_DIR/go/go.mod" ]] && command -v go &>/dev/null; then
     fi
 fi
 
-# Rust (optional - only if cargo available)
+# Rust (required if cargo available)
 if [[ -f "$ROOT_DIR/rust/Cargo.toml" ]] && command -v cargo &>/dev/null; then
     echo "Building Rust..."
     if (cd "$ROOT_DIR/rust" && cargo build --release --quiet); then
@@ -52,7 +52,7 @@ if [[ -f "$ROOT_DIR/rust/Cargo.toml" ]] && command -v cargo &>/dev/null; then
     fi
 fi
 
-# Swift (optional - only if swift available)
+# Swift (required if swift available)
 if [[ -f "$ROOT_DIR/swift/Package.swift" ]] && command -v swift &>/dev/null; then
     echo "Building Swift..."
     if (cd "$ROOT_DIR/swift" && swift build -c release --quiet); then
