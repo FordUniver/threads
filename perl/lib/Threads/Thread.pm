@@ -93,7 +93,7 @@ sub new_from_file_lazy {
 
     # Extract fields via regex (no YAML parse)
     my %meta;
-    $meta{id}     = $1 if $header =~ /^id:\s*(\S+)/m;
+    $meta{id}     = $1 if $header =~ /^id:\s*["']?(\S+?)["']?\s*$/m;
     $meta{name}   = $1 if $header =~ /^name:\s*["']?(.+?)["']?\s*$/m;
     $meta{desc}   = $1 if $header =~ /^desc:\s*["']?(.+?)["']?\s*$/m;
     $meta{status} = $1 if $header =~ /^status:\s*(\S.*?)\s*$/m;
