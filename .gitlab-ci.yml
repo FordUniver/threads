@@ -3,6 +3,7 @@
 
 stages:
   - test
+  - benchmark
 
 variables:
   GIT_DEPTH: 1
@@ -89,3 +90,47 @@ test:bun:
     - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
   script:
     - make test-bun
+
+# Benchmark job - compares implementations on same hardware
+# Runs scripting languages (easy to set up) + Go (fast to build)
+benchmark:
+  stage: benchmark
+  image: golang:1.24
+  needs:
+    - job: test:go
+      optional: true
+    - job: test:python
+      optional: true
+    - job: test:perl
+      optional: true
+    - job: test:ruby
+      optional: true
+    - job: test:bun
+      optional: true
+  before_script:
+    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc
+    # Install bun
+    - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+    # Install Perl YAML::Tiny
+    - cpan -T YAML::Tiny 2>/dev/null || true
+  script:
+    - cd test/benchmark
+    - chmod +x *.sh
+    # Generate workspace with 1000 threads
+    - ./generate-workspace.sh 1000
+    # Run benchmark with 5 iterations
+    - ./bench.sh 5 1000
+    - echo "=== Benchmark Results ==="
+    - cat benchmark-results.csv
+  artifacts:
+    paths:
+      - test/benchmark/benchmark-results.csv
+    expire_in: 1 month
+  rules:
+    # Run on main branch
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    # Run on merge requests
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    # Allow manual trigger on any branch
+    - when: manual
+      allow_failure: true
