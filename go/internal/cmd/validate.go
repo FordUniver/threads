@@ -15,8 +15,9 @@ import (
 )
 
 var (
-	validateFormat string
-	validateJSON   bool
+	validateFormat    string
+	validateJSON      bool
+	validateRecursive bool // accepted for CLI consistency, always recursive
 )
 
 var validateCmd = &cobra.Command{
@@ -29,6 +30,7 @@ var validateCmd = &cobra.Command{
 func init() {
 	validateCmd.Flags().StringVarP(&validateFormat, "format", "f", "fancy", "Output format (fancy, plain, json, yaml)")
 	validateCmd.Flags().BoolVar(&validateJSON, "json", false, "Output as JSON (shorthand for --format=json)")
+	validateCmd.Flags().BoolVarP(&validateRecursive, "recursive", "r", false, "Validate recursively (always enabled, flag for CLI consistency)")
 }
 
 type validationResult struct {

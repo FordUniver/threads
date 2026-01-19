@@ -100,6 +100,39 @@ test_validate_recursive() {
     end_test
 }
 
+# Test: validate -r --json reports correct error count across nested dirs
+# This catches implementations that skip files or don't actually validate
+test_validate_error_count_accuracy() {
+    begin_test "validate -r --json reports accurate error count"
+    setup_nested_workspace
+
+    # Create 3 valid threads at different levels
+    create_thread "val001" "Valid Root" "active"
+    create_thread "val002" "Valid Cat" "active" "" "$TEST_WS/cat1"
+    create_thread "val003" "Valid Proj" "active" "" "$TEST_WS/cat1/proj1"
+
+    # Create 2 invalid threads (missing name) at different levels
+    create_malformed_thread "bad001" "missing_name" "$TEST_WS"
+    create_malformed_thread "bad002" "missing_name" "$TEST_WS/cat1/proj1"
+
+    local output
+    output=$($THREADS_BIN validate -r --json 2>/dev/null) || true
+
+    # Extract error count from JSON (should be exactly 2)
+    # JSON format: {"total": N, "errors": M, "results": [...]}
+    local errors
+    errors=$(echo "$output" | grep -o '"errors"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*')
+
+    local total
+    total=$(echo "$output" | grep -o '"total"[[:space:]]*:[[:space:]]*[0-9]*' | grep -o '[0-9]*')
+
+    assert_eq "5" "$total" "should validate all 5 threads"
+    assert_eq "2" "$errors" "should report exactly 2 errors"
+
+    teardown_test_workspace
+    end_test
+}
+
 # Run all tests
 test_validate_valid_thread
 test_validate_no_frontmatter
@@ -107,3 +140,4 @@ test_validate_invalid_yaml
 test_validate_missing_id_ok
 test_validate_missing_name
 test_validate_recursive
+test_validate_error_count_accuracy
