@@ -19,14 +19,22 @@ our @EXPORT_OK = qw(
 # Precompiled pattern for terminal status detection (quick check)
 our $TERMINAL_STATUS_RE = qr/^status:\s*(resolved|superseded|deferred|rejected)/m;
 
+# Cache for workspace root (process-scoped, computed once per invocation)
+my $_workspace_root_cache;
+
 # Get workspace root via git rev-parse (like other implementations)
+# Result is cached to avoid repeated subprocess spawns
 sub workspace_root {
+    return $_workspace_root_cache if defined $_workspace_root_cache;
+
     my $output = `git rev-parse --show-toplevel 2>/dev/null`;
     if ($? != 0 || !defined $output || $output eq '') {
         die "Not in a git repository. threads requires a git repo to define scope.\n";
     }
     chomp $output;
     die "Git root directory does not exist: $output\n" unless -d $output;
+
+    $_workspace_root_cache = $output;
     return $output;
 }
 
