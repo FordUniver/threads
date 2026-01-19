@@ -1,173 +1,51 @@
-# GitLab CI/CD for threads CLI - Multi-language testing
-# Tests all 7 implementations on every push
+# GitLab CI/CD for threads CLI
 
 stages:
   - test
-  - parity
   - benchmark
 
 variables:
   GIT_DEPTH: 1
 
-# Template for test jobs
-.test_template:
+# Unit tests - Go tests
+unit-test:
   stage: test
+  image: golang:1.24
+  script:
+    - cd go && go test -v ./...
+  artifacts:
+    when: on_failure
+    paths:
+      - go/
+    expire_in: 1 week
+
+# Integration tests - CLI behavior tests
+integration-test:
+  stage: test
+  image: golang:1.24
   before_script:
-    - echo "Testing $CI_JOB_NAME implementation"
+    - apt-get update && apt-get install -y gawk make jq wget
+    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
+  script:
+    - make integration-test
   artifacts:
     when: on_failure
     paths:
       - test/results/
     expire_in: 1 week
 
-# Go implementation
-test:go:
-  extends: .test_template
-  image: golang:1.24
-  before_script:
-    - apt-get update && apt-get install -y gawk make jq wget
-    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
-  script:
-    - make test-go
-
-# Python implementation
-test:python:
-  extends: .test_template
-  image: python:3.12
-  before_script:
-    - apt-get update && apt-get install -y gawk make jq wget
-    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
-    - pip install uv
-  script:
-    - make test-python
-
-# Perl implementation
-test:perl:
-  extends: .test_template
-  image: perl:5.38
-  before_script:
-    - apt-get update && apt-get install -y gawk make jq wget
-    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
-    - cpanm --notest YAML::Tiny
-  script:
-    - make test-perl
-
-# Rust implementation
-test:rust:
-  extends: .test_template
-  image: rust:1.82
-  before_script:
-    - apt-get update && apt-get install -y gawk make jq wget
-    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
-  script:
-    - make test-rust
-
-# Swift implementation
-test:swift:
-  extends: .test_template
-  image: swift:5.9
-  before_script:
-    - apt-get update && apt-get install -y gawk make jq wget
-    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
-  script:
-    - make test-swift
-
-# Ruby implementation
-test:ruby:
-  extends: .test_template
-  image: ruby:3.3
-  before_script:
-    - apt-get update && apt-get install -y gawk make jq wget
-    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
-  script:
-    - make test-ruby
-
-# Bun implementation
-test:bun:
-  extends: .test_template
-  image: oven/bun:1.0
-  before_script:
-    - apt-get update && apt-get install -y gawk make jq git wget
-    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
-  script:
-    - make test-bun
-
-# Parity job - compares output across implementations
-parity:
-  stage: parity
-  image: swift:5.9
-  needs:
-    - job: test:go
-      optional: true
-    - job: test:python
-      optional: true
-    - job: test:perl
-      optional: true
-    - job: test:rust
-      optional: true
-    - job: test:swift
-      optional: true
-    - job: test:ruby
-      optional: true
-    - job: test:bun
-      optional: true
-  before_script:
-    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc build-essential jq gawk
-    # Install Go 1.24
-    - curl -fsSL https://go.dev/dl/go1.24.0.linux-amd64.tar.gz | tar -C /usr/local -xzf -
-    - export PATH="/usr/local/go/bin:$PATH"
-    # Install Rust
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    # Install uv (for Python)
-    - curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Install bun
-    - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
-    # Install Perl YAML::Tiny
-    - cpan -T YAML::Tiny 2>/dev/null || true
-  script:
-    - export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
-    - chmod +x test/parity/*.sh
-    - ./test/parity/compare-implementations.sh
-  artifacts:
-    when: on_failure
-    paths:
-      - test/parity/
-    expire_in: 1 week
-
-# Benchmark job - compares all implementations on same hardware
+# Benchmark - performance tracking
 benchmark:
   stage: benchmark
-  image: swift:5.9
+  image: golang:1.24
   needs:
-    - job: test:go
-      optional: true
-    - job: test:python
-      optional: true
-    - job: test:perl
-      optional: true
-    - job: test:rust
-      optional: true
-    - job: test:swift
-      optional: true
-    - job: test:ruby
-      optional: true
-    - job: test:bun
+    - job: integration-test
       optional: true
   before_script:
-    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc build-essential jq
-    # Install Go 1.24
-    - curl -fsSL https://go.dev/dl/go1.24.0.linux-amd64.tar.gz | tar -C /usr/local -xzf -
-    - export PATH="/usr/local/go/bin:$PATH"
-    # Install Rust
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    # Install uv (for Python)
-    - curl -LsSf https://astral.sh/uv/install.sh | sh
-    # Install bun
-    - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
-    # Install Perl YAML::Tiny
-    - cpan -T YAML::Tiny 2>/dev/null || true
+    - apt-get update && apt-get install -y gawk make jq wget bc
+    - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
   script:
-    - export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+    - make build
     - cd test/benchmark
     - chmod +x *.sh
     # Generate workspace with 3000 threads

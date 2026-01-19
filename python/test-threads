@@ -1,6 +1,0 @@
-#!/usr/bin/env bash
-# Wrapper script for running Python threads in test environment
-# Maintains current working directory while using the correct Python environment
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PYTHONPATH="$SCRIPT_DIR/src:${PYTHONPATH:-}"
-exec "$SCRIPT_DIR/.venv/bin/python" -m threads "$@"
