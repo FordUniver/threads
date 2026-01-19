@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 ITERATIONS=${1:-5}
-WORKSPACE_SIZE=${2:-10000}
+WORKSPACE_SIZE=${2:-3000}
 WORKSPACE="/tmp/threads-benchmark-workspace"
 
 echo "threads Benchmark"
@@ -107,6 +107,45 @@ if [[ ${#IMPLS[@]} -eq 0 ]]; then
 fi
 
 echo "Found implementations: ${IMPLS[*]}"
+echo
+
+# === Correctness validation ===
+# Ensure all implementations find the same threads
+echo "Validating correctness across implementations..."
+VALIDATION_DIR="/tmp/threads-bench-validation"
+mkdir -p "$VALIDATION_DIR"
+
+REFERENCE_IMPL="${IMPLS[0]}"
+REFERENCE_PATH="${IMPL_PATHS[$REFERENCE_IMPL]}"
+
+# Get reference output (thread IDs only, sorted)
+WORKSPACE="$WORKSPACE" "$REFERENCE_PATH" list -r --json 2>/dev/null | jq -r '.threads[].id' | sort > "$VALIDATION_DIR/reference.txt"
+REFERENCE_COUNT=$(wc -l < "$VALIDATION_DIR/reference.txt" | tr -d ' ')
+echo "  Reference ($REFERENCE_IMPL): $REFERENCE_COUNT threads"
+
+VALIDATION_FAILED=0
+for impl in "${IMPLS[@]}"; do
+    if [[ "$impl" == "$REFERENCE_IMPL" ]]; then
+        continue
+    fi
+    impl_path="${IMPL_PATHS[$impl]}"
+    WORKSPACE="$WORKSPACE" "$impl_path" list -r --json 2>/dev/null | jq -r '.threads[].id' | sort > "$VALIDATION_DIR/${impl}.txt"
+    impl_count=$(wc -l < "$VALIDATION_DIR/${impl}.txt" | tr -d ' ')
+
+    if ! diff -q "$VALIDATION_DIR/reference.txt" "$VALIDATION_DIR/${impl}.txt" >/dev/null 2>&1; then
+        echo "  ERROR: $impl found $impl_count threads (differs from reference)"
+        diff "$VALIDATION_DIR/reference.txt" "$VALIDATION_DIR/${impl}.txt" | head -10
+        VALIDATION_FAILED=1
+    else
+        echo "  OK: $impl ($impl_count threads)"
+    fi
+done
+
+if [[ $VALIDATION_FAILED -ne 0 ]]; then
+    echo "Validation failed! Implementations disagree on thread list." >&2
+    exit 1
+fi
+echo "All implementations agree on $REFERENCE_COUNT threads."
 echo
 
 # CSV output
