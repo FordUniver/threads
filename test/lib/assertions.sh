@@ -288,6 +288,12 @@ assert_json_valid() {
     local output="$1"
     local msg="${2:-JSON should be valid}"
 
+    # Reject empty output - empty string is not valid JSON
+    if [[ -z "$output" || "$output" =~ ^[[:space:]]*$ ]]; then
+        _fail "$msg: empty output is not valid JSON"
+        return 1
+    fi
+
     if echo "$output" | jq . >/dev/null 2>&1; then
         return 0
     else
@@ -352,10 +358,16 @@ assert_yaml_valid() {
     local output="$1"
     local msg="${2:-YAML should be valid}"
 
-    # Check if yq is available
+    # Require yq - CI images must have it installed
     if ! command -v yq >/dev/null 2>&1; then
-        # Skip validation if yq not available
-        return 0
+        _fail "$msg: yq not installed (required for YAML validation)"
+        return 1
+    fi
+
+    # Reject empty output - empty string is not valid YAML
+    if [[ -z "$output" || "$output" =~ ^[[:space:]]*$ ]]; then
+        _fail "$msg: empty output is not valid YAML"
+        return 1
     fi
 
     if echo "$output" | yq . >/dev/null 2>&1; then
@@ -375,9 +387,10 @@ assert_yaml_field() {
     local msg="${4:-YAML field $field}"
     local actual
 
-    # Check if yq is available
+    # Require yq - CI images must have it installed
     if ! command -v yq >/dev/null 2>&1; then
-        return 0
+        _fail "$msg: yq not installed (required for YAML validation)"
+        return 1
     fi
 
     actual=$(echo "$output" | yq -r "$field" 2>/dev/null)
