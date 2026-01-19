@@ -350,10 +350,6 @@ struct FindOptions {
     var down: Int?
     /// Up depth: nil = no up search, 0 = unlimited, N = N levels
     var up: Int?
-    /// Cross git boundaries when searching down
-    var noGitBoundDown: Bool = false
-    /// Cross git boundaries when searching up
-    var noGitBoundUp: Bool = false
 
     /// Returns true if down searching is enabled
     var hasDown: Bool { down != nil }
@@ -490,7 +486,7 @@ func findThreadsWithOptions(_ startPath: String, _ ws: String, _ options: FindOp
         findThreadsDown(absStart, ws, &threads,
                        currentDepth: 0,
                        maxDepth: maxDepth,
-                       crossGitBoundaries: options.noGitBoundDown)
+                       crossGitBoundaries: false)
     }
 
     // Search up (parent directories)
@@ -499,7 +495,7 @@ func findThreadsWithOptions(_ startPath: String, _ ws: String, _ options: FindOp
         findThreadsUp(absStart, ws, &threads,
                      currentDepth: 0,
                      maxDepth: maxDepth,
-                     crossGitBoundaries: options.noGitBoundUp)
+                     crossGitBoundaries: false)
     }
 
     // Sort and deduplicate

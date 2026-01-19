@@ -9,10 +9,6 @@ export interface FindOptions {
   down?: number;
   // up specifies parent directory search depth. undefined = no up search, 0 = unlimited (to git root), N = N levels
   up?: number;
-  // noGitBoundDown allows crossing git boundaries when searching down
-  noGitBoundDown?: boolean;
-  // noGitBoundUp allows crossing git boundaries when searching up
-  noGitBoundUp?: boolean;
 }
 
 // Check if a directory is a git root (contains .git)
@@ -159,14 +155,14 @@ export function findThreadsWithOptions(startPath: string, gitRoot: string, optio
   if (options.down !== undefined) {
     // Convert: 0 = unlimited (-1 internally), N > 0 = N levels
     const maxDepth = options.down === 0 ? -1 : options.down;
-    findThreadsDown(absStart, gitRoot, threads, 0, maxDepth, options.noGitBoundDown || false);
+    findThreadsDown(absStart, gitRoot, threads, 0, maxDepth, false);
   }
 
   // Search up (parent directories)
   if (options.up !== undefined) {
     // Convert: 0 = unlimited (-1 internally), N > 0 = N levels
     const maxDepth = options.up === 0 ? -1 : options.up;
-    findThreadsUp(absStart, gitRoot, threads, 0, maxDepth, options.noGitBoundUp || false);
+    findThreadsUp(absStart, gitRoot, threads, 0, maxDepth, false);
   }
 
   // Sort and deduplicate

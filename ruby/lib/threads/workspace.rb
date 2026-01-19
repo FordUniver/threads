@@ -7,13 +7,11 @@ require 'securerandom'
 module Threads
   # Options for finding threads with direction and boundary controls
   class FindOptions
-    attr_accessor :down, :up, :no_git_bound_down, :no_git_bound_up
+    attr_accessor :down, :up
 
     def initialize
       @down = nil  # nil = no down search, Integer = depth (0=unlimited)
       @up = nil    # nil = no up search, Integer = depth (0=unlimited)
-      @no_git_bound_down = false
-      @no_git_bound_up = false
     end
 
     def has_down?
@@ -125,13 +123,13 @@ module Threads
         # Search down (subdirectories)
         if options.has_down?
           max_depth = options.down_depth
-          find_threads_down(abs_start, git_root, threads, 0, max_depth, options.no_git_bound_down)
+          find_threads_down(abs_start, git_root, threads, 0, max_depth, false)
         end
 
         # Search up (parent directories)
         if options.has_up?
           max_depth = options.up_depth
-          find_threads_up(abs_start, git_root, threads, 0, max_depth, options.no_git_bound_up)
+          find_threads_up(abs_start, git_root, threads, 0, max_depth, false)
         end
 
         # Sort and deduplicate

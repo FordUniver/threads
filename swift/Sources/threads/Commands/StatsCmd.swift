@@ -25,15 +25,6 @@ struct StatsCmd: ParsableCommand {
     @Option(name: .shortAndLong, help: "Search parent directories (N levels, 0=unlimited)")
     var up: Int?
 
-    @Flag(name: .long, help: "Cross git boundaries when searching down")
-    var noGitBoundDown = false
-
-    @Flag(name: .long, help: "Cross git boundaries when searching up")
-    var noGitBoundUp = false
-
-    @Flag(name: .long, help: "Cross all git boundaries")
-    var noGitBound = false
-
     @Argument(help: "Path to show stats for")
     var path: String?
 
@@ -77,10 +68,6 @@ struct StatsCmd: ParsableCommand {
     func run() throws {
         let ws = try getWorkspace()
 
-        // Determine effective git boundary flags
-        let effectiveNoGitBoundDown = noGitBound || noGitBoundDown
-        let effectiveNoGitBoundUp = noGitBound || noGitBoundUp
-
         // Determine search direction: --down/-d takes priority, then -r as alias
         let hasDown = down != nil || recursive
         var downDepth = -1  // unlimited by default when enabled
@@ -102,28 +89,26 @@ struct StatsCmd: ParsableCommand {
             upDepth: upDepth
         )
 
-        // Determine start path
-        var startPath = ws
+        // Determine start path - default to PWD, not workspace root
+        var startPath = FileManager.default.currentDirectoryPath
         var categoryFilter: String?
         var projectFilter: String?
 
         if let pathFilter = path {
-            let fullPath = "\(ws)/\(pathFilter)"
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue {
-                startPath = fullPath
-                let parts = pathFilter.split(separator: "/", maxSplits: 1).map(String.init)
-                categoryFilter = parts[0]
-                if parts.count > 1 {
-                    projectFilter = parts[1]
+            // Use inferScope to properly resolve the path
+            if let scope = try? inferScope(ws, pathFilter) {
+                startPath = scope.threadsDir.replacingOccurrences(of: "/.threads", with: "")
+                if scope.category != "-" {
+                    categoryFilter = scope.category
+                    if scope.project != "-" {
+                        projectFilter = scope.project
+                    }
                 }
             }
         }
 
         // Build find options
         var options = FindOptions()
-        options.noGitBoundDown = effectiveNoGitBoundDown
-        options.noGitBoundUp = effectiveNoGitBoundUp
 
         if hasDown {
             // Convert depth: -1 (unlimited) -> 0 in FindOptions convention

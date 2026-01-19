@@ -166,9 +166,6 @@ module Threads
         o.on('-r', '--recursive', 'Include nested categories/projects') { opts[:recursive] = true }
         o.on('-d', '--down=N', Integer, 'Search subdirectories (N levels, 0=unlimited)') { |v| down_val = v; down_set = true }
         o.on('-u', '--up=N', Integer, 'Search parent directories (N levels, 0=to git root)') { |v| up_val = v; up_set = true }
-        o.on('--no-git-bound-down', 'Cross git boundaries when searching down') { opts[:no_git_bound_down] = true }
-        o.on('--no-git-bound-up', 'Cross git boundaries when searching up') { opts[:no_git_bound_up] = true }
-        o.on('--no-git-bound', 'Cross all git boundaries') { opts[:no_git_bound] = true }
         o.on('--include-closed', 'Include resolved/terminal threads') { opts[:include_closed] = true }
         o.on('-s', '--search=TERM', 'Search name/title/desc') { |v| opts[:search] = v }
         o.on('--status=STATUS', 'Filter by status') { |v| opts[:status] = v }
@@ -382,9 +379,6 @@ module Threads
         o.on('-r', '--recursive', 'Include nested categories/projects') { opts[:recursive] = true }
         o.on('-d', '--down=N', Integer, 'Search subdirectories (N levels, 0=unlimited)') { |v| down_val = v; down_set = true }
         o.on('-u', '--up=N', Integer, 'Search parent directories (N levels, 0=to git root)') { |v| up_val = v; up_set = true }
-        o.on('--no-git-bound-down', 'Cross git boundaries when searching down') { opts[:no_git_bound_down] = true }
-        o.on('--no-git-bound-up', 'Cross git boundaries when searching up') { opts[:no_git_bound_up] = true }
-        o.on('--no-git-bound', 'Cross all git boundaries') { opts[:no_git_bound] = true }
       end
 
       remaining = parser.parse(args)

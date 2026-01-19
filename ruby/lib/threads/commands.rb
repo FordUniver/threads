@@ -22,9 +22,6 @@ module Threads
         up_set = opts[:up_set]
         down_val = opts[:down_val]
         up_val = opts[:up_val]
-        no_git_bound = opts[:no_git_bound]
-        no_git_bound_down = opts[:no_git_bound_down] || no_git_bound
-        no_git_bound_up = opts[:no_git_bound_up] || no_git_bound
 
         # Determine if we're using direction-based search
         has_down = down_set || recursive
@@ -43,8 +40,6 @@ module Threads
 
         # Build FindOptions
         options = FindOptions.new
-        options.no_git_bound_down = no_git_bound_down
-        options.no_git_bound_up = no_git_bound_up
 
         if has_down
           depth = down_depth < 0 ? 0 : down_depth
@@ -626,40 +621,62 @@ module Threads
         recursive = opts[:recursive]
         path_filter = opts[:path]
 
-        category_filter = nil
-        project_filter = nil
+        # Direction flags
+        down_set = opts[:down_set]
+        up_set = opts[:up_set]
+        down_val = opts[:down_val]
+        up_val = opts[:up_val]
 
-        if path_filter && !path_filter.empty?
-          path_check = File.join(ws, path_filter)
-          if File.directory?(path_check)
-            parts = path_filter.split('/', 2)
-            category_filter = parts[0]
-            project_filter = parts[1] if parts.length > 1
-          end
+        # Determine if we're using direction-based search
+        has_down = down_set || recursive
+        has_up = up_set
+
+        # Compute depth values
+        down_depth = -1 # unlimited by default
+        down_depth = down_val if down_set && down_val && down_val > 0
+
+        up_depth = -1 # unlimited by default
+        up_depth = up_val if up_set && up_val && up_val > 0
+
+        # Resolve starting path - default to PWD, not workspace root
+        start_path = path_filter && !path_filter.empty? ? resolve_path(ws, path_filter) : Dir.pwd
+        filter_path = Workspace.parse_thread_relative_path(ws, start_path)
+
+        # Build FindOptions
+        options = FindOptions.new
+
+        if has_down
+          depth = down_depth < 0 ? 0 : down_depth
+          options.down = depth
         end
 
-        threads = Workspace.find_all_threads(ws)
+        if has_up
+          depth = up_depth < 0 ? 0 : up_depth
+          options.up = depth
+        end
+
+        # Track search direction for output
+        searching = has_down || has_up
+
+        # Find threads using options
+        threads = if searching
+                    Workspace.find_threads_with_options(start_path, ws, options)
+                  else
+                    # Local-only: just threads at start_path
+                    local_threads = []
+                    Workspace.collect_threads_at_path(start_path, local_threads)
+                    local_threads
+                  end
+
         counts = Hash.new(0)
         total = 0
 
         threads.each do |path|
-          category, project, = Workspace.parse_thread_path(ws, path)
+          rel_path = Workspace.parse_thread_relative_path(ws, path)
 
-          # Category filter
-          next if category_filter && category != category_filter
-
-          # Project filter
-          next if project_filter && project != project_filter
-
-          # Non-recursive: only threads at current hierarchy level
-          unless recursive
-            if project_filter
-              # At project level, count all
-            elsif category_filter
-              next if project != '-'
-            else
-              next if category != '-'
-            end
+          # Path filter: if not searching, only show threads at the specified level
+          unless searching
+            next if rel_path != filter_path
           end
 
           begin
@@ -674,22 +691,15 @@ module Threads
         end
 
         # Build scope description
-        level_desc, path_suffix = if project_filter && category_filter
-                                    ['project-level', " (#{category_filter}/#{project_filter})"]
-                                  elsif category_filter
-                                    ['category-level', " (#{category_filter})"]
-                                  else
-                                    ['workspace-level', '']
-                                  end
+        path_desc = filter_path == '.' ? 'repo root' : filter_path
+        search_suffix = search_direction_desc(has_down, down_depth, has_up, up_depth)
 
-        recursive_suffix = recursive ? ' (including nested)' : ''
-
-        puts "Stats for #{level_desc} threads#{path_suffix}#{recursive_suffix}"
+        puts "Stats for threads in #{path_desc}#{search_suffix}"
         puts
 
         if total == 0
           puts 'No threads found.'
-          puts 'Hint: use -r to include nested categories/projects' unless recursive
+          puts 'Hint: use -r to include nested directories, -u to search parents' unless searching
           return
         end
 
