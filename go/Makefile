@@ -2,7 +2,7 @@
 
 BINARY := threads
 PKG := git.zib.de/cspiegel/threads
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null | sed 's/^v//' || echo "dev")
 LDFLAGS := -ldflags "-s -w -X main.version=$(VERSION)"
 
 build:

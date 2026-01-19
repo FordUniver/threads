@@ -11,6 +11,11 @@ import (
 
 var ws string
 
+// SetVersion sets the version string for the CLI
+func SetVersion(v string) {
+	rootCmd.Version = v
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "threads",
 	Short: "Thread management for LLM workflows",
