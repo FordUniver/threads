@@ -520,9 +520,12 @@ sub cmd_body {
 
     my $id = shift @ARGV or die "Usage: threads body <id> [--set|--append]\n";
 
-    # Read content from stdin
-    local $/;
-    my $content = <STDIN>;
+    # Read content from stdin (scope local $/ to avoid affecting later chomp calls)
+    my $content;
+    {
+        local $/;
+        $content = <STDIN>;
+    }
     die "No content provided (pipe content to stdin)\n"
         unless defined $content && length $content;
 
@@ -676,11 +679,13 @@ sub cmd_log {
     my $id = shift @ARGV or die "Usage: threads log <id> <entry>\n";
     my $entry = shift @ARGV;
 
-    # Read from stdin if no entry
+    # Read from stdin if no entry (scope local $/ to avoid affecting later chomp calls)
     unless (defined $entry) {
-        local $/;
-        $entry = <STDIN>;
-        chomp $entry if defined $entry;
+        {
+            local $/;
+            $entry = <STDIN>;
+        }
+        $entry =~ s/\n+$// if defined $entry;  # Remove trailing newlines
     }
     die "No entry provided\n" unless defined $entry && length $entry;
 
