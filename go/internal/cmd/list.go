@@ -16,17 +16,14 @@ import (
 )
 
 var (
-	listDown            *int
-	listRecursive       bool
-	listUp              *int
-	listNoGitBoundDown  bool
-	listNoGitBoundUp    bool
-	listNoGitBound      bool
-	listIncludeClosed   bool
-	listSearch          string
-	listStatus          string
-	listFormat          string
-	listJSON            bool
+	listDown          *int
+	listRecursive     bool
+	listUp            *int
+	listIncludeClosed bool
+	listSearch        string
+	listStatus        string
+	listFormat        string
+	listJSON          bool
 )
 
 var listCmd = &cobra.Command{
@@ -57,9 +54,6 @@ func init() {
 	listCmd.Flags().IntVarP(&listDownVal, "down", "d", -1, "Search subdirectories (N levels, 0=unlimited)")
 	listCmd.Flags().BoolVarP(&listRecursive, "recursive", "r", false, "Alias for --down (unlimited depth)")
 	listCmd.Flags().IntVarP(&listUpVal, "up", "u", -1, "Search parent directories (N levels, 0=to git root)")
-	listCmd.Flags().BoolVar(&listNoGitBoundDown, "no-git-bound-down", false, "Cross git boundaries when searching down")
-	listCmd.Flags().BoolVar(&listNoGitBoundUp, "no-git-bound-up", false, "Cross git boundaries when searching up")
-	listCmd.Flags().BoolVar(&listNoGitBound, "no-git-bound", false, "Cross all git boundaries")
 	listCmd.Flags().BoolVar(&listIncludeClosed, "include-closed", false, "Include resolved/terminal threads")
 	listCmd.Flags().StringVarP(&listSearch, "search", "s", "", "Search name/title/desc (substring)")
 	listCmd.Flags().StringVar(&listStatus, "status", "", "Filter by status (comma-separated)")
@@ -141,10 +135,6 @@ func runList(cmd *cobra.Command, args []string) error {
 	filterPath := scope.Path
 	startPath := filepath.Dir(scope.ThreadsDir)
 
-	// Build FindOptions from flags
-	noGitBoundDown := listNoGitBound || listNoGitBoundDown
-	noGitBoundUp := listNoGitBound || listNoGitBoundUp
-
 	// Determine search direction: --down/-d takes priority, then -r as alias
 	downSet := cmd.Flags().Changed("down")
 	hasDown := downSet || listRecursive
@@ -161,9 +151,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build options
-	options := workspace.NewFindOptions().
-		WithNoGitBoundDown(noGitBoundDown).
-		WithNoGitBoundUp(noGitBoundUp)
+	options := workspace.NewFindOptions()
 
 	if hasDown {
 		depth := downDepth

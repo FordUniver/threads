@@ -25,18 +25,6 @@ pub struct ListArgs {
     #[arg(short = 'u', long = "up", value_name = "N")]
     up: Option<Option<usize>>,
 
-    /// Cross git boundaries when searching down (enter nested repos)
-    #[arg(long)]
-    no_git_bound_down: bool,
-
-    /// Cross git boundaries when searching up (continue past git root)
-    #[arg(long)]
-    no_git_bound_up: bool,
-
-    /// Cross all git boundaries (alias for --no-git-bound-up --no-git-bound-down)
-    #[arg(long)]
-    no_git_bound: bool,
-
     /// Include resolved/terminal threads
     #[arg(long)]
     include_closed: bool,
@@ -132,10 +120,6 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
     let filter_path = scope.path.clone();
     let start_path = scope.threads_dir.parent().unwrap_or(git_root);
 
-    // Build FindOptions from flags
-    let no_git_bound_down = args.no_git_bound || args.no_git_bound_down;
-    let no_git_bound_up = args.no_git_bound || args.no_git_bound_up;
-
     // Determine search direction: --down/-d takes priority, then -r as alias
     let down_opt = if args.down.is_some() {
         args.down
@@ -145,21 +129,15 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
         None
     };
 
-    let options = FindOptions::new()
-        .with_no_git_bound_down(no_git_bound_down)
-        .with_no_git_bound_up(no_git_bound_up);
+    let mut options = FindOptions::new();
 
-    let options = if let Some(depth) = down_opt {
-        options.with_down(depth)
-    } else {
-        options
-    };
+    if let Some(depth) = down_opt {
+        options = options.with_down(depth);
+    }
 
-    let options = if let Some(depth) = args.up {
-        options.with_up(depth)
-    } else {
-        options
-    };
+    if let Some(depth) = args.up {
+        options = options.with_up(depth);
+    }
 
     // Track search direction for output
     let search_dir = SearchDirection {

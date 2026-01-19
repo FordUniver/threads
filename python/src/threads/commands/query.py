@@ -57,8 +57,6 @@ def cmd_list(
     down: Optional[int] = None,
     recursive: bool = False,
     up: Optional[int] = None,
-    no_git_bound_down: bool = False,
-    no_git_bound_up: bool = False,
     include_closed: bool = False,
     search: str | None = None,
     status_filter: str | None = None,
@@ -94,8 +92,6 @@ def cmd_list(
 
     # Build FindOptions
     options = FindOptions.new()
-    options.no_git_bound_down = no_git_bound_down
-    options.no_git_bound_up = no_git_bound_up
 
     if has_down:
         options.down = down_depth
@@ -375,8 +371,6 @@ def cmd_stats(
     down: Optional[int] = None,
     recursive: bool = False,
     up: Optional[int] = None,
-    no_git_bound_down: bool = False,
-    no_git_bound_up: bool = False,
     format_str: str = "fancy",
     json_output: bool = False,
 ) -> None:
@@ -409,8 +403,6 @@ def cmd_stats(
 
     # Build FindOptions
     options = FindOptions.new()
-    options.no_git_bound_down = no_git_bound_down
-    options.no_git_bound_up = no_git_bound_up
 
     if has_down:
         options.down = down_depth

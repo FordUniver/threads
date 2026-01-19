@@ -123,8 +123,7 @@ def infer_scope(path_arg: str | None, git_root: Path | None = None) -> Scope:
         while check_path != git_root_resolved:
             if is_git_root(check_path):
                 raise ValueError(
-                    f"Path is inside a nested git repository at: {check_path}. "
-                    "Use --no-git-bound to cross git boundaries."
+                    f"Path is inside a nested git repository at: {check_path}"
                 )
             check_path = check_path.parent
 

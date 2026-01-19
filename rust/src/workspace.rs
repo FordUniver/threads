@@ -14,17 +14,13 @@ use crate::thread;
 // Cached regexes for workspace operations
 static ID_ONLY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{6}$").unwrap());
 
-/// Options for finding threads with direction and boundary controls.
+/// Options for finding threads with direction controls.
 #[derive(Debug, Clone, Default)]
 pub struct FindOptions {
     /// Search subdirectories. None = no recursion, Some(None) = unlimited, Some(Some(n)) = n levels
     pub down: Option<Option<usize>>,
     /// Search parent directories. None = no up search, Some(None) = to git root, Some(Some(n)) = n levels
     pub up: Option<Option<usize>>,
-    /// Cross git boundaries when searching down (enter nested git repos)
-    pub no_git_bound_down: bool,
-    /// Cross git boundaries when searching up (continue past git root)
-    pub no_git_bound_up: bool,
 }
 
 impl FindOptions {
@@ -47,16 +43,6 @@ impl FindOptions {
 
     pub fn with_up(mut self, depth: Option<usize>) -> Self {
         self.up = Some(depth);
-        self
-    }
-
-    pub fn with_no_git_bound_down(mut self, value: bool) -> Self {
-        self.no_git_bound_down = value;
-        self
-    }
-
-    pub fn with_no_git_bound_up(mut self, value: bool) -> Self {
-        self.no_git_bound_up = value;
         self
     }
 }
@@ -181,8 +167,9 @@ fn find_threads_recursive(
     Ok(())
 }
 
-/// Find threads with options for direction and boundary controls.
-/// This is the primary search function supporting --up, --down, and boundary flags.
+/// Find threads with options for direction controls.
+/// This is the primary search function supporting --up and --down flags.
+/// Traversal always stops at git boundaries (nested repos when going down, git root when going up).
 pub fn find_threads_with_options(
     start_path: &Path,
     git_root: &Path,
@@ -196,28 +183,14 @@ pub fn find_threads_with_options(
     // Always collect threads at start_path
     collect_threads_at_path(&start_canonical, &mut threads);
 
-    // Search down (subdirectories)
+    // Search down (subdirectories) - stops at nested git repos
     if let Some(max_depth) = options.down {
-        find_threads_down(
-            &start_canonical,
-            git_root,
-            &mut threads,
-            0,
-            max_depth,
-            options.no_git_bound_down,
-        )?;
+        find_threads_down(&start_canonical, git_root, &mut threads, 0, max_depth)?;
     }
 
-    // Search up (parent directories)
+    // Search up (parent directories) - stops at git root
     if let Some(max_depth) = options.up {
-        find_threads_up(
-            &start_canonical,
-            git_root,
-            &mut threads,
-            0,
-            max_depth,
-            options.no_git_bound_up,
-        )?;
+        find_threads_up(&start_canonical, git_root, &mut threads, 0, max_depth)?;
     }
 
     threads.sort();
@@ -244,13 +217,13 @@ fn collect_threads_at_path(dir: &Path, threads: &mut Vec<PathBuf>) {
 }
 
 /// Recursively find threads going down into subdirectories.
+/// Always stops at nested git repositories.
 fn find_threads_down(
     dir: &Path,
     git_root: &Path,
     threads: &mut Vec<PathBuf>,
     current_depth: usize,
     max_depth: Option<usize>,
-    cross_git_boundaries: bool,
 ) -> Result<(), String> {
     // Check depth limit (None or Some(0) means unlimited, matching Go's convention)
     if let Some(max) = max_depth {
@@ -275,8 +248,8 @@ fn find_threads_down(
                 continue;
             }
 
-            // Check git boundary
-            if !cross_git_boundaries && path != git_root && is_git_root(&path) {
+            // Stop at nested git repos
+            if path != git_root && is_git_root(&path) {
                 continue;
             }
 
@@ -284,14 +257,7 @@ fn find_threads_down(
             collect_threads_at_path(&path, threads);
 
             // Continue recursing
-            find_threads_down(
-                &path,
-                git_root,
-                threads,
-                current_depth + 1,
-                max_depth,
-                cross_git_boundaries,
-            )?;
+            find_threads_down(&path, git_root, threads, current_depth + 1, max_depth)?;
         }
     }
 
@@ -299,13 +265,13 @@ fn find_threads_down(
 }
 
 /// Find threads going up into parent directories.
+/// Always stops at the git root boundary.
 fn find_threads_up(
     dir: &Path,
     git_root: &Path,
     threads: &mut Vec<PathBuf>,
     current_depth: usize,
     max_depth: Option<usize>,
-    cross_git_boundaries: bool,
 ) -> Result<(), String> {
     // Check depth limit (None or Some(0) means unlimited, matching Go's convention)
     if let Some(max) = max_depth {
@@ -325,8 +291,8 @@ fn find_threads_up(
         .canonicalize()
         .unwrap_or_else(|_| git_root.to_path_buf());
 
-    // Check git boundary: stop at git root unless crossing is allowed
-    if !cross_git_boundaries && !parent_canonical.starts_with(&git_root_canonical) {
+    // Stop at git root
+    if !parent_canonical.starts_with(&git_root_canonical) {
         return Ok(());
     }
 
@@ -334,14 +300,7 @@ fn find_threads_up(
     collect_threads_at_path(&parent_canonical, threads);
 
     // Continue up
-    find_threads_up(
-        &parent_canonical,
-        git_root,
-        threads,
-        current_depth + 1,
-        max_depth,
-        cross_git_boundaries,
-    )
+    find_threads_up(&parent_canonical, git_root, threads, current_depth + 1, max_depth)
 }
 
 /// Scope represents thread placement information.
@@ -429,7 +388,7 @@ pub fn infer_scope(git_root: &Path, path_arg: Option<&str>) -> Result<Scope, Str
         while check_path != git_root_canonical {
             if is_git_root(&check_path) {
                 return Err(format!(
-                    "Path is inside a nested git repository at: {}. Use --no-git-bound to cross git boundaries.",
+                    "Path is inside a nested git repository at: {}",
                     check_path.display()
                 ));
             }

@@ -21,16 +21,12 @@ var (
 	hexIDRe       = regexp.MustCompile(`^[0-9a-f]{6}$`)
 )
 
-// FindOptions contains options for finding threads with direction and boundary controls.
+// FindOptions contains options for finding threads with direction controls.
 type FindOptions struct {
 	// Down specifies subdirectory search. nil = no recursion, *int nil = unlimited, *int N = N levels
 	Down *int
 	// Up specifies parent directory search. nil = no up search, *int nil = to git root, *int N = N levels
 	Up *int
-	// NoGitBoundDown allows crossing git boundaries when searching down
-	NoGitBoundDown bool
-	// NoGitBoundUp allows crossing git boundaries when searching up
-	NoGitBoundUp bool
 }
 
 // NewFindOptions creates FindOptions with default values.
@@ -49,18 +45,6 @@ func (o *FindOptions) WithDown(depth *int) *FindOptions {
 // Pass nil for unlimited (to git root), or a pointer to a specific depth.
 func (o *FindOptions) WithUp(depth *int) *FindOptions {
 	o.Up = depth
-	return o
-}
-
-// WithNoGitBoundDown allows crossing git boundaries when searching down.
-func (o *FindOptions) WithNoGitBoundDown(value bool) *FindOptions {
-	o.NoGitBoundDown = value
-	return o
-}
-
-// WithNoGitBoundUp allows crossing git boundaries when searching up.
-func (o *FindOptions) WithNoGitBoundUp(value bool) *FindOptions {
-	o.NoGitBoundUp = value
 	return o
 }
 
@@ -199,8 +183,9 @@ func findThreadsRecursive(dir, gitRoot string, threads *[]string) error {
 	return nil
 }
 
-// FindThreadsWithOptions finds threads with direction and boundary controls.
-// This is the primary search function supporting --up, --down, and boundary flags.
+// FindThreadsWithOptions finds threads with direction controls.
+// This is the primary search function supporting --up and --down flags.
+// Traversal always stops at git boundaries (nested repos when going down, git root when going up).
 func FindThreadsWithOptions(startPath, gitRoot string, options *FindOptions) ([]string, error) {
 	var threads []string
 
@@ -212,16 +197,16 @@ func FindThreadsWithOptions(startPath, gitRoot string, options *FindOptions) ([]
 	// Always collect threads at start_path
 	collectThreadsAtPath(absStart, &threads)
 
-	// Search down (subdirectories)
+	// Search down (subdirectories) - stops at nested git repos
 	if options.HasDown() {
 		maxDepth := options.DownDepth()
-		findThreadsDown(absStart, gitRoot, &threads, 0, maxDepth, options.NoGitBoundDown)
+		findThreadsDown(absStart, gitRoot, &threads, 0, maxDepth)
 	}
 
-	// Search up (parent directories)
+	// Search up (parent directories) - stops at git root
 	if options.HasUp() {
 		maxDepth := options.UpDepth()
-		findThreadsUp(absStart, gitRoot, &threads, 0, maxDepth, options.NoGitBoundUp)
+		findThreadsUp(absStart, gitRoot, &threads, 0, maxDepth)
 	}
 
 	// Sort and deduplicate
@@ -254,7 +239,8 @@ func collectThreadsAtPath(dir string, threads *[]string) {
 }
 
 // findThreadsDown recursively finds threads going down into subdirectories.
-func findThreadsDown(dir, gitRoot string, threads *[]string, currentDepth, maxDepth int, crossGitBoundaries bool) {
+// Always stops at nested git repositories.
+func findThreadsDown(dir, gitRoot string, threads *[]string, currentDepth, maxDepth int) {
 	// Check depth limit (-1 means unlimited)
 	if maxDepth >= 0 && currentDepth >= maxDepth {
 		return
@@ -279,8 +265,8 @@ func findThreadsDown(dir, gitRoot string, threads *[]string, currentDepth, maxDe
 
 		subdir := filepath.Join(dir, name)
 
-		// Check git boundary
-		if !crossGitBoundaries && subdir != gitRoot && IsGitRoot(subdir) {
+		// Stop at nested git repos
+		if subdir != gitRoot && IsGitRoot(subdir) {
 			continue
 		}
 
@@ -288,12 +274,13 @@ func findThreadsDown(dir, gitRoot string, threads *[]string, currentDepth, maxDe
 		collectThreadsAtPath(subdir, threads)
 
 		// Continue recursing
-		findThreadsDown(subdir, gitRoot, threads, currentDepth+1, maxDepth, crossGitBoundaries)
+		findThreadsDown(subdir, gitRoot, threads, currentDepth+1, maxDepth)
 	}
 }
 
 // findThreadsUp finds threads going up into parent directories.
-func findThreadsUp(dir, gitRoot string, threads *[]string, currentDepth, maxDepth int, crossGitBoundaries bool) {
+// Always stops at the git root boundary.
+func findThreadsUp(dir, gitRoot string, threads *[]string, currentDepth, maxDepth int) {
 	// Check depth limit (-1 means unlimited)
 	if maxDepth >= 0 && currentDepth >= maxDepth {
 		return
@@ -301,14 +288,14 @@ func findThreadsUp(dir, gitRoot string, threads *[]string, currentDepth, maxDept
 
 	parent := filepath.Dir(dir)
 	if parent == dir {
-		return // reached root
+		return // reached filesystem root
 	}
 
 	absParent, _ := filepath.Abs(parent)
 	absGitRoot, _ := filepath.Abs(gitRoot)
 
-	// Check git boundary: stop at git root unless crossing is allowed
-	if !crossGitBoundaries && !strings.HasPrefix(absParent, absGitRoot) {
+	// Stop at git root
+	if !strings.HasPrefix(absParent, absGitRoot) {
 		return
 	}
 
@@ -316,7 +303,7 @@ func findThreadsUp(dir, gitRoot string, threads *[]string, currentDepth, maxDept
 	collectThreadsAtPath(absParent, threads)
 
 	// Continue up
-	findThreadsUp(absParent, gitRoot, threads, currentDepth+1, maxDepth, crossGitBoundaries)
+	findThreadsUp(absParent, gitRoot, threads, currentDepth+1, maxDepth)
 }
 
 // deduplicate removes duplicate strings from a sorted slice.
@@ -405,7 +392,7 @@ func InferScope(gitRoot, pathArg string) (*Scope, error) {
 		checkPath := absTarget
 		for checkPath != absGitRoot {
 			if IsGitRoot(checkPath) {
-				return nil, fmt.Errorf("path is inside a nested git repository at: %s. Use --no-git-bound to cross git boundaries",
+				return nil, fmt.Errorf("path is inside a nested git repository at: %s",
 					checkPath)
 			}
 			checkPath = filepath.Dir(checkPath)

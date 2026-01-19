@@ -16,14 +16,11 @@ import (
 )
 
 var (
-	statsDownVal        int
-	statsRecursive      bool
-	statsUpVal          int
-	statsNoGitBoundDown bool
-	statsNoGitBoundUp   bool
-	statsNoGitBound     bool
-	statsFormat         string
-	statsJSON           bool
+	statsDownVal   int
+	statsRecursive bool
+	statsUpVal     int
+	statsFormat    string
+	statsJSON      bool
 )
 
 var statsCmd = &cobra.Command{
@@ -48,9 +45,6 @@ func init() {
 	statsCmd.Flags().IntVarP(&statsDownVal, "down", "d", -1, "Search subdirectories (N levels, 0=unlimited)")
 	statsCmd.Flags().BoolVarP(&statsRecursive, "recursive", "r", false, "Alias for --down (unlimited depth)")
 	statsCmd.Flags().IntVarP(&statsUpVal, "up", "u", -1, "Search parent directories (N levels, 0=to git root)")
-	statsCmd.Flags().BoolVar(&statsNoGitBoundDown, "no-git-bound-down", false, "Cross git boundaries when searching down")
-	statsCmd.Flags().BoolVar(&statsNoGitBoundUp, "no-git-bound-up", false, "Cross git boundaries when searching up")
-	statsCmd.Flags().BoolVar(&statsNoGitBound, "no-git-bound", false, "Cross all git boundaries")
 	statsCmd.Flags().StringVarP(&statsFormat, "format", "f", "fancy", "Output format: fancy, plain, json, yaml")
 	statsCmd.Flags().BoolVar(&statsJSON, "json", false, "Output as JSON (shorthand for --format=json)")
 }
@@ -128,10 +122,6 @@ func runStats(cmd *cobra.Command, args []string) error {
 	filterPath := scope.Path
 	startPath := scope.ThreadsDir[:len(scope.ThreadsDir)-len("/.threads")]
 
-	// Build FindOptions from flags
-	noGitBoundDown := statsNoGitBound || statsNoGitBoundDown
-	noGitBoundUp := statsNoGitBound || statsNoGitBoundUp
-
 	// Determine search direction
 	downSet := cmd.Flags().Changed("down")
 	hasDown := downSet || statsRecursive
@@ -148,9 +138,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build options
-	options := workspace.NewFindOptions().
-		WithNoGitBoundDown(noGitBoundDown).
-		WithNoGitBoundUp(noGitBoundUp)
+	options := workspace.NewFindOptions()
 
 	if hasDown {
 		depth := downDepth
