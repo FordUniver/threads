@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'yaml'
 require 'time'
 require 'io/wait'
 
@@ -158,14 +159,17 @@ module Threads
         status = opts[:status] || 'idea'
         desc = opts[:desc] || ''
         body_content = opts[:body] || ''
+        fmt = opts[:format] || 'fancy'
 
         raise ArgumentError, 'title is required' if title.nil? || title.empty?
 
         # Validate status before creating thread
         Threads.validate_status!(status)
 
-        # Warn if no description
-        warn 'Warning: No --desc provided. Add one with: threads update <id> --desc "..."' if desc.empty?
+        # Warn if no description (only in plain/fancy mode)
+        if desc.empty? && (fmt == 'fancy' || fmt == 'plain')
+          warn 'Warning: No --desc provided. Add one with: threads update <id> --desc "..."'
+        end
 
         # Slugify title
         slug = Workspace.slugify(title)
@@ -216,11 +220,20 @@ module Threads
         File.write(thread_path, content)
 
         rel_path = thread_path.sub("#{ws}/", '')
-        puts "Created #{scope.level_desc}: #{id}"
-        puts "  → #{rel_path}"
+        abs_path = File.absolute_path(thread_path)
 
-        warn "Hint: Add body with: echo \"content\" | threads body #{id} --set" if body_content.empty?
-        puts "Note: Thread #{id} has uncommitted changes. Use 'threads commit #{id}' when ready."
+        # Output based on format
+        case fmt
+        when 'json'
+          puts JSON.pretty_generate({ id: id, path: rel_path, path_absolute: abs_path })
+        when 'yaml'
+          puts YAML.dump({ 'id' => id, 'path' => rel_path, 'path_absolute' => abs_path })
+        else
+          puts "Created #{scope.level_desc}: #{id}"
+          puts "  → #{rel_path}"
+          warn "Hint: Add body with: echo \"content\" | threads body #{id} --set" if body_content.empty?
+          puts "Note: Thread #{id} has uncommitted changes. Use 'threads commit #{id}' when ready."
+        end
       end
 
       # Read thread content
@@ -230,9 +243,20 @@ module Threads
       end
 
       # Print thread file path
-      def path(ws, ref)
+      def path(ws, ref, opts = {})
+        fmt = opts[:format] || 'fancy'
         file = Workspace.find_by_ref(ws, ref)
-        puts File.absolute_path(file)
+        abs_path = File.absolute_path(file)
+        rel_path = file.start_with?(ws) ? file.sub("#{ws}/", '') : file
+
+        case fmt
+        when 'json'
+          puts JSON.pretty_generate({ path: rel_path, path_absolute: abs_path })
+        when 'yaml'
+          puts YAML.dump({ 'path' => rel_path, 'path_absolute' => abs_path })
+        else
+          puts abs_path
+        end
       end
 
       # Change thread status
@@ -577,6 +601,7 @@ module Threads
       # Validate thread files
       def validate(ws, opts = {})
         path = opts[:path]
+        fmt = opts[:format] || 'fancy'
 
         files = if path && !path.empty?
                   abs_path = File.absolute_path?(path) ? path : File.join(ws, path)
@@ -585,7 +610,8 @@ module Threads
                   Workspace.find_all_threads(ws)
                 end
 
-        errors = 0
+        results = []
+        error_count = 0
 
         files.each do |file|
           rel_path = file.sub("#{ws}/", '')
@@ -605,15 +631,36 @@ module Threads
             issues << "parse error: #{e.message}"
           end
 
-          if issues.empty?
-            puts "OK: #{rel_path}"
-          else
-            puts "WARN: #{rel_path}: #{issues.join(', ')}"
-            errors += 1
+          valid = issues.empty?
+          error_count += 1 unless valid
+
+          results << { path: rel_path, valid: valid, issues: issues }
+        end
+
+        # Output based on format
+        case fmt
+        when 'json'
+          puts JSON.pretty_generate({ total: results.length, errors: error_count, results: results })
+        when 'yaml'
+          puts YAML.dump({ 'total' => results.length, 'errors' => error_count, 'results' => results.map { |r| { 'path' => r[:path], 'valid' => r[:valid], 'issues' => r[:issues] } } })
+        else
+          results.each do |r|
+            if r[:valid]
+              puts "OK: #{r[:path]}"
+            else
+              puts "WARN: #{r[:path]}: #{r[:issues].join(', ')}"
+            end
           end
         end
 
-        raise Threads::Error, "#{errors} validation error(s)" if errors > 0
+        if error_count > 0
+          if fmt == 'fancy' || fmt == 'plain'
+            raise Threads::Error, "#{error_count} validation error(s)"
+          else
+            # Still exit with error code for structured output, but don't print extra message
+            raise Threads::Error, ''
+          end
+        end
       end
 
       # Show stats

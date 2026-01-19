@@ -3,11 +3,35 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as yaml from 'js-yaml';
 import { Thread, extractIDFromPath, extractNameFromPath, baseStatus, isTerminal, isValidStatus, ALL_STATUSES } from '../src/thread';
 import { findWorkspace, findAllThreads, inferScope, parseThreadPath, generateID, slugify, findByRef, findThreadsWithOptions, findGitRoot, FindOptions } from '../src/workspace';
 import { insertLogEntry, addNote, removeByHash, editByHash, addTodoItem, setTodoChecked, countMatchingItems, replaceSection, appendToSection } from '../src/section';
 import { formatDate, formatTime, getErrorMessage } from '../src/utils';
 import * as git from '../src/git';
+
+// Output format types
+type OutputFormat = 'fancy' | 'plain' | 'json' | 'yaml';
+
+// Parse format flag, with --json taking precedence
+function resolveFormat(flags: Record<string, string | boolean>): OutputFormat {
+  if (flags.json === true) {
+    return 'json';
+  }
+  const fmt = flags.format as string | undefined;
+  if (fmt) {
+    const lower = fmt.toLowerCase();
+    if (lower === 'json' || lower === 'yaml' || lower === 'plain') {
+      return lower as OutputFormat;
+    }
+    if (lower === 'fancy') {
+      return 'fancy';
+    }
+    console.error(`Error: invalid format '${fmt}'. Use: json, yaml, plain`);
+    process.exit(1);
+  }
+  return 'fancy';
+}
 
 // Parse command line arguments
 const args = Bun.argv.slice(2);
@@ -370,6 +394,7 @@ async function cmdList(args: string[]): Promise<void> {
 async function cmdNew(args: string[]): Promise<void> {
   const { flags, positional } = parseFlags(args);
   const ws = getWorkspace();
+  const fmt = resolveFormat(flags);
 
   let targetPath: string;
   let title: string;
@@ -400,8 +425,8 @@ async function cmdNew(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Warn if no description provided
-  if (!newDesc) {
+  // Warn if no description provided (only in plain/fancy mode)
+  if (!newDesc && (fmt === 'fancy' || fmt === 'plain')) {
     console.error('Warning: No --desc provided. Add one with: threads update <id> --desc "..."');
   }
 
@@ -470,11 +495,25 @@ async function cmdNew(args: string[]): Promise<void> {
   fs.writeFileSync(threadPath, content);
 
   const relPath = path.relative(ws, threadPath);
-  console.log(`Created ${scope.levelDesc}: ${id}`);
-  console.log(`  → ${relPath}`);
+  const absPath = path.resolve(threadPath);
 
-  if (!newBody) {
-    console.error(`Hint: Add body with: echo "content" | threads body ${id} --set`);
+  // Output based on format
+  switch (fmt) {
+    case 'json':
+      console.log(JSON.stringify({ id, path: relPath, path_absolute: absPath }, null, 2));
+      break;
+    case 'yaml':
+      console.log(yaml.dump({ id, path: relPath, path_absolute: absPath }));
+      break;
+    case 'fancy':
+    case 'plain':
+    default:
+      console.log(`Created ${scope.levelDesc}: ${id}`);
+      console.log(`  → ${relPath}`);
+      if (!newBody) {
+        console.error(`Hint: Add body with: echo "content" | threads body ${id} --set`);
+      }
+      break;
   }
 
   // Commit if requested
@@ -486,7 +525,7 @@ async function cmdNew(args: string[]): Promise<void> {
       console.error(`Error: ${getErrorMessage(e)}`);
       process.exit(1);
     }
-  } else {
+  } else if (fmt === 'fancy' || fmt === 'plain') {
     console.log(`Note: Thread ${id} has uncommitted changes. Use 'threads commit ${id}' when ready.`);
   }
 }
@@ -517,8 +556,9 @@ async function cmdRead(args: string[]): Promise<void> {
 
 // path command
 async function cmdPath(args: string[]): Promise<void> {
-  const { positional } = parseFlags(args);
+  const { flags, positional } = parseFlags(args);
   const ws = getWorkspace();
+  const fmt = resolveFormat(flags);
 
   if (positional.length < 1) {
     console.error('Usage: threads path <id>');
@@ -536,7 +576,22 @@ async function cmdPath(args: string[]): Promise<void> {
   }
 
   const absPath = path.resolve(file);
-  console.log(absPath);
+  const relPath = path.relative(ws, file);
+
+  // Output based on format
+  switch (fmt) {
+    case 'json':
+      console.log(JSON.stringify({ path: relPath, path_absolute: absPath }, null, 2));
+      break;
+    case 'yaml':
+      console.log(yaml.dump({ path: relPath, path_absolute: absPath }));
+      break;
+    case 'fancy':
+    case 'plain':
+    default:
+      console.log(absPath);
+      break;
+  }
 }
 
 // status command
@@ -1311,8 +1366,9 @@ async function cmdCommit(args: string[]): Promise<void> {
 
 // validate command
 async function cmdValidate(args: string[]): Promise<void> {
-  const { positional } = parseFlags(args);
+  const { flags, positional } = parseFlags(args);
   const ws = getWorkspace();
+  const fmt = resolveFormat(flags);
 
   let files: string[];
 
@@ -1327,7 +1383,15 @@ async function cmdValidate(args: string[]): Promise<void> {
     files = findAllThreads(ws);
   }
 
-  let errors = 0;
+  interface ValidationResult {
+    path: string;
+    valid: boolean;
+    issues: string[];
+  }
+
+  const results: ValidationResult[] = [];
+  let errorCount = 0;
+
   for (const file of files) {
     const relPath = path.relative(ws, file);
     const issues: string[] = [];
@@ -1347,16 +1411,39 @@ async function cmdValidate(args: string[]): Promise<void> {
       issues.push(`parse error: ${getErrorMessage(e)}`);
     }
 
-    if (issues.length > 0) {
-      console.log(`WARN: ${relPath}: ${issues.join(', ')}`);
-      errors++;
-    } else {
-      console.log(`OK: ${relPath}`);
+    const valid = issues.length === 0;
+    if (!valid) {
+      errorCount++;
     }
+
+    results.push({ path: relPath, valid, issues });
   }
 
-  if (errors > 0) {
-    console.error(`${errors} validation error(s)`);
+  // Output based on format
+  switch (fmt) {
+    case 'json':
+      console.log(JSON.stringify({ total: results.length, errors: errorCount, results }, null, 2));
+      break;
+    case 'yaml':
+      console.log(yaml.dump({ total: results.length, errors: errorCount, results }));
+      break;
+    case 'fancy':
+    case 'plain':
+    default:
+      for (const r of results) {
+        if (r.valid) {
+          console.log(`OK: ${r.path}`);
+        } else {
+          console.log(`WARN: ${r.path}: ${r.issues.join(', ')}`);
+        }
+      }
+      break;
+  }
+
+  if (errorCount > 0) {
+    if (fmt === 'fancy' || fmt === 'plain') {
+      console.error(`${errorCount} validation error(s)`);
+    }
     process.exit(1);
   }
 }

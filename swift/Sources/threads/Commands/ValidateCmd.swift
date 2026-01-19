@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import Yams
 
 struct ValidateCmd: ParsableCommand {
     static var configuration = CommandConfiguration(
@@ -10,11 +11,18 @@ struct ValidateCmd: ParsableCommand {
     @Flag(name: .shortAndLong, help: "Validate recursively")
     var recursive = false
 
+    @Option(name: .shortAndLong, help: "Output format (json, yaml, plain)")
+    var format: String?
+
+    @Flag(name: .long, help: "Output as JSON (shorthand for --format=json)")
+    var json = false
+
     @Argument(help: "Path to validate")
     var path: String?
 
     func run() throws {
         let ws = try getWorkspace()
+        let fmt = json ? "json" : (format?.lowercased() ?? "fancy")
         var files: [String]
 
         if let target = path {
@@ -46,18 +54,21 @@ struct ValidateCmd: ParsableCommand {
             }
         }
 
+        struct ValidationResult {
+            let path: String
+            let valid: Bool
+            let issues: [String]
+        }
+
+        var results: [ValidationResult] = []
         var errorCount = 0
 
         for file in files {
             let relPath = file.relativePath(from: ws) ?? file
-
             var issues: [String] = []
 
             do {
                 let t = try Thread.parse(path: file)
-
-                // Note: ID can be derived from filename, so we don't check for empty ID
-                // The Thread.parse method already extracts ID from filename
 
                 if t.name.isEmpty {
                     issues.append("missing name/title field")
@@ -71,11 +82,40 @@ struct ValidateCmd: ParsableCommand {
                 issues.append("parse error: \(error.localizedDescription)")
             }
 
-            if !issues.isEmpty {
-                print("WARN: \(relPath): \(issues.joined(separator: ", "))")
+            let valid = issues.isEmpty
+            if !valid {
                 errorCount += 1
-            } else {
-                print("OK: \(relPath)")
+            }
+
+            results.append(ValidationResult(path: relPath, valid: valid, issues: issues))
+        }
+
+        // Output based on format
+        switch fmt {
+        case "json":
+            let resultsArray = results.map { r -> [String: Any] in
+                ["path": r.path, "valid": r.valid, "issues": r.issues]
+            }
+            let data: [String: Any] = ["total": results.count, "errors": errorCount, "results": resultsArray]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]),
+               let output = String(data: jsonData, encoding: .utf8) {
+                print(output)
+            }
+        case "yaml":
+            let resultsArray = results.map { r -> [String: Any] in
+                ["path": r.path, "valid": r.valid, "issues": r.issues]
+            }
+            let data: [String: Any] = ["total": results.count, "errors": errorCount, "results": resultsArray]
+            if let output = try? Yams.dump(object: data) {
+                print(output, terminator: "")
+            }
+        default:
+            for r in results {
+                if r.valid {
+                    print("OK: \(r.path)")
+                } else {
+                    print("WARN: \(r.path): \(r.issues.joined(separator: ", "))")
+                }
             }
         }
 

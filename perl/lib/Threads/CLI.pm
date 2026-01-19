@@ -240,9 +240,31 @@ sub cmd_read {
 sub cmd_path {
     my ($class, @args) = @_;
 
-    my $id = shift @args or die "Usage: threads path <id>\n";
+    my %opts = (format => 'fancy');
+    local @ARGV = @args;
+    GetOptions(
+        'f|format=s' => \$opts{format},
+        'json'       => sub { $opts{format} = 'json' },
+    ) or return 1;
+
+    my $id = shift @ARGV or die "Usage: threads path <id>\n";
+    my $ws = workspace_root();
     my $path = find_thread($id);
-    say abs_path($path) // $path;
+    my $abs_path = abs_path($path) // $path;
+    my $rel_path = $path;
+    $rel_path =~ s{^\Q$ws\E/}{};
+
+    my $fmt = lc($opts{format});
+    if ($fmt eq 'json') {
+        require JSON::PP;
+        say JSON::PP::encode_json({ path => $rel_path, path_absolute => $abs_path });
+    } elsif ($fmt eq 'yaml') {
+        require YAML::Tiny;
+        my $yaml = YAML::Tiny->new({ path => $rel_path, path_absolute => $abs_path });
+        print $yaml->write_string;
+    } else {
+        say $abs_path;
+    }
     return 0;
 }
 
@@ -309,11 +331,16 @@ sub cmd_stats {
 sub cmd_validate {
     my ($class, @args) = @_;
 
-    my %opts = (recursive => 0);
+    my %opts = (recursive => 0, format => 'fancy');
     local @ARGV = @args;
-    GetOptions('r|recursive' => \$opts{recursive});
+    GetOptions(
+        'r|recursive' => \$opts{recursive},
+        'f|format=s'  => \$opts{format},
+        'json'        => sub { $opts{format} = 'json' },
+    ) or return 1;
 
     my $path = shift @ARGV // '.';
+    my $ws = workspace_root();
     my ($threads_dir, $cat, $proj, $level) = infer_scope($path);
 
     my @files = find_all_threads(
@@ -323,34 +350,58 @@ sub cmd_validate {
         include_terminal => 1,
     );
 
-    my $errors = 0;
+    my @results;
+    my $error_count = 0;
+
     for my $file (@files) {
+        my $rel_path = $file;
+        $rel_path =~ s{^\Q$ws\E/}{};
+        my @issues;
+
         my $t = eval { Threads::Thread->new_from_file($file) };
         unless ($t) {
-            warn "$file: failed to parse\n";
-            $errors++;
-            next;
-        }
-
-        unless ($t->name) {
-            warn "$file: missing name\n";
-            $errors++;
-        }
-
-        unless ($t->status) {
-            warn "$file: missing status\n";
-            $errors++;
+            push @issues, "parse error";
         } else {
-            my $base = $t->base_status;
-            unless (grep { $_ eq $base } @Threads::Thread::ALL_STATUSES) {
-                warn "$file: invalid status '$base'\n";
-                $errors++;
+            push @issues, 'missing name/title field' unless $t->name;
+            if (!$t->status) {
+                push @issues, 'missing status field';
+            } else {
+                my $base = $t->base_status;
+                unless (grep { $_ eq $base } @Threads::Thread::ALL_STATUSES) {
+                    push @issues, "invalid status '$base'";
+                }
             }
         }
+
+        my $valid = @issues == 0;
+        $error_count++ unless $valid;
+        push @results, { path => $rel_path, valid => $valid, issues => \@issues };
     }
 
-    say $errors ? "Validation failed with $errors error(s)" : "All threads valid";
-    return $errors ? 1 : 0;
+    my $fmt = lc($opts{format});
+    if ($fmt eq 'json') {
+        require JSON::PP;
+        say JSON::PP::encode_json({ total => scalar(@results), errors => $error_count, results => \@results });
+    } elsif ($fmt eq 'yaml') {
+        require YAML::Tiny;
+        # Convert to YAML-friendly structure
+        my @yaml_results = map {
+            { path => $_->{path}, valid => $_->{valid} ? 1 : 0, issues => $_->{issues} }
+        } @results;
+        my $yaml = YAML::Tiny->new({ total => scalar(@results), errors => $error_count, results => \@yaml_results });
+        print $yaml->write_string;
+    } else {
+        for my $r (@results) {
+            if ($r->{valid}) {
+                say "OK: $r->{path}";
+            } else {
+                say "WARN: $r->{path}: " . join(', ', @{$r->{issues}});
+            }
+        }
+        say $error_count ? "Validation failed with $error_count error(s)" : "All threads valid";
+    }
+
+    return $error_count ? 1 : 0;
 }
 
 # ============================================================================
@@ -360,15 +411,19 @@ sub cmd_validate {
 sub cmd_new {
     my ($class, @args) = @_;
 
-    my %opts = (status => 'idea', desc => '', body => undef, commit => 0, message => undef);
+    my %opts = (status => 'idea', desc => '', body => undef, commit => 0, message => undef, format => 'fancy');
     local @ARGV = @args;
     GetOptions(
-        'status=s' => \$opts{status},
-        'desc=s'   => \$opts{desc},
-        'body=s'   => \$opts{body},
-        'commit'   => \$opts{commit},
-        'm=s'      => \$opts{message},
+        'status=s'   => \$opts{status},
+        'desc=s'     => \$opts{desc},
+        'body=s'     => \$opts{body},
+        'commit'     => \$opts{commit},
+        'm=s'        => \$opts{message},
+        'f|format=s' => \$opts{format},
+        'json'       => sub { $opts{format} = 'json' },
     ) or return 1;
+
+    my $fmt = lc($opts{format});
 
     # Parse positional: [path] title
     my ($path, $title);
@@ -382,6 +437,7 @@ sub cmd_new {
         die "Usage: threads new [path] <title> [--desc=...] [--status=...]\n";
     }
 
+    my $ws = workspace_root();
     my ($threads_dir, $cat, $proj, $level) = infer_scope($path);
 
     # Validate status
@@ -414,17 +470,33 @@ sub cmd_new {
     my $filepath = "$threads_dir/$filename";
     $thread->save($filepath);
 
-    # Warn if no description
-    warn "Warning: no description provided (use --desc)\n" unless length $opts{desc};
+    my $rel_path = $filepath;
+    $rel_path =~ s{^\Q$ws\E/}{};
+    my $abs_path = abs_path($filepath) // $filepath;
+    my $id = $thread->id;
+
+    # Output based on format
+    if ($fmt eq 'json') {
+        require JSON::PP;
+        say JSON::PP::encode_json({ id => $id, path => $rel_path, path_absolute => $abs_path });
+    } elsif ($fmt eq 'yaml') {
+        require YAML::Tiny;
+        my $yaml = YAML::Tiny->new({ id => $id, path => $rel_path, path_absolute => $abs_path });
+        print $yaml->write_string;
+    } else {
+        # Warn if no description (only in plain/fancy mode)
+        warn "Warning: no description provided (use --desc)\n" unless length $opts{desc};
+
+        say $id;
+        _print_uncommitted_note($id, $opts{commit});
+    }
 
     # Commit if requested
     if ($opts{commit}) {
-        my $msg = $opts{message} // "threads: add " . $thread->id . " - $title";
+        my $msg = $opts{message} // "threads: add $id - $title";
         git_commit([$filepath], $msg);
     }
 
-    say $thread->id;
-    _print_uncommitted_note($thread->id, $opts{commit});
     return 0;
 }
 

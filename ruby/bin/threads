@@ -187,7 +187,7 @@ module Threads
     end
 
     def run_new(args)
-      opts = { status: 'idea' }
+      opts = { status: 'idea', format: 'fancy' }
       path = nil
       title = nil
 
@@ -195,6 +195,8 @@ module Threads
         o.on('--status=STATUS', 'Initial status') { |v| opts[:status] = v }
         o.on('--desc=DESC', 'One-line description') { |v| opts[:desc] = v }
         o.on('--body=BODY', 'Initial body content') { |v| opts[:body] = v }
+        o.on('-f', '--format=FORMAT', 'Output format (json, yaml, plain)') { |v| opts[:format] = v.downcase }
+        o.on('--json', 'Output as JSON (shorthand for --format=json)') { opts[:format] = 'json' }
       end
 
       remaining = parser.parse(args)
@@ -224,9 +226,17 @@ module Threads
     end
 
     def run_path(args)
-      raise ArgumentError, 'usage: threads path <id>' if args.empty?
+      opts = { format: 'fancy' }
 
-      Commands.path(@ws, args[0])
+      parser = OptionParser.new do |o|
+        o.on('-f', '--format=FORMAT', 'Output format (json, yaml, plain)') { |v| opts[:format] = v.downcase }
+        o.on('--json', 'Output as JSON (shorthand for --format=json)') { opts[:format] = 'json' }
+      end
+
+      remaining = parser.parse(args)
+      raise ArgumentError, 'usage: threads path <id>' if remaining.empty?
+
+      Commands.path(@ws, remaining[0], opts)
       EXIT_SUCCESS
     end
 
@@ -355,10 +365,12 @@ module Threads
     end
 
     def run_validate(args)
-      opts = {}
+      opts = { format: 'fancy' }
 
       parser = OptionParser.new do |o|
         o.on('-r', '--recursive', 'Validate recursively') { opts[:recursive] = true }
+        o.on('-f', '--format=FORMAT', 'Output format (json, yaml, plain)') { |v| opts[:format] = v.downcase }
+        o.on('--json', 'Output as JSON (shorthand for --format=json)') { opts[:format] = 'json' }
       end
 
       remaining = parser.parse(args)

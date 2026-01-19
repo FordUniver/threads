@@ -1,5 +1,6 @@
 import ArgumentParser
 import Foundation
+import Yams
 
 struct NewCmd: ParsableCommand {
     static var configuration = CommandConfiguration(
@@ -28,11 +29,18 @@ struct NewCmd: ParsableCommand {
     @Option(name: .shortAndLong, help: "Commit message")
     var m: String?
 
+    @Option(name: .shortAndLong, help: "Output format (json, yaml, plain)")
+    var format: String?
+
+    @Flag(name: .long, help: "Output as JSON (shorthand for --format=json)")
+    var json = false
+
     @Argument(help: "Path (optional) and title")
     var args: [String] = []
 
     mutating func run() throws {
         let ws = try getWorkspace()
+        let fmt = json ? "json" : (format?.lowercased() ?? "fancy")
 
         guard Thread.isValidStatus(status) else {
             throw ValidationError("Invalid status '\(status)'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, rejected")
@@ -56,8 +64,8 @@ struct NewCmd: ParsableCommand {
             throw ValidationError("title is required")
         }
 
-        // Warn if no description provided
-        if desc.isEmpty {
+        // Warn if no description provided (only in plain/fancy mode)
+        if desc.isEmpty && (fmt == "fancy" || fmt == "plain") {
             printError("Warning: No --desc provided. Add one with: threads update <id> --desc \"...\"")
         }
 
@@ -133,19 +141,35 @@ struct NewCmd: ParsableCommand {
         try content.write(toFile: threadPath, atomically: true, encoding: .utf8)
 
         let relPath = threadPath.relativePath(from: ws) ?? threadPath
+        let absPath = (threadPath as NSString).standardizingPath
 
-        print("Created \(scope.levelDesc): \(id)")
-        print("  → \(relPath)")
+        // Output based on format
+        switch fmt {
+        case "json":
+            let data: [String: Any] = ["id": id, "path": relPath, "path_absolute": absPath]
+            if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]),
+               let output = String(data: jsonData, encoding: .utf8) {
+                print(output)
+            }
+        case "yaml":
+            let data = ["id": id, "path": relPath, "path_absolute": absPath]
+            if let output = try? Yams.dump(object: data) {
+                print(output, terminator: "")
+            }
+        default:
+            print("Created \(scope.levelDesc): \(id)")
+            print("  → \(relPath)")
 
-        if bodyContent.isEmpty {
-            printError("Hint: Add body with: echo \"content\" | threads body \(id) --set")
+            if bodyContent.isEmpty {
+                printError("Hint: Add body with: echo \"content\" | threads body \(id) --set")
+            }
         }
 
         // Commit if requested
         if commit {
             let msg = m ?? generateCommitMessage(ws, [threadPath])
             try gitAutoCommit(ws, threadPath, msg)
-        } else {
+        } else if fmt == "fancy" || fmt == "plain" {
             print("Note: Thread \(id) has uncommitted changes. Use 'threads commit \(id)' when ready.")
         }
     }
