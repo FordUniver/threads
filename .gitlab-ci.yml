@@ -3,6 +3,7 @@
 
 stages:
   - test
+  - parity
   - benchmark
 
 variables:
@@ -90,6 +91,48 @@ test:bun:
     - wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64 && chmod +x /usr/local/bin/yq
   script:
     - make test-bun
+
+# Parity job - compares output across implementations
+parity:
+  stage: parity
+  image: swift:5.9
+  needs:
+    - job: test:go
+      optional: true
+    - job: test:python
+      optional: true
+    - job: test:perl
+      optional: true
+    - job: test:rust
+      optional: true
+    - job: test:swift
+      optional: true
+    - job: test:ruby
+      optional: true
+    - job: test:bun
+      optional: true
+  before_script:
+    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc build-essential jq gawk
+    # Install Go 1.24
+    - curl -fsSL https://go.dev/dl/go1.24.0.linux-amd64.tar.gz | tar -C /usr/local -xzf -
+    - export PATH="/usr/local/go/bin:$PATH"
+    # Install Rust
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    # Install uv (for Python)
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
+    # Install bun
+    - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
+    # Install Perl YAML::Tiny
+    - cpan -T YAML::Tiny 2>/dev/null || true
+  script:
+    - export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+    - chmod +x test/parity/*.sh
+    - ./test/parity/compare-implementations.sh
+  artifacts:
+    when: on_failure
+    paths:
+      - test/parity/
+    expire_in: 1 week
 
 # Benchmark job - compares all implementations on same hardware
 benchmark:

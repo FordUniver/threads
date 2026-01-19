@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { Thread, extractIDFromPath, extractNameFromPath, baseStatus, isTerminal, isValidStatus, ALL_STATUSES } from '../src/thread';
-import { findWorkspace, findAllThreads, inferScope, parseThreadPath, generateID, slugify, findByRef, findThreadsWithOptions, findGitRoot, FindOptions } from '../src/workspace';
+import { findWorkspace, findAllThreads, inferScope, parseThreadPath, computeRelativePath, generateID, slugify, findByRef, findThreadsWithOptions, findGitRoot, FindOptions } from '../src/workspace';
 import { insertLogEntry, addNote, removeByHash, editByHash, addTodoItem, setTodoChecked, countMatchingItems, replaceSection, appendToSection } from '../src/section';
 import { formatDate, formatTime, getErrorMessage } from '../src/utils';
 import * as git from '../src/git';
@@ -52,6 +52,12 @@ function getWorkspace(): string {
   return ws;
 }
 
+// Flags that take values (need to consume next arg when space-separated)
+const VALUE_FLAGS = new Set([
+  'down', 'd', 'up', 'u', 'format', 'f', 'search', 's',
+  'category', 'c', 'project', 'p', 'status', 'm', 'set'
+]);
+
 // Parse flags from args
 function parseFlags(args: string[]): { flags: Record<string, string | boolean>; positional: string[] } {
   const flags: Record<string, string | boolean> = {};
@@ -62,19 +68,29 @@ function parseFlags(args: string[]): { flags: Record<string, string | boolean>; 
     if (arg.startsWith('--')) {
       const eqIdx = arg.indexOf('=');
       if (eqIdx !== -1) {
+        // --flag=value
         flags[arg.substring(2, eqIdx)] = arg.substring(eqIdx + 1);
       } else {
-        flags[arg.substring(2)] = true;
+        // --flag or --flag value
+        const key = arg.substring(2);
+        if (VALUE_FLAGS.has(key) && i + 1 < args.length && !args[i + 1].startsWith('-')) {
+          flags[key] = args[++i];
+        } else {
+          flags[key] = true;
+        }
       }
     } else if (arg.startsWith('-') && arg.length === 2) {
       // Short flag like -r, -m
       const key = arg.substring(1);
-      // Check if next arg is the value
-      if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
+      // Check if next arg is the value (for flags that take values)
+      if (VALUE_FLAGS.has(key) && i + 1 < args.length && !args[i + 1].startsWith('-')) {
         flags[key] = args[++i];
       } else {
         flags[key] = true;
       }
+    } else if (arg.startsWith('-') && arg.length > 2 && arg[2] === '=') {
+      // -f=value format
+      flags[arg.substring(1, 2)] = arg.substring(3);
     } else {
       positional.push(arg);
     }
@@ -304,11 +320,13 @@ async function cmdList(args: string[]): Promise<void> {
       title = name.replace(/-/g, ' ');
     }
 
+    // Compute git-relative path
+    const relPath = computeRelativePath(ws, threadPath);
+
     results.push({
       id: t.id,
       status: base,
-      category,
-      project,
+      path: relPath,
       name,
       title,
       desc: t.frontmatter.desc,
@@ -379,14 +397,13 @@ async function cmdList(args: string[]): Promise<void> {
   }
 
   // Print table header
-  console.log(`${'ID'.padEnd(6)} ${'STATUS'.padEnd(10)} ${'CATEGORY'.padEnd(18)} ${'PROJECT'.padEnd(22)} NAME`);
-  console.log(`${'--'.padEnd(6)} ${'------'.padEnd(10)} ${'--------'.padEnd(18)} ${'-------'.padEnd(22)} ----`);
+  console.log(`${'ID'.padEnd(6)} ${'STATUS'.padEnd(10)} ${'PATH'.padEnd(24)} NAME`);
+  console.log(`${'--'.padEnd(6)} ${'------'.padEnd(10)} ${'----'.padEnd(24)} ----`);
 
   for (const t of results) {
-    const category = truncate(t.category, 16);
-    const project = truncate(t.project, 20);
+    const pathDisplay = truncate(t.path, 22);
     // Use String() to guard against non-string values from malformed thread files
-    console.log(`${String(t.id || '').padEnd(6)} ${String(t.status || '').padEnd(10)} ${category.padEnd(18)} ${project.padEnd(22)} ${t.title || ''}`);
+    console.log(`${String(t.id || '').padEnd(6)} ${String(t.status || '').padEnd(10)} ${pathDisplay.padEnd(24)} ${t.title || ''}`);
   }
 }
 
@@ -1294,6 +1311,9 @@ async function cmdCommit(args: string[]): Promise<void> {
         files.push(t);
       }
     }
+    // Also include deleted thread files
+    const deleted = git.findDeletedThreadFiles(ws);
+    files.push(...deleted);
   } else {
     // Resolve provided IDs to files
     if (positional.length === 0) {

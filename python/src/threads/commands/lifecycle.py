@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from ..git import git_add, git_commit, is_modified, get_file_status
+from ..git import git_add, git_commit, is_modified, get_file_status, find_deleted_thread_files
 from ..models import LogEntry, Thread, validate_status
 from ..storage import find_threads, load_thread, save_thread
 from ..workspace import (
@@ -19,7 +19,7 @@ def auto_commit(file: Path, message: str, git_root: Path) -> None:
     """Stage and commit a file (push is opt-in)."""
     try:
         git_add(file, git_root)
-        git_commit(message, git_root)
+        git_commit(message, git_root, files=[file])
     except Exception as e:
         print(f"ERROR: git operation failed: {e}", file=sys.stderr)
         raise
@@ -29,7 +29,7 @@ def auto_commit_remove(rel_path: Path, message: str, git_root: Path) -> None:
     """Stage removal and commit (push is opt-in)."""
     try:
         git_add(rel_path, git_root)
-        git_commit(message, git_root)
+        git_commit(message, git_root, files=[rel_path])
     except Exception as e:
         print(f"ERROR: git operation failed: {e}", file=sys.stderr)
         raise
@@ -203,7 +203,7 @@ def cmd_move(
         git_add(dest_file, git_root)
         if message is None:
             message = f"threads: move {src_file.stem} to {scope.level_desc}"
-        git_commit(message, git_root)
+        git_commit(message, git_root, files=[Path(rel_src), dest_file])
         print("Note: Changes are local. Push with 'git push' when ready.")
     else:
         print("Note: Use --commit to commit this move", file=sys.stderr)
@@ -224,6 +224,9 @@ def cmd_commit(
         for path in find_threads(git_root):
             if is_modified(path, git_root):
                 files.append(path)
+        # Also include deleted thread files
+        for rel_path in find_deleted_thread_files(git_root):
+            files.append(git_root / rel_path)
     else:
         if not refs:
             raise ValueError("Provide thread IDs or use --pending")
@@ -253,7 +256,7 @@ def cmd_commit(
     for file in files:
         git_add(file, git_root)
 
-    git_commit(message, git_root)
+    git_commit(message, git_root, files=files)
     print(f"Committed {len(files)} thread(s).")
 
 

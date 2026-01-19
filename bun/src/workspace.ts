@@ -11,15 +11,9 @@ export interface FindOptions {
   up?: number;
 }
 
-// Check if a directory is a git root (contains .git)
+// Check if a directory is a git root (contains .git directory or file for worktrees)
 function isGitRoot(dir: string): boolean {
-  try {
-    const gitPath = path.join(dir, '.git');
-    const stat = fs.statSync(gitPath);
-    return stat.isDirectory();
-  } catch {
-    return false;
-  }
+  return fs.existsSync(path.join(dir, '.git'));
 }
 
 // Find the git root for the current directory
@@ -365,6 +359,33 @@ export function parseThreadPath(ws: string, threadPath: string): { category: str
   }
 
   return { category, project, name };
+}
+
+// Compute git-relative path for a thread file.
+// Returns the directory containing .threads relative to git root.
+export function computeRelativePath(ws: string, threadPath: string): string {
+  // Get the directory containing .threads
+  const threadsDir = path.dirname(threadPath);  // Remove filename
+  const parentDir = path.dirname(threadsDir);   // Remove .threads
+
+  // If parentDir equals workspace root, return "."
+  const wsReal = path.resolve(ws);
+  const parentReal = path.resolve(parentDir);
+
+  if (parentReal === wsReal) {
+    return '.';
+  }
+
+  // Compute relative path from workspace root
+  if (parentReal.startsWith(wsReal)) {
+    let rel = parentReal.substring(wsReal.length);
+    if (rel.startsWith('/')) {
+      rel = rel.substring(1);
+    }
+    return rel || '.';
+  }
+
+  return '.';
 }
 
 // Generate unique 6-character hex ID

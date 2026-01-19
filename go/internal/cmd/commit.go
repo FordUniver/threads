@@ -52,6 +52,12 @@ func runCommit(cmd *cobra.Command, args []string) error {
 				files = append(files, t)
 			}
 		}
+
+		// Also include deleted thread files
+		deleted, err := git.FindDeletedThreadFiles(ws)
+		if err == nil {
+			files = append(files, deleted...)
+		}
 	} else {
 		// Resolve provided IDs to files
 		if len(args) == 0 {

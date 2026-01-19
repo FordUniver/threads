@@ -22,14 +22,27 @@ def run_git(
 
 
 def git_add(file: Path, workspace: Path) -> None:
-    """Stage a file for commit."""
-    rel_path = file.relative_to(workspace) if file.is_absolute() else file
+    """Stage a file for commit. Skips non-existent files (assumed to be already-staged deletions)."""
+    if file.is_absolute():
+        full_path = file
+        rel_path = file.relative_to(workspace)
+    else:
+        full_path = workspace / file
+        rel_path = file
+
+    # Skip non-existent files (deletions already staged)
+    if not full_path.exists():
+        return
+
     run_git(["add", str(rel_path)], workspace)
 
 
-def git_commit(message: str, workspace: Path) -> None:
-    """Create a commit with the given message."""
-    run_git(["commit", "-m", message], workspace)
+def git_commit(message: str, workspace: Path, files: list[Path] | None = None) -> None:
+    """Create a commit with the given message, optionally limited to specific files."""
+    args = ["commit", "-m", message]
+    if files:
+        args.extend(str(f.relative_to(workspace) if f.is_absolute() else f) for f in files)
+    run_git(args, workspace)
 
 
 def git_pull_rebase(workspace: Path) -> bool:
@@ -171,3 +184,18 @@ def get_file_status(file: Path, workspace: Path) -> str:
                 return "deleted"
         else:
             return "added"
+
+
+def find_deleted_thread_files(workspace: Path) -> list[Path]:
+    """Find deleted thread files that are staged or in working tree.
+
+    Returns paths of files matching .threads/*.md that show as deleted (D) in git status.
+    """
+    status_map = get_all_git_status(workspace, refresh=True)
+    deleted = []
+
+    for rel_path, status in status_map.items():
+        if status == "D" and ".threads/" in str(rel_path) and str(rel_path).endswith(".md"):
+            deleted.append(rel_path)
+
+    return deleted

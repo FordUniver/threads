@@ -24,7 +24,8 @@ export function replaceSection(content: string, name: string, newContent: string
 
   // Reset lastIndex since we tested
   pattern.lastIndex = 0;
-  return content.replace(pattern, `$1\n${newContent}\n\n$2`);
+  // Use function replacement to prevent $ in newContent being interpreted as backreferences
+  return content.replace(pattern, (match, p1, p2) => `${p1}\n${newContent}\n\n${p2}`);
 }
 
 // Append content to a section
@@ -76,15 +77,17 @@ export function insertLogEntry(content: string, entry: string): string {
   const todayPattern = new RegExp(`^### ${today.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'm');
   if (todayPattern.test(content)) {
     // Insert after today's heading
+    // Use function replacement to prevent $ in entry being interpreted as backreferences
     const pattern = new RegExp(`(^### ${today.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n)`, 'm');
-    return content.replace(pattern, `$1\n${bulletEntry}\n`);
+    return content.replace(pattern, (match, p1) => `${p1}\n${bulletEntry}\n`);
   }
 
   // Check if Log section exists
   const logPattern = /^## Log/m;
   if (logPattern.test(content)) {
     // Insert new heading after ## Log
-    return content.replace(logPattern, `## Log\n\n${heading}\n\n${bulletEntry}`);
+    // Use function replacement to prevent $ in entry being interpreted as backreferences
+    return content.replace(logPattern, () => `## Log\n\n${heading}\n\n${bulletEntry}`);
   }
 
   // No Log section - append one
@@ -100,8 +103,9 @@ export function addNote(content: string, text: string): { content: string; hash:
   const noteEntry = `- ${text}  <!-- ${hash} -->`;
 
   // Insert at top of Notes section
+  // Use function replacement to prevent $ in text being interpreted as backreferences
   const pattern = /^## Notes\n/m;
-  const newContent = content.replace(pattern, `## Notes\n\n${noteEntry}\n`);
+  const newContent = content.replace(pattern, () => `## Notes\n\n${noteEntry}\n`);
 
   return { content: newContent, hash };
 }
@@ -177,8 +181,9 @@ export function addTodoItem(content: string, text: string): { content: string; h
   const todoEntry = `- [ ] ${text}  <!-- ${hash} -->`;
 
   // Insert at top of Todo section
+  // Use function replacement to prevent $ in text being interpreted as backreferences
   const pattern = /^## Todo\n/m;
-  const newContent = content.replace(pattern, `## Todo\n\n${todoEntry}\n`);
+  const newContent = content.replace(pattern, () => `## Todo\n\n${todoEntry}\n`);
 
   return { content: newContent, hash };
 }

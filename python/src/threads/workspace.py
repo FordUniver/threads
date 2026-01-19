@@ -58,8 +58,8 @@ def find_git_root_for_path(path: Path) -> Path:
 
 
 def is_git_root(path: Path) -> bool:
-    """Check if a directory contains a .git folder."""
-    return (path / ".git").is_dir()
+    """Check if a directory contains a .git folder or file (worktree-style)."""
+    return (path / ".git").exists()
 
 
 def infer_scope(path_arg: str | None, git_root: Path | None = None) -> Scope:

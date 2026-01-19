@@ -178,35 +178,36 @@ sub cmd_list {
             next unless $match;
         }
 
+        # Compute relative path for this thread
+        my $rel_path = _compute_relative_path($file);
+
         push @threads, {
-            thread   => $t,
-            category => $t_cat,
-            project  => $t_proj,
+            thread => $t,
+            path   => $rel_path,
         };
     }
 
     if ($opts{json}) {
         require JSON::PP;
         my @data = map {{
-            id       => $_->{thread}->id,
-            name     => $_->{thread}->name,
-            desc     => $_->{thread}->desc,
-            status   => $_->{thread}->status,
-            category => $_->{category},
-            project  => $_->{project},
+            id     => $_->{thread}->id,
+            name   => $_->{thread}->name,
+            desc   => $_->{thread}->desc,
+            status => $_->{thread}->status,
+            path   => $_->{path},
         }} @threads;
         say JSON::PP::encode_json(\@data);
     } else {
         printf "Showing %d threads\n\n", scalar @threads;
         return 0 unless @threads;
-        printf "%-8s %-10s %-12s %-12s %s\n", qw(ID STATUS CATEGORY PROJECT NAME);
+        printf "%-8s %-10s %-24s %s\n", qw(ID STATUS PATH NAME);
         for my $item (@threads) {
             my $t = $item->{thread};
-            printf "%-8s %-10s %-12s %-12s %s\n",
+            my $path_display = _truncate($item->{path}, 22);
+            printf "%-8s %-10s %-24s %s\n",
                 $t->id,
                 $t->base_status,
-                $item->{category},
-                $item->{project},
+                $path_display,
                 $t->name;
         }
     }
@@ -1040,6 +1041,29 @@ sub _extract_scope {
     } else {
         return ($parts[0], $parts[1]);
     }
+}
+
+# Compute relative path from workspace root for a thread file
+# Returns "." for workspace level, "cat" for category, "cat/proj" for project
+sub _compute_relative_path {
+    my ($filepath) = @_;
+    my $ws = workspace_root();
+    # Get parent of .threads directory (the scope directory)
+    my $scope_dir = dirname(dirname($filepath));
+    my $rel = File::Spec->abs2rel($scope_dir, $ws);
+
+    return '.' if $rel eq '.' || $rel eq '';
+
+    # Normalize path separators
+    $rel =~ s{\\}{/}g;
+    return $rel;
+}
+
+# Truncate string to max length with ellipsis
+sub _truncate {
+    my ($str, $max_len) = @_;
+    return $str if length($str) <= $max_len;
+    return substr($str, 0, $max_len - 2) . '..';
 }
 
 sub _print_uncommitted_note {

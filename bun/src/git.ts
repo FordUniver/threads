@@ -48,9 +48,22 @@ export function existsInHEAD(ws: string, relPath: string): boolean {
   return result.success;
 }
 
-// Stage a file
+// Stage files, skipping any that don't exist (assumed to be already-staged deletions)
 export function add(ws: string, ...files: string[]): void {
-  const result = runGit(ws, ['add', ...files]);
+  const existingFiles: string[] = [];
+  for (const f of files) {
+    const fullPath = path.isAbsolute(f) ? f : path.join(ws, f);
+    if (fs.existsSync(fullPath)) {
+      existingFiles.push(f);
+    }
+    // Non-existent files are assumed to be deletions already staged
+  }
+
+  if (existingFiles.length === 0) {
+    return;
+  }
+
+  const result = runGit(ws, ['add', ...existingFiles]);
   if (!result.success) {
     throw new Error(`git add failed: ${result.output}`);
   }
@@ -156,4 +169,37 @@ function extractID(name: string): string {
 
 function isHex(s: string): boolean {
   return /^[0-9a-f]+$/.test(s);
+}
+
+// Check if a path looks like a thread file (.threads/*.md)
+function isThreadPath(p: string): boolean {
+  return p.includes('.threads/') && p.endsWith('.md');
+}
+
+// Find deleted thread files that are staged or in working tree
+export function findDeletedThreadFiles(ws: string): string[] {
+  const result = runGit(ws, ['status', '--porcelain']);
+  if (!result.success) {
+    return [];
+  }
+
+  const deleted: string[] = [];
+  const lines = result.output.split('\n');
+  for (const line of lines) {
+    if (line.length < 4) {
+      continue;
+    }
+    // Porcelain format: XY PATH
+    // X = index status, Y = worktree status
+    // D in either position means deleted
+    const indexStatus = line[0];
+    const worktreeStatus = line[1];
+    const filePath = line.substring(3);
+
+    if ((indexStatus === 'D' || worktreeStatus === 'D') && isThreadPath(filePath)) {
+      deleted.push(path.join(ws, filePath));
+    }
+  }
+
+  return deleted;
 }

@@ -19,12 +19,15 @@ our @EXPORT_OK = qw(
 # Precompiled pattern for terminal status detection (quick check)
 our $TERMINAL_STATUS_RE = qr/^status:\s*(resolved|superseded|deferred|rejected)/m;
 
-# Get workspace root from WORKSPACE environment variable
+# Get workspace root via git rev-parse (like other implementations)
 sub workspace_root {
-    my $ws = $ENV{WORKSPACE} // '';
-    die "WORKSPACE environment variable not set\n" unless $ws;
-    die "WORKSPACE directory does not exist: $ws\n" unless -d $ws;
-    return $ws;
+    my $output = `git rev-parse --show-toplevel 2>/dev/null`;
+    if ($? != 0 || !defined $output || $output eq '') {
+        die "Not in a git repository. threads requires a git repo to define scope.\n";
+    }
+    chomp $output;
+    die "Git root directory does not exist: $output\n" unless -d $output;
+    return $output;
 }
 
 # Infer scope from path, returns (threads_dir, category, project, level_desc)
@@ -213,8 +216,8 @@ sub _find_threads_down {
         my $subdir = "$dir/$entry";
         next unless -d $subdir;
 
-        # Stop at nested git repos (git boundary)
-        if (-d "$subdir/.git") {
+        # Stop at nested git repos (git boundary) - check for .git dir or file (worktree)
+        if (-e "$subdir/.git") {
             next;
         }
 

@@ -79,7 +79,7 @@ Path notation:
 
 Status values:
   Active:   idea, planning, active, blocked, paused
-  Terminal: resolved, superseded, deferred
+  Terminal: resolved, superseded, deferred, rejected
 """
 
 

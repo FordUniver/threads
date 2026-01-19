@@ -248,8 +248,8 @@ def save_thread(thread: Thread) -> None:
 
 
 def _is_git_root(path: Path) -> bool:
-    """Check if a directory contains a .git folder."""
-    return (path / ".git").is_dir()
+    """Check if a directory contains a .git folder or file (worktree-style)."""
+    return (path / ".git").exists()
 
 
 def _find_threads_recursive(

@@ -4,8 +4,7 @@ import Foundation
 struct ThreadInfo: Codable {
     let id: String
     let status: String
-    let category: String
-    let project: String
+    let path: String
     let name: String
     let title: String
     let desc: String
@@ -163,6 +162,8 @@ struct ListCmd: ParsableCommand {
             guard let t = try? Thread.parse(path: threadPath) else { continue }
 
             let (cat, proj, name) = parseThreadPath(ws, threadPath)
+            // Compute git-relative path (like Go does)
+            let relPath = computeRelativePath(ws, threadPath)
             let threadStatus = t.status
             let baseStatus = Thread.baseStatus(threadStatus)
 
@@ -211,8 +212,7 @@ struct ListCmd: ParsableCommand {
             results.append(ThreadInfo(
                 id: t.id,
                 status: baseStatus,
-                category: cat,
-                project: proj,
+                path: relPath,
                 name: name,
                 title: title,
                 desc: t.frontmatter.desc
@@ -274,21 +274,50 @@ struct ListCmd: ParsableCommand {
         }
 
         // Print table header
-        print(formatRow("ID", "STATUS", "CATEGORY", "PROJECT", "NAME"))
-        print(formatRow("--", "------", "--------", "-------", "----"))
+        print(formatRow("ID", "STATUS", "PATH", "NAME"))
+        print(formatRow("--", "------", "----", "----"))
 
         for t in results {
-            let cat = truncate(t.category, 16)
-            let proj = truncate(t.project, 20)
-            print(formatRow(t.id, t.status, cat, proj, t.title))
+            let pathDisplay = truncate(t.path, 22)
+            print(formatRow(t.id, t.status, pathDisplay, t.title))
         }
     }
 
-    func formatRow(_ id: String, _ status: String, _ category: String, _ project: String, _ name: String) -> String {
+    func formatRow(_ id: String, _ status: String, _ path: String, _ name: String) -> String {
         let idPad = id.rightPad(toLength: 6)
         let statusPad = status.rightPad(toLength: 10)
-        let catPad = category.rightPad(toLength: 18)
-        let projPad = project.rightPad(toLength: 22)
-        return "\(idPad) \(statusPad) \(catPad) \(projPad) \(name)"
+        let pathPad = path.rightPad(toLength: 24)
+        return "\(idPad) \(statusPad) \(pathPad) \(name)"
     }
+}
+
+/// Compute git-relative path for a thread file.
+/// Returns the directory containing .threads relative to git root.
+func computeRelativePath(_ gitRoot: String, _ threadPath: String) -> String {
+    // Get the directory containing .threads
+    let url = URL(fileURLWithPath: threadPath)
+    let threadsDir = url.deletingLastPathComponent().path  // Remove filename
+    let parentDir = URL(fileURLWithPath: threadsDir).deletingLastPathComponent().path  // Remove .threads
+
+    // Get relative path from git root
+    let gitRootURL = URL(fileURLWithPath: gitRoot).standardizedFileURL
+    let parentURL = URL(fileURLWithPath: parentDir).standardizedFileURL
+
+    if parentURL.path == gitRootURL.path {
+        return "."
+    }
+
+    // Try to compute relative path
+    let gitRootPath = gitRootURL.path
+    let parentPath = parentURL.path
+
+    if parentPath.hasPrefix(gitRootPath) {
+        var rel = String(parentPath.dropFirst(gitRootPath.count))
+        if rel.hasPrefix("/") {
+            rel = String(rel.dropFirst())
+        }
+        return rel.isEmpty ? "." : rel
+    }
+
+    return "."
 }

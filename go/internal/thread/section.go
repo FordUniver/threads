@@ -51,7 +51,14 @@ func ReplaceSection(content, name, newContent string) string {
 		return content
 	}
 
-	return re.ReplaceAllString(content, fmt.Sprintf("${1}\n%s\n\n${3}", newContent))
+	// Use ReplaceAllStringFunc to prevent $ in newContent being interpreted as backreferences
+	return re.ReplaceAllStringFunc(content, func(match string) string {
+		submatches := re.FindStringSubmatch(match)
+		if len(submatches) < 4 {
+			return match
+		}
+		return submatches[1] + "\n" + newContent + "\n\n" + submatches[3]
+	})
 }
 
 // AppendToSection appends content to a section
@@ -101,15 +108,25 @@ func InsertLogEntry(content, entry string) string {
 	todayPattern := regexp.MustCompile(fmt.Sprintf(`(?m)^### %s`, regexp.QuoteMeta(today)))
 	if todayPattern.MatchString(content) {
 		// Insert after today's heading
+		// Use ReplaceAllStringFunc to prevent $ in entry being interpreted as backreferences
 		pattern := fmt.Sprintf(`(?m)(^### %s\n)`, regexp.QuoteMeta(today))
 		re := regexp.MustCompile(pattern)
-		return re.ReplaceAllString(content, fmt.Sprintf("${1}\n%s\n", bulletEntry))
+		return re.ReplaceAllStringFunc(content, func(match string) string {
+			submatches := re.FindStringSubmatch(match)
+			if len(submatches) < 2 {
+				return match
+			}
+			return submatches[1] + "\n" + bulletEntry + "\n"
+		})
 	}
 
 	// Check if Log section exists
 	if logSectionRe.MatchString(content) {
 		// Insert new heading after ## Log
-		return logSectionRe.ReplaceAllString(content, fmt.Sprintf("## Log\n\n%s\n\n%s", heading, bulletEntry))
+		// Use ReplaceAllStringFunc to prevent $ in entry being interpreted as backreferences
+		return logSectionRe.ReplaceAllStringFunc(content, func(match string) string {
+			return "## Log\n\n" + heading + "\n\n" + bulletEntry
+		})
 	}
 
 	// No Log section - append one
@@ -125,7 +142,14 @@ func AddNote(content, text string) (string, string) {
 	noteEntry := fmt.Sprintf("- %s  <!-- %s -->", text, hash)
 
 	// Insert at top of Notes section
-	newContent := notesSectionRe.ReplaceAllString(content, fmt.Sprintf("${1}\n%s\n", noteEntry))
+	// Use ReplaceAllStringFunc to prevent $ in text being interpreted as backreferences
+	newContent := notesSectionRe.ReplaceAllStringFunc(content, func(match string) string {
+		submatches := notesSectionRe.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		return submatches[1] + "\n" + noteEntry + "\n"
+	})
 
 	return newContent, hash
 }
@@ -199,7 +223,14 @@ func AddTodoItem(content, text string) (string, string) {
 	todoEntry := fmt.Sprintf("- [ ] %s  <!-- %s -->", text, hash)
 
 	// Insert at top of Todo section
-	newContent := todoSectionRe.ReplaceAllString(content, fmt.Sprintf("${1}\n%s\n", todoEntry))
+	// Use ReplaceAllStringFunc to prevent $ in text being interpreted as backreferences
+	newContent := todoSectionRe.ReplaceAllStringFunc(content, func(match string) string {
+		submatches := todoSectionRe.FindStringSubmatch(match)
+		if len(submatches) < 2 {
+			return match
+		}
+		return submatches[1] + "\n" + todoEntry + "\n"
+	})
 
 	return newContent, hash
 }

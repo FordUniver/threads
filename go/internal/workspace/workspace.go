@@ -112,10 +112,10 @@ func FindGitRootForPath(path string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-// IsGitRoot checks if a directory contains a .git folder.
+// IsGitRoot checks if a directory contains a .git folder or file (worktree-style).
 func IsGitRoot(path string) bool {
-	info, err := os.Stat(filepath.Join(path, ".git"))
-	return err == nil && info.IsDir()
+	_, err := os.Stat(filepath.Join(path, ".git"))
+	return err == nil
 }
 
 // FindAllThreads returns all thread file paths within the git root.
