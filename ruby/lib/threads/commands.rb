@@ -640,7 +640,16 @@ module Threads
 
         # Resolve starting path - default to PWD, not workspace root
         start_path = path_filter && !path_filter.empty? ? resolve_path(ws, path_filter) : Dir.pwd
-        filter_path = Workspace.parse_thread_relative_path(ws, start_path)
+
+        # Compute filter_path: relative path of start_path from workspace
+        abs_start = File.expand_path(start_path)
+        abs_ws = File.expand_path(ws)
+        filter_path = if abs_start.start_with?("#{abs_ws}/")
+                        rel = abs_start.sub("#{abs_ws}/", '')
+                        rel.empty? ? '.' : rel
+                      else
+                        '.'
+                      end
 
         # Build FindOptions
         options = FindOptions.new

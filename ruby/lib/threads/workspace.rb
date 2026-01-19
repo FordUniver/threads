@@ -336,7 +336,12 @@ module Threads
           )
         end
 
-        rel = abs_path.sub("#{ws}/", '')
+        # If abs_path equals ws, we're at workspace root
+        abs_ws = File.expand_path(ws)
+        abs_path_expanded = File.expand_path(abs_path)
+        return Scope.new(File.join(ws, '.threads'), '-', '-', 'workspace-level thread') if abs_path_expanded == abs_ws
+
+        rel = abs_path_expanded.sub("#{abs_ws}/", '')
         return Scope.new(File.join(ws, '.threads'), '-', '-', 'workspace-level thread') if rel.empty?
 
         parts = rel.split('/', 3)
