@@ -18,4 +18,4 @@ if [[ -z "$project_root" ]]; then
     project_root="$(dirname "$script_dir")"
 fi
 
-cd "$project_root" && exec uv run python -m threads "$@"
+exec uv run --project "$project_root" python -m threads "$@"

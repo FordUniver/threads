@@ -123,9 +123,10 @@ generate_thread() {
     local filepath="$dir/${hex_id}-${slug}.md"
 
     # Base content
+    # Quote the ID so YAML parsers treat it as string, not integer/octal
     cat > "$filepath" << EOF
 ---
-id: $hex_id
+id: '$hex_id'
 name: Benchmark Thread $idx
 desc: A synthetic thread for benchmarking purposes with deterministic content
 status: $status
