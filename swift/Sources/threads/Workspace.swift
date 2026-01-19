@@ -116,23 +116,20 @@ func expandGlobPattern(_ pattern: String) -> [String] {
 
 // inferScope determines the threads directory and level from a path
 func inferScope(_ ws: String, _ path: String) throws -> Scope {
-    // Handle explicit "." for workspace level
-    if path == "." {
-        return Scope(
-            threadsDir: (ws as NSString).appendingPathComponent(".threads"),
-            category: "-",
-            project: "-",
-            levelDesc: "workspace-level thread"
-        )
-    }
-
     var absPath: String
 
-    // Resolve to absolute path
-    if (path as NSString).isAbsolutePath {
+    // Handle "." as PWD (current directory), not workspace root
+    if path == "." {
+        absPath = FileManager.default.currentDirectoryPath
+    } else if path.hasPrefix("./") {
+        // PWD-relative path
+        let relPart = String(path.dropFirst(2))
+        absPath = (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent(relPart)
+        absPath = (absPath as NSString).standardizingPath
+    } else if (path as NSString).isAbsolutePath {
         absPath = path
     } else {
-        // Try as relative to workspace first
+        // Git-root-relative path: try workspace first
         let wsRelPath = (ws as NSString).appendingPathComponent(path)
         var isDir: ObjCBool = false
         if FileManager.default.fileExists(atPath: wsRelPath, isDirectory: &isDir), isDir.boolValue {
@@ -143,6 +140,12 @@ func inferScope(_ ws: String, _ path: String) throws -> Scope {
         } else {
             throw WorkspaceError.pathNotFound(path)
         }
+    }
+
+    // Verify path exists
+    var isDir: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: absPath, isDirectory: &isDir), isDir.boolValue else {
+        throw WorkspaceError.pathNotFound(path)
     }
 
     // Must be within workspace (use secure path containment)

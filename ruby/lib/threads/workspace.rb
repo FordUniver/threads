@@ -308,26 +308,25 @@ module Threads
 
       # Infer scope from path
       def infer_scope(ws, path)
-        # Handle explicit "." for workspace level
-        if path == '.'
-          return Scope.new(
-            File.join(ws, '.threads'),
-            '-',
-            '-',
-            'workspace-level thread'
-          )
-        end
-
-        # Resolve to absolute path
-        abs_path = if File.absolute_path?(path)
+        # Handle "." as PWD (current directory), not workspace root
+        abs_path = if path == '.'
+                     Dir.pwd
+                   elsif path.start_with?('./')
+                     # PWD-relative path
+                     File.expand_path(path)
+                   elsif File.absolute_path?(path)
                      path
                    elsif File.directory?(File.join(ws, path))
+                     # Git-root-relative path
                      File.join(ws, path)
                    elsif File.directory?(path)
                      File.expand_path(path)
                    else
                      raise WorkspaceError, "path not found: #{path}"
                    end
+
+        # Verify path exists
+        raise WorkspaceError, "path not found or not a directory: #{path}" unless File.directory?(abs_path)
 
         # Must be within workspace (use secure path containment check)
         unless path_contained_in?(abs_path, ws)

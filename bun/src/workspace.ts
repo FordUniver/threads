@@ -264,22 +264,18 @@ export interface Scope {
 
 // Infer scope from a path
 export function inferScope(ws: string, targetPath: string): Scope {
-  // Handle explicit "." for workspace level
-  if (targetPath === '.') {
-    return {
-      threadsDir: path.join(ws, '.threads'),
-      category: '-',
-      project: '-',
-      levelDesc: 'workspace-level thread',
-    };
-  }
-
   let absPath: string;
 
-  // Resolve to absolute path
-  if (path.isAbsolute(targetPath)) {
+  // Handle "." as PWD (current directory), not workspace root
+  if (targetPath === '.') {
+    absPath = process.cwd();
+  } else if (path.isAbsolute(targetPath)) {
     absPath = targetPath;
+  } else if (targetPath.startsWith('./')) {
+    // PWD-relative path
+    absPath = path.resolve(process.cwd(), targetPath);
   } else {
+    // Git-root-relative path: try workspace first, then PWD
     const wsRelPath = path.join(ws, targetPath);
     if (fs.existsSync(wsRelPath) && fs.statSync(wsRelPath).isDirectory()) {
       absPath = wsRelPath;
@@ -288,6 +284,11 @@ export function inferScope(ws: string, targetPath: string): Scope {
     } else {
       throw new Error(`path not found: ${targetPath}`);
     }
+  }
+
+  // Verify path exists
+  if (!fs.existsSync(absPath) || !fs.statSync(absPath).isDirectory()) {
+    throw new Error(`path not found or not a directory: ${targetPath}`);
   }
 
   // Must be within workspace (use relative path check for security)
