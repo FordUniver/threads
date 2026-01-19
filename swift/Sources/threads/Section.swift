@@ -1,11 +1,5 @@
 import Foundation
 
-// Escape $ characters in replacement strings for NSRegularExpression
-// ($ is a backreference in replacement patterns, $$ is literal $)
-func escapeForReplacement(_ text: String) -> String {
-    return text.replacingOccurrences(of: "$", with: "$$")
-}
-
 // extractSection returns the content of a section (between ## Name and next ## or EOF)
 func extractSection(_ content: String, _ name: String) -> String {
     let pattern = "(?ms)^## \(NSRegularExpression.escapedPattern(for: name))\n(.+?)(?:^## |\\z)"
@@ -21,16 +15,24 @@ func extractSection(_ content: String, _ name: String) -> String {
 func replaceSection(_ content: String, _ name: String, _ newContent: String) -> String {
     let pattern = "(?ms)(^## \(NSRegularExpression.escapedPattern(for: name))\n)(.+?)(^## |\\z)"
     guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines, .dotMatchesLineSeparators]),
-          regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)) != nil else {
+          let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)) else {
         // Section doesn't exist
         return content
     }
 
-    return regex.stringByReplacingMatches(
-        in: content,
-        range: NSRange(content.startIndex..., in: content),
-        withTemplate: "$1\n\(escapeForReplacement(newContent))\n\n$3"
-    )
+    // Use functional replacement to avoid $ escaping issues in templates
+    guard let headerRange = Range(match.range(at: 1), in: content),
+          let tailRange = Range(match.range(at: 3), in: content) else {
+        return content
+    }
+
+    let header = String(content[headerRange])
+    let tail = String(content[tailRange])
+    let fullMatchRange = Range(match.range, in: content)!
+
+    var result = content
+    result.replaceSubrange(fullMatchRange, with: "\(header)\n\(newContent)\n\n\(tail)")
+    return result
 }
 
 // appendToSection appends content to a section
@@ -90,29 +92,23 @@ func insertLogEntry(_ content: String, _ entry: String) -> String {
     let bulletEntry = "- **\(timestamp)** \(entry)"
     let heading = "### \(today)"
 
-    // Check if today's heading exists
-    let todayPattern = "(?m)^### \(NSRegularExpression.escapedPattern(for: today))"
+    // Check if today's heading exists - use functional replacement to preserve $ in entry
+    let todayPattern = "(?m)(^### \(NSRegularExpression.escapedPattern(for: today))\n)"
     if let todayRegex = try? NSRegularExpression(pattern: todayPattern),
-       todayRegex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)) != nil {
-        // Insert after today's heading
-        let insertPattern = "(?m)(^### \(NSRegularExpression.escapedPattern(for: today))\n)"
-        if let insertRegex = try? NSRegularExpression(pattern: insertPattern) {
-            return insertRegex.stringByReplacingMatches(
-                in: content,
-                range: NSRange(content.startIndex..., in: content),
-                withTemplate: "$1\n\(escapeForReplacement(bulletEntry))\n"
-            )
-        }
+       let match = todayRegex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
+       let matchRange = Range(match.range, in: content) {
+        var result = content
+        let matched = String(content[matchRange])
+        result.replaceSubrange(matchRange, with: "\(matched)\n\(bulletEntry)\n")
+        return result
     }
 
     // Check if Log section exists
-    if CachedRegex.logSection.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)) != nil {
-        // Insert new heading after ## Log
-        return CachedRegex.logSection.stringByReplacingMatches(
-            in: content,
-            range: NSRange(content.startIndex..., in: content),
-            withTemplate: "## Log\n\n\(heading)\n\n\(escapeForReplacement(bulletEntry))"
-        )
+    if let match = CachedRegex.logSection.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
+       let matchRange = Range(match.range, in: content) {
+        var result = content
+        result.replaceSubrange(matchRange, with: "## Log\n\n\(heading)\n\n\(bulletEntry)")
+        return result
     }
 
     // No Log section - append one
@@ -127,14 +123,13 @@ func addNote(_ content: String, _ text: String) -> (String, String) {
     let hash = generateHash(text)
     let noteEntry = "- \(text)  <!-- \(hash) -->"
 
-    // Insert at top of Notes section
+    // Insert at top of Notes section - use functional replacement to preserve $ in text
     let pattern = "(?m)(^## Notes\n)"
-    if let regex = try? NSRegularExpression(pattern: pattern) {
-        newContent = regex.stringByReplacingMatches(
-            in: newContent,
-            range: NSRange(newContent.startIndex..., in: newContent),
-            withTemplate: "$1\n\(escapeForReplacement(noteEntry))\n"
-        )
+    if let regex = try? NSRegularExpression(pattern: pattern),
+       let match = regex.firstMatch(in: newContent, range: NSRange(newContent.startIndex..., in: newContent)),
+       let matchRange = Range(match.range, in: newContent) {
+        let matched = String(newContent[matchRange])
+        newContent.replaceSubrange(matchRange, with: "\(matched)\n\(noteEntry)\n")
     }
 
     return (newContent, hash)
@@ -210,14 +205,14 @@ func addTodoItem(_ content: String, _ text: String) -> (String, String) {
     let hash = generateHash(text)
     let todoEntry = "- [ ] \(text)  <!-- \(hash) -->"
 
-    // Insert at top of Todo section
+    // Insert at top of Todo section - use functional replacement to preserve $ in text
     let pattern = "(?m)(^## Todo\n)"
-    if let regex = try? NSRegularExpression(pattern: pattern) {
-        let newContent = regex.stringByReplacingMatches(
-            in: content,
-            range: NSRange(content.startIndex..., in: content),
-            withTemplate: "$1\n\(escapeForReplacement(todoEntry))\n"
-        )
+    if let regex = try? NSRegularExpression(pattern: pattern),
+       let match = regex.firstMatch(in: content, range: NSRange(content.startIndex..., in: content)),
+       let matchRange = Range(match.range, in: content) {
+        var newContent = content
+        let matched = String(content[matchRange])
+        newContent.replaceSubrange(matchRange, with: "\(matched)\n\(todoEntry)\n")
         return (newContent, hash)
     }
 
