@@ -72,8 +72,44 @@ test_help_flag() {
     end_test
 }
 
+# Test: quoted ID in YAML frontmatter (from benchmark cross-validation)
+# Some YAML parsers treat unquoted 000abc as octal/integer; quoted IDs must work
+test_quoted_id_in_yaml() {
+    begin_test "quoted ID in YAML parsed correctly"
+    setup_test_workspace
+
+    # Create thread file directly with quoted ID (valid YAML)
+    mkdir -p "$TEST_WS/.threads"
+    cat > "$TEST_WS/.threads/00a1b2-quoted-id-test.md" << 'EOF'
+---
+id: '00a1b2'
+name: Quoted ID Test
+desc: Tests that quoted IDs are parsed without quotes
+status: active
+---
+
+## Body
+EOF
+
+    # List with JSON and extract the ID
+    local output
+    output=$($THREADS_BIN list --json 2>/dev/null) || true
+
+    # The ID should be "00a1b2" not "'00a1b2'"
+    assert_contains "$output" '"id"' "JSON output should have id field"
+    assert_contains "$output" '00a1b2' "ID should be present"
+    # Ensure quotes are stripped (not double-quoted in JSON)
+    if [[ "$output" == *"'00a1b2'"* ]]; then
+        fail_test "ID should not include YAML quotes"
+    fi
+
+    teardown_test_workspace
+    end_test
+}
+
 # Run all tests
 test_special_chars_in_name
 test_partial_id_not_found
 test_not_found_error
 test_help_flag
+test_quoted_id_in_yaml
