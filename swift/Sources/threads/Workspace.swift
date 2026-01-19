@@ -23,21 +23,18 @@ func findWorkspace() throws -> String {
     return normalized
 }
 
-// findAllThreads returns all thread file paths in the workspace (recursive traversal)
+// findAllThreads returns all thread file paths in the workspace
+// Uses optimized 3-level traversal (workspace/category/project) for performance
 func findAllThreads(_ ws: String) throws -> [String] {
     var threads: [String] = []
-    findThreadsRecursive(ws, ws, &threads)
-    return threads.sorted()
-}
-
-// Recursively find threads, stopping at nested git repos
-private func findThreadsRecursive(_ dir: String, _ gitRoot: String, _ threads: inout [String]) {
     let fm = FileManager.default
 
-    // Collect from .threads at this level
-    let threadsDir = (dir as NSString).appendingPathComponent(".threads")
-    if fm.fileExists(atPath: threadsDir),
-       let files = try? fm.contentsOfDirectory(atPath: threadsDir) {
+    // Helper to collect .md files from a .threads directory
+    func collectThreads(from threadsDir: String) {
+        guard fm.fileExists(atPath: threadsDir),
+              let files = try? fm.contentsOfDirectory(atPath: threadsDir) else {
+            return
+        }
         for file in files where file.hasSuffix(".md") {
             let fullPath = (threadsDir as NSString).appendingPathComponent(file)
             if !fullPath.contains("/archive/") {
@@ -46,19 +43,31 @@ private func findThreadsRecursive(_ dir: String, _ gitRoot: String, _ threads: i
         }
     }
 
-    // Recurse into subdirectories
-    guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { return }
+    // Level 1: workspace/.threads/
+    collectThreads(from: (ws as NSString).appendingPathComponent(".threads"))
 
-    for entry in entries where !entry.hasPrefix(".") {
-        let subdir = (dir as NSString).appendingPathComponent(entry)
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: subdir, isDirectory: &isDir), isDir.boolValue else { continue }
+    // Level 2: workspace/*/.threads/ (categories)
+    if let categories = try? fm.contentsOfDirectory(atPath: ws) {
+        for cat in categories where !cat.hasPrefix(".") {
+            let catPath = (ws as NSString).appendingPathComponent(cat)
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: catPath, isDirectory: &isDir), isDir.boolValue {
+                collectThreads(from: (catPath as NSString).appendingPathComponent(".threads"))
 
-        // Stop at nested git repos
-        if subdir != gitRoot && isGitRoot(subdir) { continue }
-
-        findThreadsRecursive(subdir, gitRoot, &threads)
+                // Level 3: workspace/*/*/.threads/ (projects)
+                if let projects = try? fm.contentsOfDirectory(atPath: catPath) {
+                    for proj in projects where !proj.hasPrefix(".") {
+                        let projPath = (catPath as NSString).appendingPathComponent(proj)
+                        if fm.fileExists(atPath: projPath, isDirectory: &isDir), isDir.boolValue {
+                            collectThreads(from: (projPath as NSString).appendingPathComponent(".threads"))
+                        }
+                    }
+                }
+            }
+        }
     }
+
+    return threads.sorted()
 }
 
 // expandGlobPattern expands a path with * wildcards
