@@ -41,9 +41,17 @@ sub infer_scope {
     if ($path eq '.') {
         $abs_path = abs_path(getcwd()) // getcwd();
     } elsif (File::Spec->file_name_is_absolute($path)) {
-        $abs_path = abs_path($path) // $path;
+        $abs_path = abs_path($path);
+        die "Path not found: $path\n" unless defined $abs_path && -d $abs_path;
     } else {
-        $abs_path = abs_path(File::Spec->catdir(getcwd(), $path));
+        my $full_path = File::Spec->catdir(getcwd(), $path);
+        $abs_path = abs_path($full_path);
+        # Try git-root-relative path if PWD-relative doesn't work
+        if (!defined $abs_path || !-d $abs_path) {
+            my $ws_path = File::Spec->catdir($ws, $path);
+            $abs_path = abs_path($ws_path);
+            die "Path not found: $path\n" unless defined $abs_path && -d $abs_path;
+        }
     }
 
     # If path is exactly workspace, return workspace level
