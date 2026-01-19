@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 ITERATIONS=${1:-5}
-WORKSPACE_SIZE=${2:-1000}
+WORKSPACE_SIZE=${2:-10000}
 WORKSPACE="/tmp/threads-benchmark-workspace"
 
 echo "threads Benchmark"

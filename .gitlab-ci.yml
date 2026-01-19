@@ -127,10 +127,10 @@ benchmark:
     - export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
     - cd test/benchmark
     - chmod +x *.sh
-    # Generate workspace with 1000 threads
-    - ./generate-workspace.sh 1000
+    # Generate workspace with 10000 threads
+    - ./generate-workspace.sh 10000
     # Run benchmark with 5 iterations
-    - ./bench.sh 5 1000
+    - ./bench.sh 5 10000
     - echo "=== Benchmark Results ==="
     - cat benchmark-results.csv
   artifacts:
