@@ -111,7 +111,7 @@ benchmark:
     - job: test:bun
       optional: true
   before_script:
-    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc build-essential
+    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc build-essential jq
     # Install Go 1.24
     - curl -fsSL https://go.dev/dl/go1.24.0.linux-amd64.tar.gz | tar -C /usr/local -xzf -
     - export PATH="/usr/local/go/bin:$PATH"
