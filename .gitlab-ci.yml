@@ -69,16 +69,9 @@ benchmark:
       allow_failure: true
 
 # Release - build binaries and create GitLab release on tag push
-release:
+release-build:
   stage: release
   image: golang:1.24
-  before_script:
-    - apt-get update && apt-get install -y wget
-    - wget -qO /tmp/glab.tar.gz https://gitlab.com/gitlab-org/cli/-/releases/v1.52.0/downloads/glab_1.52.0_linux_amd64.tar.gz
-    - tar -xzf /tmp/glab.tar.gz -C /tmp
-    - mv /tmp/bin/glab /usr/local/bin/glab && chmod +x /usr/local/bin/glab
-    # Configure glab to use CI_JOB_TOKEN for git.zib.de
-    - glab auth login --hostname git.zib.de --token "$CI_JOB_TOKEN"
   script:
     - VERSION="${CI_COMMIT_TAG#v}"
     - mkdir -p build
@@ -96,7 +89,39 @@ release:
     # Generate checksums
     - cd build && sha256sum threads-* > checksums.txt && cd ..
     - cat build/checksums.txt
-    # Create release
-    - glab release create "$CI_COMMIT_TAG" --notes "Release $CI_COMMIT_TAG" build/threads-* build/checksums.txt
+  artifacts:
+    paths:
+      - build/
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/
+
+release-publish:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: release-build
+      artifacts: true
+  script:
+    - echo "Creating release for $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: "Release $CI_COMMIT_TAG"
+    assets:
+      links:
+        - name: threads-darwin-arm64
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/build/threads-darwin-arm64?job=release-build"
+          link_type: package
+        - name: threads-darwin-amd64
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/build/threads-darwin-amd64?job=release-build"
+          link_type: package
+        - name: threads-linux-amd64
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/build/threads-linux-amd64?job=release-build"
+          link_type: package
+        - name: threads-linux-arm64
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/build/threads-linux-arm64?job=release-build"
+          link_type: package
+        - name: checksums.txt
+          url: "${CI_PROJECT_URL}/-/jobs/artifacts/${CI_COMMIT_TAG}/raw/build/checksums.txt?job=release-build"
+          link_type: other
   rules:
     - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/
