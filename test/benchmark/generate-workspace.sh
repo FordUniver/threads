@@ -20,12 +20,9 @@ echo "  Output: $OUTPUT_DIR"
 rm -rf "$OUTPUT_DIR"
 mkdir -p "$OUTPUT_DIR/.threads"
 
-# Deterministic pseudo-random based on index
+# Deterministic pseudo-random based on index (inline for speed)
 # Returns 0-99 based on input, deterministic
-pseudo_random() {
-    local n=$1
-    echo $(( (n * 7919 + 104729) % 100 ))
-}
+# Usage: result=$(( (n * 7919 + 104729) % 100 ))
 
 # Structure: 15 categories with varying project counts
 # Some categories are "hot" (many projects/threads), some "cold" (few/none)
@@ -73,30 +70,10 @@ echo " done"
 TOTAL_DIRS=$(find "$OUTPUT_DIR" -type d -name ".threads" | wc -l)
 echo "  Created $TOTAL_DIRS .threads directories"
 
-# Status options with weights (deterministic selection based on index)
-# 0-39: active (40%), 40-59: planning (20%), 60-74: idea (15%)
-# 75-84: blocked (10%), 85-94: paused (10%), 95-99: resolved (5%)
-get_status() {
-    local r=$(pseudo_random $1)
-    if (( r < 40 )); then echo "active"
-    elif (( r < 60 )); then echo "planning"
-    elif (( r < 75 )); then echo "idea"
-    elif (( r < 85 )); then echo "blocked"
-    elif (( r < 95 )); then echo "paused"
-    else echo "resolved"
-    fi
-}
-
-# Size category based on index (deterministic)
-# 0-59: small (60%), 60-84: medium (25%), 85-94: large (10%), 95-99: huge (5%)
-get_size_category() {
-    local r=$(pseudo_random $(($1 * 3 + 17)))
-    if (( r < 60 )); then echo "small"
-    elif (( r < 85 )); then echo "medium"
-    elif (( r < 95 )); then echo "large"
-    else echo "huge"
-    fi
-}
+# Status and size are computed inline in generate_thread for speed
+# Status weights: 0-39: active (40%), 40-59: planning (20%), 60-74: idea (15%)
+#                 75-84: blocked (10%), 85-94: paused (10%), 95-99: resolved (5%)
+# Size weights: 0-59: small (60%), 60-84: medium (25%), 85-94: large (10%), 95-99: huge (5%)
 
 # Generate repeated content block for large files
 generate_log_entries() {
@@ -119,9 +96,26 @@ generate_thread() {
     local idx="$1"
     local dir="$2"
 
-    local status=$(get_status $idx)
-    local size_cat=$(get_size_category $idx)
-    local hex_id=$(printf '%06x' "$idx")
+    # Inline pseudo-random and status/size calculation (avoid subshells)
+    local r=$(( (idx * 7919 + 104729) % 100 ))
+    local status
+    if (( r < 40 )); then status="active"
+    elif (( r < 60 )); then status="planning"
+    elif (( r < 75 )); then status="idea"
+    elif (( r < 85 )); then status="blocked"
+    elif (( r < 95 )); then status="paused"
+    else status="resolved"
+    fi
+
+    local r2=$(( ((idx * 3 + 17) * 7919 + 104729) % 100 ))
+    local size_cat
+    if (( r2 < 60 )); then size_cat="small"
+    elif (( r2 < 85 )); then size_cat="medium"
+    elif (( r2 < 95 )); then size_cat="large"
+    else size_cat="huge"
+    fi
+
+    printf -v hex_id '%06x' "$idx"
     local slug="benchmark-thread-$idx"
     local filepath="$dir/${hex_id}-${slug}.md"
 
@@ -383,8 +377,8 @@ total_weight=0
 for i in "${!THREAD_DIRS[@]}"; do
     dir="${THREAD_DIRS[$i]}"
     depth=$(echo "$dir" | tr -cd '/' | wc -c)
-    # Base weight increases with depth, plus deterministic variation
-    variation=$(pseudo_random $((i * 13)))
+    # Base weight increases with depth, plus deterministic variation (inline)
+    variation=$(( ((i * 13) * 7919 + 104729) % 100 ))
     weight=$((depth * 10 + variation / 10))
     # Some directories get extra weight (hot spots)
     if (( i % 17 == 0 )); then
@@ -417,8 +411,8 @@ for i in "${!THREAD_DIRS[@]}"; do
             break 2
         fi
         generate_thread $thread_idx "$dir"
-        ((thread_idx++))
-        ((threads_generated++))
+        ((++thread_idx))
+        ((++threads_generated))
 
         # Progress indicator every 1000 threads
         if (( threads_generated % 1000 == 0 )); then
@@ -432,8 +426,8 @@ remaining=$((NUM_THREADS - threads_generated))
 if (( remaining > 0 )); then
     for j in $(seq 1 $remaining); do
         generate_thread $thread_idx "$OUTPUT_DIR/.threads"
-        ((thread_idx++))
-        ((threads_generated++))
+        ((++thread_idx))
+        ((++threads_generated))
     done
 fi
 echo " done"
