@@ -565,6 +565,10 @@ module Threads
             rel_path = t.sub("#{ws}/", '')
             files << t if Git.has_changes?(ws, rel_path)
           end
+
+          # Also include deleted thread files
+          deleted = Git.find_deleted_thread_files(ws)
+          files.concat(deleted)
         else
           raise ArgumentError, 'provide thread IDs or use --pending' if ids.empty?
 

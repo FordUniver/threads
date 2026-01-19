@@ -35,20 +35,45 @@ module Threads
         status.success?
       end
 
-      # Stage files
+      # Stage files (skip non-existent for deletions)
       def add(ws, *files)
-        output, status = Open3.capture2e('git', '-C', ws, 'add', *files)
+        existing = files.select { |f| File.exist?(File.join(ws, f)) }
+        return if existing.empty?
+
+        output, status = Open3.capture2e('git', '-C', ws, 'add', *existing)
         raise GitError, "git add failed: #{output}" unless status.success?
       end
 
-      # Create commit
+      # Create commit with specified files only
       def commit(ws, files, message)
-        # Stage files
+        # Stage existing files
         add(ws, *files)
 
-        # Commit
-        output, status = Open3.capture2e('git', '-C', ws, 'commit', '-m', message, *files)
+        # Commit only the specified files (including deletions)
+        output, status = Open3.capture2e('git', '-C', ws, 'commit', '-m', message, '--', *files)
         raise GitError, "git commit failed: #{output}" unless status.success?
+      end
+
+      # Find deleted thread files from git status
+      def find_deleted_thread_files(ws)
+        output, status = Open3.capture2('git', '-C', ws, 'status', '--porcelain')
+        return [] unless status.success?
+
+        deleted = []
+        output.each_line do |line|
+          next if line.length < 4
+
+          index_status = line[0]
+          worktree_status = line[1]
+          file_path = line[3..-1]&.chomp
+
+          # D in either position means deleted
+          if (index_status == 'D' || worktree_status == 'D') && file_path&.match?(%r{\.threads/.*\.md$})
+            deleted << File.join(ws, file_path)
+          end
+        end
+
+        deleted
       end
 
       # Pull with rebase and push

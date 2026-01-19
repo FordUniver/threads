@@ -38,6 +38,10 @@ struct CommitCmd: ParsableCommand {
                     files.append(t)
                 }
             }
+
+            // Also include deleted thread files
+            let deleted = findDeletedThreadFiles(ws)
+            files.append(contentsOf: deleted)
         } else {
             // Resolve provided IDs to files
             if ids.isEmpty {

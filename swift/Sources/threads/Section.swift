@@ -1,5 +1,11 @@
 import Foundation
 
+// Escape $ characters in replacement strings for NSRegularExpression
+// ($ is a backreference in replacement patterns, $$ is literal $)
+func escapeForReplacement(_ text: String) -> String {
+    return text.replacingOccurrences(of: "$", with: "$$")
+}
+
 // extractSection returns the content of a section (between ## Name and next ## or EOF)
 func extractSection(_ content: String, _ name: String) -> String {
     let pattern = "(?ms)^## \(NSRegularExpression.escapedPattern(for: name))\n(.+?)(?:^## |\\z)"
@@ -23,7 +29,7 @@ func replaceSection(_ content: String, _ name: String, _ newContent: String) -> 
     return regex.stringByReplacingMatches(
         in: content,
         range: NSRange(content.startIndex..., in: content),
-        withTemplate: "$1\n\(newContent)\n\n$3"
+        withTemplate: "$1\n\(escapeForReplacement(newContent))\n\n$3"
     )
 }
 
@@ -94,7 +100,7 @@ func insertLogEntry(_ content: String, _ entry: String) -> String {
             return insertRegex.stringByReplacingMatches(
                 in: content,
                 range: NSRange(content.startIndex..., in: content),
-                withTemplate: "$1\n\(bulletEntry)\n"
+                withTemplate: "$1\n\(escapeForReplacement(bulletEntry))\n"
             )
         }
     }
@@ -105,7 +111,7 @@ func insertLogEntry(_ content: String, _ entry: String) -> String {
         return CachedRegex.logSection.stringByReplacingMatches(
             in: content,
             range: NSRange(content.startIndex..., in: content),
-            withTemplate: "## Log\n\n\(heading)\n\n\(bulletEntry)"
+            withTemplate: "## Log\n\n\(heading)\n\n\(escapeForReplacement(bulletEntry))"
         )
     }
 
@@ -127,7 +133,7 @@ func addNote(_ content: String, _ text: String) -> (String, String) {
         newContent = regex.stringByReplacingMatches(
             in: newContent,
             range: NSRange(newContent.startIndex..., in: newContent),
-            withTemplate: "$1\n\(noteEntry)\n"
+            withTemplate: "$1\n\(escapeForReplacement(noteEntry))\n"
         )
     }
 
@@ -210,7 +216,7 @@ func addTodoItem(_ content: String, _ text: String) -> (String, String) {
         let newContent = regex.stringByReplacingMatches(
             in: content,
             range: NSRange(content.startIndex..., in: content),
-            withTemplate: "$1\n\(todoEntry)\n"
+            withTemplate: "$1\n\(escapeForReplacement(todoEntry))\n"
         )
         return (newContent, hash)
     }

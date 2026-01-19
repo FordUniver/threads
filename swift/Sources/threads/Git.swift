@@ -100,11 +100,18 @@ func gitExistsInHEAD(_ ws: String, _ relPath: String) -> Bool {
     }
 }
 
-// gitAdd stages a file
+// gitAdd stages files (skips non-existent for deletions)
 func gitAdd(_ ws: String, _ files: [String]) throws {
+    // Filter to only existing files (deleted files can't be staged with add)
+    let existingFiles = files.filter { file in
+        let fullPath = file.hasPrefix("/") ? file : "\(ws)/\(file)"
+        return FileManager.default.fileExists(atPath: fullPath)
+    }
+    guard !existingFiles.isEmpty else { return }
+
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    process.arguments = ["-C", ws, "add"] + files
+    process.arguments = ["-C", ws, "add"] + existingFiles
 
     let pipe = Pipe()
     process.standardOutput = pipe
@@ -120,15 +127,15 @@ func gitAdd(_ ws: String, _ files: [String]) throws {
     }
 }
 
-// gitCommit creates a commit with the given message
+// gitCommit creates a commit with the given message (only commits specified files)
 func gitCommit(_ ws: String, _ files: [String], _ message: String) throws {
     // Stage files
     try gitAdd(ws, files)
 
-    // Commit
+    // Commit only the specified files (-- ensures file paths aren't misinterpreted)
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-    process.arguments = ["-C", ws, "commit", "-m", message] + files
+    process.arguments = ["-C", ws, "commit", "-m", message, "--"] + files
 
     let pipe = Pipe()
     process.standardOutput = pipe
@@ -184,6 +191,49 @@ func gitPush(_ ws: String) throws {
         let output = String(data: data, encoding: .utf8) ?? ""
         throw GitError.pushFailed(output)
     }
+}
+
+// findDeletedThreadFiles returns paths to deleted thread files from git status
+func findDeletedThreadFiles(_ ws: String) -> [String] {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", ws, "status", "--porcelain"]
+
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = FileHandle.nullDevice
+
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return []
+    }
+
+    guard process.terminationStatus == 0 else { return [] }
+
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    guard let output = String(data: data, encoding: .utf8) else {
+        return []
+    }
+
+    var deleted: [String] = []
+    for line in output.split(separator: "\n", omittingEmptySubsequences: true) {
+        guard line.count >= 4 else { continue }
+
+        let indexStatus = line[line.startIndex]
+        let worktreeStatus = line[line.index(line.startIndex, offsetBy: 1)]
+        let idx = line.index(line.startIndex, offsetBy: 3)
+        let filePath = String(line[idx...])
+
+        // D in either position means deleted
+        if (indexStatus == "D" || worktreeStatus == "D") &&
+           filePath.contains(".threads/") && filePath.hasSuffix(".md") {
+            deleted.append("\(ws)/\(filePath)")
+        }
+    }
+
+    return deleted
 }
 
 // gitAutoCommit stages and commits a file (push is opt-in, not automatic)

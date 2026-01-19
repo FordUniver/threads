@@ -43,6 +43,10 @@ pub fn run(args: CommitArgs, ws: &Path) -> Result<(), String> {
                 files.push(t.to_string_lossy().to_string());
             }
         }
+
+        // Also include deleted thread files
+        let deleted = git::find_deleted_thread_files(ws);
+        files.extend(deleted);
     } else {
         // Resolve provided IDs to files
         if args.ids.is_empty() {

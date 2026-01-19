@@ -56,8 +56,9 @@ sub set_section {
 
     if (has_section($content, $section)) {
         # Replace existing section content (header + content until next section or EOF)
+        # Use callback to avoid $ interpolation in replacement text
         my $re = _section_replace_re($section);
-        $content =~ s/$re/$1$new_text/;
+        $content =~ s/$re/$1 . $new_text/e;
     } else {
         # Append new section at end
         $content =~ s/\n*$/\n/;  # Ensure single trailing newline

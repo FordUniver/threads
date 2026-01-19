@@ -30,7 +30,23 @@ module Threads
       @ws = nil
     end
 
+    # Convert -x=value to -x value for short options (OptionParser doesn't handle -x=value)
+    def normalize_args(args)
+      result = []
+      args.each do |arg|
+        if arg =~ /^-([a-zA-Z])=(.+)$/
+          # Short option with equals: -d=1 -> -d 1
+          result << "-#{$1}"
+          result << $2
+        else
+          result << arg
+        end
+      end
+      result
+    end
+
     def run(args)
+      args = normalize_args(args)
       # Handle --help and -h at top level
       if args.empty? || args.include?('--help') || args.include?('-h')
         if args.length <= 1 || args[0] == '--help' || args[0] == '-h'

@@ -44,11 +44,22 @@ pub fn exists_in_head(ws: &Path, rel_path: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Stage files
+/// Stage files (skips non-existent for deletions)
 pub fn add(ws: &Path, files: &[&str]) -> Result<(), String> {
+    // Filter to only existing files (deleted files can't be staged with add)
+    let existing: Vec<&str> = files
+        .iter()
+        .filter(|f| ws.join(f).exists())
+        .copied()
+        .collect();
+
+    if existing.is_empty() {
+        return Ok(());
+    }
+
     let ws_str = ws.to_string_lossy();
     let mut args = vec!["-C", &ws_str, "add"];
-    args.extend(files);
+    args.extend(&existing);
 
     let output = Command::new("git")
         .args(&args)
@@ -65,15 +76,15 @@ pub fn add(ws: &Path, files: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-/// Create a commit
+/// Create a commit (only commits specified files)
 pub fn commit(ws: &Path, files: &[String], message: &str) -> Result<(), String> {
     // Stage files
     let file_refs: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     add(ws, &file_refs)?;
 
-    // Commit
+    // Commit only the specified files (-- ensures file paths aren't misinterpreted)
     let ws_str = ws.to_string_lossy();
-    let mut args = vec!["-C".to_string(), ws_str.to_string(), "commit".to_string(), "-m".to_string(), message.to_string()];
+    let mut args = vec!["-C".to_string(), ws_str.to_string(), "commit".to_string(), "-m".to_string(), message.to_string(), "--".to_string()];
     for f in files {
         args.push(f.clone());
     }
@@ -182,4 +193,39 @@ fn extract_id(name: &str) -> String {
 
 fn is_hex(s: &str) -> bool {
     s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase())
+}
+
+/// Find deleted thread files from git status
+pub fn find_deleted_thread_files(ws: &Path) -> Vec<String> {
+    let output = Command::new("git")
+        .args(["-C", &ws.to_string_lossy(), "status", "--porcelain"])
+        .output();
+
+    let output = match output {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut deleted = Vec::new();
+
+    for line in stdout.lines() {
+        if line.len() < 4 {
+            continue;
+        }
+
+        let index_status = line.chars().next().unwrap_or(' ');
+        let worktree_status = line.chars().nth(1).unwrap_or(' ');
+        let file_path = &line[3..];
+
+        // D in either position means deleted
+        if (index_status == 'D' || worktree_status == 'D')
+            && file_path.contains(".threads/")
+            && file_path.ends_with(".md")
+        {
+            deleted.push(ws.join(file_path).to_string_lossy().to_string());
+        }
+    }
+
+    deleted
 }

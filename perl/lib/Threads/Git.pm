@@ -60,14 +60,17 @@ sub git_commit {
     my ($files, $message) = @_;
     my $ws = workspace_root();
 
-    # Stage files
+    # Build list of relative paths
+    my @rel_files;
     for my $file (@$files) {
         my $rel = File::Spec->abs2rel($file, $ws);
-        _workspace_git('add', $rel);
+        push @rel_files, $rel;
+        # Stage existing files (skip deleted - they'll be committed directly)
+        _workspace_git('add', $rel) if -e $file;
     }
 
-    # Commit
-    my $exit = _workspace_git('commit', '-m', $message);
+    # Commit only the specified files
+    my $exit = _workspace_git('commit', '-m', $message, '--', @rel_files);
     return $exit != 0 ? 1 : 0;
 }
 
@@ -90,17 +93,43 @@ sub git_commit_pending {
         push @thread_files, $rel if $status;
     }
 
+    # Also find deleted thread files from git status
+    my @deleted = _find_deleted_thread_files();
+    push @thread_files, @deleted;
+
     return 0 unless @thread_files;
 
-    # Stage thread files
+    # Stage thread files (existing ones)
     for my $file (@thread_files) {
-        _workspace_git('add', $file);
+        my $full = File::Spec->catfile($ws, $file);
+        _workspace_git('add', $file) if -e $full;
     }
 
-    # Commit
+    # Commit all (including deletions)
     $message //= 'threads: update pending';
-    my $exit = _workspace_git('commit', '-m', $message);
+    my $exit = _workspace_git('commit', '-m', $message, '--', @thread_files);
     return $exit != 0 ? 1 : 0;
+}
+
+# Find deleted thread files from git status
+sub _find_deleted_thread_files {
+    my ($output) = git_capture('status', '--porcelain');
+    my @deleted;
+
+    for my $line (split /\n/, ($output // '')) {
+        next unless length($line) >= 4;
+        my $index_status = substr($line, 0, 1);
+        my $worktree_status = substr($line, 1, 1);
+        my $file_path = substr($line, 3);
+
+        # D in either position means deleted
+        if (($index_status eq 'D' || $worktree_status eq 'D') &&
+            $file_path =~ m{\.threads/.*\.md$}) {
+            push @deleted, $file_path;
+        }
+    }
+
+    return @deleted;
 }
 
 # Get git status for thread files

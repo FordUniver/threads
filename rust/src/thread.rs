@@ -220,6 +220,11 @@ pub fn is_valid_status(status: &str) -> bool {
     ACTIVE_STATUSES.contains(&base.as_str()) || TERMINAL_STATUSES.contains(&base.as_str())
 }
 
+/// Escape $ characters in replacement strings for regex ($ is backreference, $$ is literal $)
+fn escape_for_replacement(text: &str) -> String {
+    text.replace('$', "$$")
+}
+
 /// Generate a 4-character hash for an item
 pub fn generate_hash(text: &str) -> String {
     let now = std::time::SystemTime::now()
@@ -247,7 +252,7 @@ pub fn insert_log_entry(content: &str, entry: &str) -> String {
         // Insert after today's heading
         let re = Regex::new(&format!(r"(?m)(^### {})\n", regex::escape(&today))).unwrap();
         return re
-            .replace(content, format!("$1\n\n{}\n", bullet_entry))
+            .replace(content, format!("$1\n\n{}\n", escape_for_replacement(&bullet_entry)))
             .to_string();
     }
 
@@ -255,7 +260,7 @@ pub fn insert_log_entry(content: &str, entry: &str) -> String {
     if LOG_SECTION_RE.is_match(content) {
         // Insert new heading after ## Log
         return LOG_SECTION_RE
-            .replace(content, format!("## Log\n\n{}\n\n{}", heading, bullet_entry))
+            .replace(content, format!("## Log\n\n{}\n\n{}", heading, escape_for_replacement(&bullet_entry)))
             .to_string();
     }
 
@@ -293,7 +298,7 @@ pub fn replace_section(content: &str, name: &str, new_content: &str) -> String {
         return content.to_string();
     }
 
-    re.replace(content, format!("$1\n\n{}\n\n$3", new_content))
+    re.replace(content, format!("$1\n\n{}\n\n$3", escape_for_replacement(new_content)))
         .to_string()
 }
 
@@ -331,7 +336,7 @@ pub fn add_note(content: &str, text: &str) -> (String, String) {
 
     // Insert at top of Notes section
     let new_content = NOTES_SECTION_RE
-        .replace(&content, format!("$1\n\n{}\n", note_entry))
+        .replace(&content, format!("$1\n\n{}\n", escape_for_replacement(&note_entry)))
         .to_string();
 
     (new_content, hash)
@@ -344,7 +349,7 @@ pub fn add_todo_item(content: &str, text: &str) -> (String, String) {
 
     // Insert at top of Todo section
     let new_content = TODO_SECTION_RE
-        .replace(content, format!("$1\n\n{}\n", todo_entry))
+        .replace(content, format!("$1\n\n{}\n", escape_for_replacement(&todo_entry)))
         .to_string();
 
     (new_content, hash)
