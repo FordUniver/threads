@@ -120,7 +120,8 @@ REFERENCE_PATH="${IMPL_PATHS[$REFERENCE_IMPL]}"
 
 # Get reference output (thread IDs only, sorted)
 # Run from workspace dir so Go can find git root, and set WORKSPACE for other impls
-(cd "$WORKSPACE" && WORKSPACE="$WORKSPACE" "$REFERENCE_PATH" list -r --json 2>/dev/null) | jq -r '.threads[]?.id // empty' | sort > "$VALIDATION_DIR/reference.txt"
+# jq handles both {"threads":[...]} (Go) and [...] (Swift/Ruby) formats
+(cd "$WORKSPACE" && WORKSPACE="$WORKSPACE" "$REFERENCE_PATH" list -r --json 2>/dev/null) | jq -r '(if type == "array" then . else .threads // [] end)[] | .id' | sort > "$VALIDATION_DIR/reference.txt"
 REFERENCE_COUNT=$(wc -l < "$VALIDATION_DIR/reference.txt" | tr -d ' ')
 echo "  Reference ($REFERENCE_IMPL): $REFERENCE_COUNT threads"
 
@@ -130,7 +131,7 @@ for impl in "${IMPLS[@]}"; do
         continue
     fi
     impl_path="${IMPL_PATHS[$impl]}"
-    (cd "$WORKSPACE" && WORKSPACE="$WORKSPACE" "$impl_path" list -r --json 2>/dev/null) | jq -r '.threads[]?.id // empty' | sort > "$VALIDATION_DIR/${impl}.txt"
+    (cd "$WORKSPACE" && WORKSPACE="$WORKSPACE" "$impl_path" list -r --json 2>/dev/null) | jq -r '(if type == "array" then . else .threads // [] end)[] | .id' | sort > "$VALIDATION_DIR/${impl}.txt"
     impl_count=$(wc -l < "$VALIDATION_DIR/${impl}.txt" | tr -d ' ')
 
     if ! diff -q "$VALIDATION_DIR/reference.txt" "$VALIDATION_DIR/${impl}.txt" >/dev/null 2>&1; then
