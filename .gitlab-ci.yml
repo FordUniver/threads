@@ -111,17 +111,20 @@ benchmark:
     - job: test:bun
       optional: true
   before_script:
-    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc golang-go
+    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc
+    # Install Go 1.24
+    - curl -fsSL https://go.dev/dl/go1.24.0.linux-amd64.tar.gz | tar -C /usr/local -xzf -
+    - export PATH="/usr/local/go/bin:$PATH"
     # Install Rust
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && export PATH="$HOME/.cargo/bin:$PATH"
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     # Install uv (for Python)
-    - curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
+    - curl -LsSf https://astral.sh/uv/install.sh | sh
     # Install bun
     - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
     # Install Perl YAML::Tiny
     - cpan -T YAML::Tiny 2>/dev/null || true
   script:
-    - export PATH="$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
+    - export PATH="/usr/local/go/bin:$HOME/.cargo/bin:$HOME/.local/bin:$PATH"
     - cd test/benchmark
     - chmod +x *.sh
     # Generate workspace with 1000 threads
