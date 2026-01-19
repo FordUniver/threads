@@ -24,6 +24,7 @@ echo
 
 # Setup test workspace
 WORKSPACE=$(mktemp -d "${TMPDIR:-/tmp}/threads-parity.XXXXXX")
+export WORKSPACE  # Required by Swift, Ruby, Bun implementations
 trap "rm -rf '$WORKSPACE'" EXIT
 
 mkdir -p "$WORKSPACE/.threads"
@@ -100,20 +101,18 @@ if [[ -f "$ROOT_DIR/swift/Package.swift" ]] && command -v swift &>/dev/null; the
     fi
 fi
 
-# Python (use test-threads wrapper if available, else direct module call)
-if [[ -f "$ROOT_DIR/python/test-threads" ]]; then
-    IMPLS+=(python)
-    IMPL_CMDS[python]="$ROOT_DIR/python/test-threads"
-elif [[ -f "$ROOT_DIR/python/pyproject.toml" ]] && command -v uv &>/dev/null; then
-    # Create wrapper if it doesn't exist
-    cat > "$ROOT_DIR/python/test-threads" << 'PYWRAP'
-#!/usr/bin/env bash
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export PYTHONPATH="$SCRIPT_DIR/src:${PYTHONPATH:-}"
-exec "$SCRIPT_DIR/.venv/bin/python" -m threads "$@"
-PYWRAP
-    chmod +x "$ROOT_DIR/python/test-threads"
-    (cd "$ROOT_DIR/python" && uv sync --quiet 2>/dev/null)
+# Python (use uv run for CI compatibility)
+if [[ -f "$ROOT_DIR/python/pyproject.toml" ]] && command -v uv &>/dev/null; then
+    echo "Setting up Python (uv sync)..."
+    if (cd "$ROOT_DIR/python" && uv sync --quiet 2>&1); then
+        IMPLS+=(python)
+        # Use uv run which handles venv automatically
+        IMPL_CMDS[python]="uv run --project $ROOT_DIR/python python -m threads"
+    else
+        echo "  Warning: uv sync failed for Python"
+    fi
+elif [[ -f "$ROOT_DIR/python/test-threads" ]] && [[ -f "$ROOT_DIR/python/.venv/bin/python" ]]; then
+    # Fallback to existing wrapper if venv exists
     IMPLS+=(python)
     IMPL_CMDS[python]="$ROOT_DIR/python/test-threads"
 fi
