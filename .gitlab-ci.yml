@@ -108,14 +108,15 @@ benchmark:
     - job: test:bun
       optional: true
   before_script:
-    - apt-get update && apt-get install -y python3 python3-pip perl ruby curl unzip bc
-    # Install uv (for Python)
-    - pip3 install uv
+    - apt-get update && apt-get install -y python3 perl ruby curl unzip bc
+    # Install uv (for Python) via official installer
+    - curl -LsSf https://astral.sh/uv/install.sh | sh && export PATH="$HOME/.local/bin:$PATH"
     # Install bun
     - curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash
     # Install Perl YAML::Tiny
     - cpan -T YAML::Tiny 2>/dev/null || true
   script:
+    - export PATH="$HOME/.local/bin:$PATH"
     - cd test/benchmark
     - chmod +x *.sh
     # Generate workspace with 1000 threads
