@@ -5,6 +5,10 @@ require 'pathname'
 require 'securerandom'
 
 module Threads
+  # Pre-compiled regexes for ID/name extraction (avoid recompilation per call)
+  ID_PREFIX_RE = /^([0-9a-f]{6})-/.freeze
+  NAME_EXTRACT_RE = /^[0-9a-f]{6}-(.+)$/.freeze
+  ID_ONLY_RE = /^[0-9a-f]{6}$/.freeze
   # Options for finding threads with direction and boundary controls
   class FindOptions
     attr_accessor :down, :up
@@ -73,26 +77,43 @@ module Threads
         ws
       end
 
-      # Find all thread files in workspace
+      # Find all thread files in workspace (recursive traversal)
       def find_all_threads(ws)
-        patterns = [
-          File.join(ws, '.threads', '*.md'),
-          File.join(ws, '*', '.threads', '*.md'),
-          File.join(ws, '*', '*', '.threads', '*.md')
-        ]
-
         threads = []
-        patterns.each do |pattern|
-          Dir.glob(pattern).each do |path|
-            # Skip archive directories
-            next if path.include?('/archive/')
+        find_threads_recursive(ws, ws, threads)
+        threads.sort
+      end
 
-            threads << path
+      private
+
+      # Recursively find threads, stopping at nested git repos
+      def find_threads_recursive(dir, git_root, threads)
+        # Collect from .threads at this level
+        threads_dir = File.join(dir, '.threads')
+        if File.directory?(threads_dir)
+          Dir.glob(File.join(threads_dir, '*.md')).each do |path|
+            threads << path unless path.include?('/archive/')
           end
         end
 
-        threads.sort
+        # Recurse into subdirectories
+        begin
+          Dir.entries(dir).each do |name|
+            next if name.start_with?('.')
+            subdir = File.join(dir, name)
+            next unless File.directory?(subdir)
+
+            # Stop at nested git repos
+            next if subdir != git_root && git_root?(subdir)
+
+            find_threads_recursive(subdir, git_root, threads)
+          end
+        rescue Errno::EACCES, Errno::ENOENT
+          # Skip unreadable directories
+        end
       end
+
+      public
 
       # Check if a directory is a git root (contains .git)
       def git_root?(path)
@@ -236,14 +257,14 @@ module Threads
       # Extract 6-char hex ID from filename
       def extract_id_from_path(path)
         filename = File.basename(path, '.md')
-        match = filename.match(/^([0-9a-f]{6})-/)
+        match = filename.match(ID_PREFIX_RE)
         match ? match[1] : nil
       end
 
       # Extract name from filename (after ID prefix)
       def extract_name_from_path(path)
         filename = File.basename(path, '.md')
-        match = filename.match(/^[0-9a-f]{6}-(.+)$/)
+        match = filename.match(NAME_EXTRACT_RE)
         match ? match[1] : filename
       end
 
@@ -370,7 +391,7 @@ module Threads
         threads = find_all_threads(ws)
 
         # Fast path: exact 6-char hex ID
-        if ref.match?(/^[0-9a-f]{6}$/)
+        if ref.match?(ID_ONLY_RE)
           threads.each do |t|
             return t if extract_id_from_path(t) == ref
           end

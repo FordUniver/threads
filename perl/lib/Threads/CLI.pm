@@ -144,10 +144,10 @@ sub cmd_list {
     # Are we doing any direction search?
     my $is_searching = defined($down_depth) || defined($up_depth);
 
-    # Load threads and filter
+    # Load threads and filter (use lazy loading - only needs metadata)
     my @threads;
     for my $file (@files) {
-        my $t = eval { Threads::Thread->new_from_file($file) };
+        my $t = eval { Threads::Thread->new_from_file_lazy($file) };
         next unless $t;
 
         # Extract category/project from path
@@ -310,7 +310,7 @@ sub cmd_stats {
 
     my %counts;
     for my $file (@files) {
-        my $t = eval { Threads::Thread->new_from_file($file) };
+        my $t = eval { Threads::Thread->new_from_file_lazy($file) };
         next unless $t;
         $counts{$t->base_status}++;
     }
@@ -358,6 +358,7 @@ sub cmd_validate {
         $rel_path =~ s{^\Q$ws\E/}{};
         my @issues;
 
+        # validate uses full YAML parsing to catch parse errors
         my $t = eval { Threads::Thread->new_from_file($file) };
         unless ($t) {
             push @issues, "parse error";

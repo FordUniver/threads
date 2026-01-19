@@ -79,12 +79,10 @@ func isContained(_ path: String, in workspace: String) -> Bool {
     let resolvedPath = (path as NSString).standardizingPath
     let resolvedWs = (workspace as NSString).standardizingPath
 
-    // Get path components and compare
-    let pathComponents = URL(fileURLWithPath: resolvedPath).standardized.pathComponents
-    let wsComponents = URL(fileURLWithPath: resolvedWs).standardized.pathComponents
-
-    guard pathComponents.count >= wsComponents.count else { return false }
-    return Array(pathComponents.prefix(wsComponents.count)) == wsComponents
+    // Simple string prefix check (standardizingPath handles ".." traversal)
+    // Ensure container ends with "/" for proper prefix matching
+    let prefix = resolvedWs.hasSuffix("/") ? resolvedWs : resolvedWs + "/"
+    return resolvedPath.hasPrefix(prefix) || resolvedPath == resolvedWs
 }
 
 /// Compute relative path from a workspace to a contained path using secure path containment.

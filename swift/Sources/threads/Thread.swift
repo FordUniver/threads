@@ -1,6 +1,11 @@
 import Foundation
 import Yams
 
+// Cached YAML decoder to avoid allocation per file
+private enum ThreadParser {
+    static let yamlDecoder = YAMLDecoder()
+}
+
 // Status constants
 let terminalStatuses = ["resolved", "superseded", "deferred", "rejected"]
 let activeStatuses = ["idea", "planning", "active", "blocked", "paused"]
@@ -86,10 +91,9 @@ class Thread {
         let yamlContent = String(content[searchStart..<endRange.lowerBound])
         bodyStart = content.distance(from: content.startIndex, to: endRange.upperBound) + 1 // skip past \n---\n
 
-        // Parse YAML - use FrontmatterRaw to handle optional fields
-        let decoder = YAMLDecoder()
+        // Parse YAML - use cached decoder and FrontmatterRaw to handle optional fields
         do {
-            let raw = try decoder.decode(FrontmatterRaw.self, from: yamlContent)
+            let raw = try ThreadParser.yamlDecoder.decode(FrontmatterRaw.self, from: yamlContent)
             frontmatter = Frontmatter(from: raw)
         } catch {
             throw ThreadError.yamlParseError(error.localizedDescription)

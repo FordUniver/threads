@@ -43,7 +43,7 @@ sub _todo_remove_re {
 # Precompiled patterns for log date handling
 our $LOG_DATE_RE = qr/^### (\d{4}-\d{2}-\d{2})$/m;
 
-# Create new thread object from file
+# Create new thread object from file (full YAML parse)
 sub new_from_file {
     my ($class, $path) = @_;
 
@@ -63,6 +63,48 @@ sub new_from_file {
         desc   => $meta->{desc} // '',
         status => $meta->{status},
         _body  => $body,
+    }, $class;
+}
+
+# Create thread object with lazy frontmatter extraction (fast path for listing)
+# Only reads frontmatter fields via regex, skips full YAML parse
+sub new_from_file_lazy {
+    my ($class, $path) = @_;
+
+    open my $fh, '<:encoding(UTF-8)', $path
+        or die "Cannot read thread file: $path: $!\n";
+
+    # Read only the frontmatter section
+    my $header = '';
+    my $in_fm = 0;
+    while (<$fh>) {
+        if (/^---\s*$/) {
+            if ($in_fm) {
+                last;  # closing delimiter
+            }
+            $in_fm = 1;
+            next;
+        }
+        $header .= $_ if $in_fm;
+    }
+    close $fh;
+
+    die "Invalid thread file (no frontmatter): $path\n" unless $header;
+
+    # Extract fields via regex (no YAML parse)
+    my %meta;
+    $meta{id}     = $1 if $header =~ /^id:\s*(\S+)/m;
+    $meta{name}   = $1 if $header =~ /^name:\s*["']?(.+?)["']?\s*$/m;
+    $meta{desc}   = $1 if $header =~ /^desc:\s*["']?(.+?)["']?\s*$/m;
+    $meta{status} = $1 if $header =~ /^status:\s*(\S.*?)\s*$/m;
+
+    return bless {
+        path   => $path,
+        id     => $meta{id},
+        name   => $meta{name},
+        desc   => $meta{desc} // '',
+        status => $meta{status},
+        _lazy  => 1,  # marker for lazy-loaded (no body available)
     }, $class;
 }
 
