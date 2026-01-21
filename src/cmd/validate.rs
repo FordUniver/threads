@@ -71,7 +71,10 @@ pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
                 if t.status().is_empty() {
                     issues.push("missing status field".to_string());
                 } else if !thread::is_valid_status(t.status()) {
-                    issues.push(format!("invalid status '{}'", thread::base_status(t.status())));
+                    issues.push(format!(
+                        "invalid status '{}'",
+                        thread::base_status(t.status())
+                    ));
                 }
             }
             Err(e) => {

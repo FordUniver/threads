@@ -16,8 +16,7 @@ pub struct ReadArgs {
 pub fn run(args: ReadArgs, ws: &Path) -> Result<(), String> {
     let file = workspace::find_by_ref(ws, &args.id)?;
 
-    let content = fs::read_to_string(&file)
-        .map_err(|e| format!("reading file: {}", e))?;
+    let content = fs::read_to_string(&file).map_err(|e| format!("reading file: {}", e))?;
 
     print!("{}", content);
     Ok(())

@@ -169,10 +169,8 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
         let name = thread::extract_name_from_path(&thread_path);
 
         // Path filter: if not searching, only show threads at the specified level
-        if !search_dir.is_searching() {
-            if rel_path != filter_path {
-                continue;
-            }
+        if !search_dir.is_searching() && rel_path != filter_path {
+            continue;
         }
         // Note: find_threads_with_options already handles direction/depth filtering
 
@@ -271,7 +269,11 @@ fn output_fancy(
         format!(" ({})", filter_path)
     };
 
-    let pwd_marker = if filter_path == pwd_rel { " ← PWD" } else { "" };
+    let pwd_marker = if filter_path == pwd_rel {
+        " ← PWD"
+    } else {
+        ""
+    };
 
     println!("{}{}{}", repo_name, path_desc, pwd_marker);
     println!();
@@ -302,14 +304,8 @@ fn output_fancy(
     }
 
     // Print table header
-    println!(
-        "{:<6} {:<10} {:<24} {}",
-        "ID", "STATUS", "PATH", "NAME"
-    );
-    println!(
-        "{:<6} {:<10} {:<24} {}",
-        "--", "------", "----", "----"
-    );
+    println!("{:<6} {:<10} {:<24} NAME", "ID", "STATUS", "PATH");
+    println!("{:<6} {:<10} {:<24} ----", "--", "------", "----");
 
     for t in results {
         let path_display = truncate(&t.path, 22);
@@ -392,14 +388,8 @@ fn output_plain(
     }
 
     // Print table header
-    println!(
-        "{:<6} {:<10} {:<24} {}",
-        "ID", "STATUS", "PATH", "NAME"
-    );
-    println!(
-        "{:<6} {:<10} {:<24} {}",
-        "--", "------", "----", "----"
-    );
+    println!("{:<6} {:<10} {:<24} NAME", "ID", "STATUS", "PATH");
+    println!("{:<6} {:<10} {:<24} ----", "--", "------", "----");
 
     for t in results {
         let path_display = truncate(&t.path, 22);
@@ -413,11 +403,7 @@ fn output_plain(
     Ok(())
 }
 
-fn output_json(
-    results: &[ThreadInfo],
-    git_root: &Path,
-    pwd_rel: &str,
-) -> Result<(), String> {
+fn output_json(results: &[ThreadInfo], git_root: &Path, pwd_rel: &str) -> Result<(), String> {
     let pwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| String::new());
@@ -437,17 +423,13 @@ fn output_json(
         threads: results,
     };
 
-    let json =
-        serde_json::to_string_pretty(&output).map_err(|e| format!("JSON serialization failed: {}", e))?;
+    let json = serde_json::to_string_pretty(&output)
+        .map_err(|e| format!("JSON serialization failed: {}", e))?;
     println!("{}", json);
     Ok(())
 }
 
-fn output_yaml(
-    results: &[ThreadInfo],
-    git_root: &Path,
-    pwd_rel: &str,
-) -> Result<(), String> {
+fn output_yaml(results: &[ThreadInfo], git_root: &Path, pwd_rel: &str) -> Result<(), String> {
     let pwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| String::new());

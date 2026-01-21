@@ -41,7 +41,12 @@ pub fn run(args: StatusArgs, ws: &Path) -> Result<(), String> {
     t.set_frontmatter_field("status", &args.new_status)?;
     t.write()?;
 
-    println!("Status changed: {} → {} ({})", old_status, args.new_status, file.display());
+    println!(
+        "Status changed: {} → {} ({})",
+        old_status,
+        args.new_status,
+        file.display()
+    );
 
     if args.commit {
         let msg = args.m.unwrap_or_else(|| {

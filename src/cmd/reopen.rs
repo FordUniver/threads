@@ -48,7 +48,12 @@ pub fn run(args: ReopenArgs, ws: &Path) -> Result<(), String> {
 
     t.write()?;
 
-    println!("Reopened: {} → {} ({})", old_status, args.status, file.display());
+    println!(
+        "Reopened: {} → {} ({})",
+        old_status,
+        args.status,
+        file.display()
+    );
 
     if args.commit {
         let msg = args.m.unwrap_or_else(|| {

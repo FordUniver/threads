@@ -29,8 +29,3 @@ impl OutputFormat {
         }
     }
 }
-
-/// Check if stdout is a terminal.
-pub fn is_tty() -> bool {
-    std::io::stdout().is_terminal()
-}

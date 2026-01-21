@@ -8,25 +8,18 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 // Cached regexes for hot paths
-static ID_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^([0-9a-f]{6})-").unwrap()
-});
+static ID_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9a-f]{6})-").unwrap());
 
-static HASH_COMMENT_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"<!--\s*([a-f0-9]{4})\s*-->").unwrap()
-});
+static HASH_COMMENT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<!--\s*([a-f0-9]{4})\s*-->").unwrap());
 
-static LOG_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)^## Log").unwrap()
-});
+static LOG_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^## Log").unwrap());
 
-static NOTES_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)(^## Notes)\n").unwrap()
-});
+static NOTES_SECTION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)(^## Notes)\n").unwrap());
 
-static TODO_SECTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?m)(^## Todo)\n").unwrap()
-});
+static TODO_SECTION_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)(^## Todo)\n").unwrap());
 
 /// Terminal statuses
 pub const TERMINAL_STATUSES: &[&str] = &["resolved", "superseded", "deferred", "rejected"];
@@ -59,8 +52,7 @@ pub struct Thread {
 impl Thread {
     /// Parse a thread file
     pub fn parse(path: &Path) -> Result<Self, String> {
-        let content =
-            fs::read_to_string(path).map_err(|e| format!("reading file: {}", e))?;
+        let content = fs::read_to_string(path).map_err(|e| format!("reading file: {}", e))?;
 
         let mut thread = Thread {
             path: path.to_string_lossy().to_string(),
@@ -95,8 +87,8 @@ impl Thread {
         let yaml_content = &rest[..end];
         self.body_start = 4 + end + 4; // skip opening ---, yaml, closing ---, and newline
 
-        self.frontmatter = serde_yaml::from_str(yaml_content)
-            .map_err(|e| format!("parsing YAML: {}", e))?;
+        self.frontmatter =
+            serde_yaml::from_str(yaml_content).map_err(|e| format!("parsing YAML: {}", e))?;
 
         Ok(())
     }
@@ -252,7 +244,10 @@ pub fn insert_log_entry(content: &str, entry: &str) -> String {
         // Insert after today's heading
         let re = Regex::new(&format!(r"(?m)(^### {})\n", regex::escape(&today))).unwrap();
         return re
-            .replace(content, format!("$1\n\n{}\n", escape_for_replacement(&bullet_entry)))
+            .replace(
+                content,
+                format!("$1\n\n{}\n", escape_for_replacement(&bullet_entry)),
+            )
             .to_string();
     }
 
@@ -260,7 +255,14 @@ pub fn insert_log_entry(content: &str, entry: &str) -> String {
     if LOG_SECTION_RE.is_match(content) {
         // Insert new heading after ## Log
         return LOG_SECTION_RE
-            .replace(content, format!("## Log\n\n{}\n\n{}", heading, escape_for_replacement(&bullet_entry)))
+            .replace(
+                content,
+                format!(
+                    "## Log\n\n{}\n\n{}",
+                    heading,
+                    escape_for_replacement(&bullet_entry)
+                ),
+            )
             .to_string();
     }
 
@@ -298,8 +300,11 @@ pub fn replace_section(content: &str, name: &str, new_content: &str) -> String {
         return content.to_string();
     }
 
-    re.replace(content, format!("$1\n\n{}\n\n$3", escape_for_replacement(new_content)))
-        .to_string()
+    re.replace(
+        content,
+        format!("$1\n\n{}\n\n$3", escape_for_replacement(new_content)),
+    )
+    .to_string()
 }
 
 /// Append to section content
@@ -336,7 +341,10 @@ pub fn add_note(content: &str, text: &str) -> (String, String) {
 
     // Insert at top of Notes section
     let new_content = NOTES_SECTION_RE
-        .replace(&content, format!("$1\n\n{}\n", escape_for_replacement(&note_entry)))
+        .replace(
+            &content,
+            format!("$1\n\n{}\n", escape_for_replacement(&note_entry)),
+        )
         .to_string();
 
     (new_content, hash)
@@ -349,7 +357,10 @@ pub fn add_todo_item(content: &str, text: &str) -> (String, String) {
 
     // Insert at top of Todo section
     let new_content = TODO_SECTION_RE
-        .replace(content, format!("$1\n\n{}\n", escape_for_replacement(&todo_entry)))
+        .replace(
+            content,
+            format!("$1\n\n{}\n", escape_for_replacement(&todo_entry)),
+        )
         .to_string();
 
     (new_content, hash)
@@ -385,7 +396,12 @@ pub fn remove_by_hash(content: &str, section: &str, hash: &str) -> Result<String
 }
 
 /// Edit item by hash
-pub fn edit_by_hash(content: &str, section: &str, hash: &str, new_text: &str) -> Result<String, String> {
+pub fn edit_by_hash(
+    content: &str,
+    section: &str,
+    hash: &str,
+    new_text: &str,
+) -> Result<String, String> {
     let lines: Vec<&str> = content.lines().collect();
     let mut result = Vec::new();
     let mut in_section = false;

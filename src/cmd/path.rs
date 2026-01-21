@@ -37,8 +37,7 @@ pub fn run(args: PathArgs, ws: &Path) -> Result<(), String> {
 
     let file = workspace::find_by_ref(ws, &args.id)?;
 
-    let abs_path = file.canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf());
+    let abs_path = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let rel_path = workspace::path_relative_to_git_root(ws, &file);
 
     match format {

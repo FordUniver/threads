@@ -138,10 +138,8 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
         let rel_path = workspace::parse_thread_path(git_root, &path);
 
         // Path filter: if not searching, only count threads at the specified level
-        if !search_dir.is_searching() {
-            if rel_path != filter_path {
-                continue;
-            }
+        if !search_dir.is_searching() && rel_path != filter_path {
+            continue;
         }
         // Note: find_threads_with_options already handles direction/depth filtering
 
@@ -318,8 +316,8 @@ fn output_yaml(
         total,
     };
 
-    let yaml = serde_yaml::to_string(&output)
-        .map_err(|e| format!("YAML serialization failed: {}", e))?;
+    let yaml =
+        serde_yaml::to_string(&output).map_err(|e| format!("YAML serialization failed: {}", e))?;
     print!("{}", yaml);
     Ok(())
 }

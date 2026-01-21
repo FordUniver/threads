@@ -5,7 +5,14 @@ use std::process::Command;
 pub fn has_changes(ws: &Path, rel_path: &str) -> bool {
     // Check unstaged changes
     let status = Command::new("git")
-        .args(["-C", &ws.to_string_lossy(), "diff", "--quiet", "--", rel_path])
+        .args([
+            "-C",
+            &ws.to_string_lossy(),
+            "diff",
+            "--quiet",
+            "--",
+            rel_path,
+        ])
         .status();
 
     if status.map(|s| !s.success()).unwrap_or(true) {
@@ -14,7 +21,15 @@ pub fn has_changes(ws: &Path, rel_path: &str) -> bool {
 
     // Check staged changes
     let status = Command::new("git")
-        .args(["-C", &ws.to_string_lossy(), "diff", "--cached", "--quiet", "--", rel_path])
+        .args([
+            "-C",
+            &ws.to_string_lossy(),
+            "diff",
+            "--cached",
+            "--quiet",
+            "--",
+            rel_path,
+        ])
         .status();
 
     if status.map(|s| !s.success()).unwrap_or(true) {
@@ -28,7 +43,13 @@ pub fn has_changes(ws: &Path, rel_path: &str) -> bool {
 /// Check if a file is tracked by git
 pub fn is_tracked(ws: &Path, rel_path: &str) -> bool {
     Command::new("git")
-        .args(["-C", &ws.to_string_lossy(), "ls-files", "--error-unmatch", rel_path])
+        .args([
+            "-C",
+            &ws.to_string_lossy(),
+            "ls-files",
+            "--error-unmatch",
+            rel_path,
+        ])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
@@ -84,7 +105,14 @@ pub fn commit(ws: &Path, files: &[String], message: &str) -> Result<(), String> 
 
     // Commit only the specified files (-- ensures file paths aren't misinterpreted)
     let ws_str = ws.to_string_lossy();
-    let mut args = vec!["-C".to_string(), ws_str.to_string(), "commit".to_string(), "-m".to_string(), message.to_string(), "--".to_string()];
+    let mut args = vec![
+        "-C".to_string(),
+        ws_str.to_string(),
+        "commit".to_string(),
+        "-m".to_string(),
+        message.to_string(),
+        "--".to_string(),
+    ];
     for f in files {
         args.push(f.clone());
     }
@@ -192,7 +220,8 @@ fn extract_id(name: &str) -> String {
 }
 
 fn is_hex(s: &str) -> bool {
-    s.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase())
+    s.chars()
+        .all(|c| c.is_ascii_hexdigit() && !c.is_uppercase())
 }
 
 /// Find deleted thread files from git status

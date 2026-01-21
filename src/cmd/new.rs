@@ -162,7 +162,10 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
             println!("  → {}", rel_path);
 
             if body.is_empty() {
-                eprintln!("Hint: Add body with: echo \"content\" | threads body {} --set", id);
+                eprintln!(
+                    "Hint: Add body with: echo \"content\" | threads body {} --set",
+                    id
+                );
             }
         }
         OutputFormat::Json => {

@@ -28,14 +28,6 @@ impl FindOptions {
         Self::default()
     }
 
-    /// Create options for simple recursive search (backward compat with -r)
-    pub fn recursive() -> Self {
-        Self {
-            down: Some(None), // unlimited depth
-            ..Default::default()
-        }
-    }
-
     pub fn with_down(mut self, depth: Option<usize>) -> Self {
         self.down = Some(depth);
         self
@@ -47,8 +39,7 @@ impl FindOptions {
     }
 }
 
-static SLUGIFY_NON_ALNUM_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
+static SLUGIFY_NON_ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-z0-9]+").unwrap());
 
 static SLUGIFY_MULTI_DASH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-+").unwrap());
 
@@ -79,29 +70,6 @@ pub fn find_git_root() -> Result<PathBuf, String> {
     Ok(PathBuf::from(root))
 }
 
-/// Find the git root for a specific path.
-pub fn find_git_root_for_path(path: &Path) -> Result<PathBuf, String> {
-    let output = Command::new("git")
-        .args(["-C", &path.to_string_lossy(), "rev-parse", "--show-toplevel"])
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "Not in a git repository at: {}",
-            path.display()
-        ));
-    }
-
-    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(PathBuf::from(root))
-}
-
-/// Check if a path is inside a git repository.
-pub fn is_in_git_repo(path: &Path) -> bool {
-    find_git_root_for_path(path).is_ok()
-}
-
 /// Check if a directory is a git root (contains .git).
 pub fn is_git_root(path: &Path) -> bool {
     path.join(".git").exists()
@@ -129,7 +97,7 @@ fn find_threads_recursive(
         if let Ok(entries) = fs::read_dir(&threads_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "md") {
+                if path.extension().is_some_and(|e| e == "md") {
                     // Skip archive subdirectory
                     if !path.to_string_lossy().contains("/archive/") {
                         threads.push(path);
@@ -205,7 +173,7 @@ fn collect_threads_at_path(dir: &Path, threads: &mut Vec<PathBuf>) {
         if let Ok(entries) = fs::read_dir(&threads_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
-                if path.extension().map_or(false, |e| e == "md") {
+                if path.extension().is_some_and(|e| e == "md") {
                     // Skip archive subdirectory
                     if !path.to_string_lossy().contains("/archive/") {
                         threads.push(path);
@@ -300,7 +268,13 @@ fn find_threads_up(
     collect_threads_at_path(&parent_canonical, threads);
 
     // Continue up
-    find_threads_up(&parent_canonical, git_root, threads, current_depth + 1, max_depth)
+    find_threads_up(
+        &parent_canonical,
+        git_root,
+        threads,
+        current_depth + 1,
+        max_depth,
+    )
 }
 
 /// Scope represents thread placement information.
@@ -313,19 +287,6 @@ pub struct Scope {
     pub path: String,
     /// Human-readable description
     pub level_desc: String,
-}
-
-/// Describes how a path was resolved for verbose output.
-#[derive(Debug, Clone)]
-pub struct PathResolution {
-    /// Original input (None if no path argument was given)
-    pub input: Option<String>,
-    /// How the path was resolved
-    pub resolved_via: String,
-    /// The PWD at resolution time
-    pub pwd: PathBuf,
-    /// The git root
-    pub git_root: PathBuf,
 }
 
 /// Infer the threads directory and scope from a path specification.
@@ -458,9 +419,8 @@ pub fn parse_thread_path(git_root: &Path, thread_path: &Path) -> String {
         } else {
             path.to_string()
         }
-    } else if rel.starts_with(".threads/") {
-        ".".to_string()
     } else {
+        // Includes .threads/ at root or any other case
         ".".to_string()
     }
 }
@@ -484,17 +444,6 @@ pub fn path_relative_to_git_root(git_root: &Path, path: &Path) -> String {
         }
     } else {
         path.to_string_lossy().to_string()
-    }
-}
-
-/// Check if the current working directory is the same as the given path.
-pub fn is_pwd(path: &Path) -> bool {
-    if let Ok(pwd) = env::current_dir() {
-        let pwd_canonical = pwd.canonicalize().unwrap_or(pwd);
-        let path_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-        pwd_canonical == path_canonical
-    } else {
-        false
     }
 }
 
@@ -619,38 +568,6 @@ pub fn complete_thread_ids(_current: &OsStr) -> Vec<CompletionCandidate> {
         .collect()
 }
 
-// Legacy compatibility: these functions adapt old category/project-based code
-// to the new path-based model. They should be phased out as commands are updated.
-
-/// Legacy: Extract category from a thread path.
-/// Returns the first path component or "-" for root.
-#[deprecated(note = "Use parse_thread_path() instead")]
-pub fn extract_category(git_root: &Path, thread_path: &Path) -> String {
-    let rel = parse_thread_path(git_root, thread_path);
-    if rel == "." {
-        "-".to_string()
-    } else {
-        rel.split('/').next().unwrap_or("-").to_string()
-    }
-}
-
-/// Legacy: Extract project from a thread path.
-/// Returns the second path component or "-" if not present.
-#[deprecated(note = "Use parse_thread_path() instead")]
-pub fn extract_project(git_root: &Path, thread_path: &Path) -> String {
-    let rel = parse_thread_path(git_root, thread_path);
-    if rel == "." {
-        "-".to_string()
-    } else {
-        let parts: Vec<&str> = rel.split('/').collect();
-        if parts.len() >= 2 {
-            parts[1].to_string()
-        } else {
-            "-".to_string()
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -672,7 +589,11 @@ mod tests {
 
         for (title, want) in cases {
             let got = slugify(title);
-            assert_eq!(got, want, "slugify({:?}) = {:?}, want {:?}", title, got, want);
+            assert_eq!(
+                got, want,
+                "slugify({:?}) = {:?}, want {:?}",
+                title, got, want
+            );
         }
     }
 }

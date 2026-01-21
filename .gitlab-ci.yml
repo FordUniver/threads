@@ -1,44 +1,151 @@
-# GitLab CI/CD for threads CLI (Rust)
+# GitLab CI/CD pipeline for threads CLI (Rust)
+#
+# Pipeline structure:
+#
+#   build ──────────────→ test:integration ──→ test:integration:verbose (on failure)
+#     │                          │
+#     │    test:unit ────────────┼──→ test:unit:verbose (on failure)
+#     │         │                │
+#     │    lint:fmt ─────────────┤
+#     │         │                │
+#     │    lint:clippy ──────────┘
+#     │
+#     └──→ release (tags only)
 
 stages:
+  - build
   - test
   - release
 
 variables:
   GIT_DEPTH: 1
+  RUST_VERSION: "1.83"
   CARGO_HOME: ${CI_PROJECT_DIR}/.cargo
 
-# Cache cargo dependencies
-cache:
-  key: ${CI_COMMIT_REF_SLUG}
-  paths:
-    - .cargo/registry
-    - target/
+# ====================================================================================
+# Build Stage
+# ====================================================================================
 
-# Unit tests
-test:
-  stage: test
-  image: rust:latest
+build:
+  stage: build
+  image: rust:${RUST_VERSION}
   script:
-    - cargo test --verbose
+    - cargo build --release
+    - ./target/release/threads --version
+  artifacts:
+    paths:
+      - target/release/threads
+    expire_in: 1 day
+  cache:
+    key: cargo-build-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .cargo/registry
+      - .cargo/git
+      - target
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: never  # Tag releases handled separately
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
-# Integration tests
-integration-test:
+# ====================================================================================
+# Test Stage
+# ====================================================================================
+
+test:unit:
   stage: test
-  image: rust:latest
+  image: rust:${RUST_VERSION}
+  script:
+    - cargo test
+  cache:
+    key: cargo-test-unit-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .cargo/registry
+      - .cargo/git
+      - target
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+lint:fmt:
+  stage: test
+  image: rust:${RUST_VERSION}
+  script:
+    - rustup component add rustfmt
+    - cargo fmt --check
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+lint:clippy:
+  stage: test
+  image: rust:${RUST_VERSION}
+  script:
+    - rustup component add clippy
+    - cargo clippy --all-targets -- -D warnings
+  cache:
+    key: cargo-clippy-${CI_COMMIT_REF_SLUG}
+    paths:
+      - .cargo/registry
+      - .cargo/git
+      - target
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+test:unit:verbose:
+  stage: test
+  needs: [test:unit]
+  when: on_failure
+  image: rust:${RUST_VERSION}
+  script:
+    - cargo test -- --nocapture
+
+test:integration:
+  stage: test
+  needs: [build]
+  image: rust:${RUST_VERSION}
   before_script:
-    - apt-get update && apt-get install -y gawk make jq
-    - cargo build
+    - apt-get update && apt-get install -y gawk jq
   script:
-    - ./test/run_tests.sh ./target/debug/threads
+    - ./target/release/threads --version
+    - ./test/run_tests.sh ./target/release/threads
   artifacts:
     when: on_failure
     paths:
       - test/results/
     expire_in: 1 week
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
 
-# Tagged release - create GitLab Release
-# Note: Cross-platform builds done locally, binaries uploaded manually
+test:integration:verbose:
+  stage: test
+  needs: [build, test:integration]
+  when: on_failure
+  image: rust:${RUST_VERSION}
+  before_script:
+    - apt-get update && apt-get install -y gawk jq
+  script:
+    - DEBUG=1 ./test/run_tests.sh ./target/release/threads
+  artifacts:
+    when: always
+    paths:
+      - test/results/
+    expire_in: 1 week
+
+# ====================================================================================
+# Release Stage (tags only, binaries built locally)
+# ====================================================================================
+
 release:
   stage: release
   image: registry.gitlab.com/gitlab-org/release-cli:latest
@@ -48,4 +155,4 @@ release:
     tag_name: $CI_COMMIT_TAG
     description: "Release $CI_COMMIT_TAG"
   rules:
-    - if: $CI_COMMIT_TAG =~ /^v[0-9]+\.[0-9]+\.[0-9]+/
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/

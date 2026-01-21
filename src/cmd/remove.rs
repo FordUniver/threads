@@ -37,8 +37,7 @@ pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
     let was_tracked = git::is_tracked(ws, &rel_path);
 
     // Remove file
-    fs::remove_file(&file)
-        .map_err(|e| format!("removing file: {}", e))?;
+    fs::remove_file(&file).map_err(|e| format!("removing file: {}", e))?;
 
     println!("Removed: {}", file.display());
 
@@ -48,9 +47,11 @@ pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
     }
 
     if args.commit {
-        let msg = args.m.unwrap_or_else(|| format!("threads: remove '{}'", name));
+        let msg = args
+            .m
+            .unwrap_or_else(|| format!("threads: remove '{}'", name));
         git::add(ws, &[&rel_path])?;
-        git::commit(ws, &[rel_path.clone()], &msg)?;
+        git::commit(ws, std::slice::from_ref(&rel_path), &msg)?;
         eprintln!("Note: Changes are local. Push with 'git push' when ready.");
     } else {
         println!("Note: To commit this removal, run:");
