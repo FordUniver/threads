@@ -541,8 +541,13 @@ pub fn find_by_ref(git_root: &Path, ref_str: &str) -> Result<PathBuf, String> {
 
 // Helper for hex encoding
 mod hex {
+    use std::fmt::Write;
+
     pub fn encode(bytes: [u8; 3]) -> String {
-        bytes.iter().map(|b| format!("{:02x}", b)).collect()
+        bytes.iter().fold(String::with_capacity(6), |mut acc, b| {
+            let _ = write!(acc, "{:02x}", b);
+            acc
+        })
     }
 }
 
