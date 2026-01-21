@@ -7,11 +7,12 @@ Threads are markdown files in `.threads/` directories. Each thread tracks a sing
 ## Installation
 
 ```bash
-# Build from source (requires Go 1.24+)
-cd go && go build -o threads ./cmd/threads
+# Build from source (requires Rust)
+cargo build --release
+cp target/release/threads ~/.local/bin/
 
 # Or install directly
-go install git.zib.de/cspiegel/threads/cmd/threads@latest
+cargo install --git https://git.zib.de/cspiegel/threads.git
 ```
 
 ## Quick Start
@@ -168,9 +169,6 @@ threads completion fish | source
 # Run all tests
 make test
 
-# Run unit tests only
-make unit-test
-
 # Run integration tests only
 make integration-test
 
@@ -182,18 +180,18 @@ make benchmark
 
 ```
 threads/
-├── go/                     # Go implementation
-│   ├── cmd/threads/        # Entry point
-│   └── internal/
-│       ├── cmd/            # Command implementations
-│       ├── git/            # Git operations
-│       ├── output/         # Output formatting
-│       ├── thread/         # Thread parsing
-│       └── workspace/      # Path resolution
+├── src/
+│   ├── main.rs             # Entry point and CLI
+│   ├── cmd/                # Command implementations
+│   ├── git.rs              # Git operations
+│   ├── output.rs           # Output formatting
+│   ├── thread.rs           # Thread parsing
+│   └── workspace.rs        # Path resolution
 ├── test/
 │   ├── cases/              # Integration test cases
 │   ├── lib/                # Test utilities
 │   └── benchmark/          # Performance benchmarks
+├── Cargo.toml
 ├── Makefile
 └── .gitlab-ci.yml
 ```

@@ -1,37 +1,8 @@
 # Benchmark results (regenerated each run)
 test/results/
 
-# Build output directories (except python wrapper)
-go/bin/
-rust/bin/
-swift/bin/
-
-# Go build artifacts
-go/threads
-
-# Python
-python/.venv/
-python/.uenv/
-__pycache__/
-*.pyc
+# Rust
+target/
 
 # macOS
 .DS_Store
-
-# Bun
-bun/node_modules/
-*.bun-build
-
-# Rust
-rust/target/
-
-# Swift
-swift/.build/
-swift/.swiftpm/
-
-# Ruby
-ruby/.bundle/
-ruby/vendor/
-
-# Perl
-perl/local/

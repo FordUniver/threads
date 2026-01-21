@@ -1,18 +1,18 @@
-# threads CLI
+# threads CLI (Rust)
 # Build, test, and benchmark
 
-.PHONY: help build unit-test integration-test test benchmark clean
+.PHONY: help build test integration-test benchmark clean release
 
 # Default target
 help:
 	@echo "threads CLI"
 	@echo ""
 	@echo "Building:"
-	@echo "  make build            - Build threads binary"
+	@echo "  make build            - Build debug binary"
+	@echo "  make release          - Build optimized release binary"
 	@echo ""
 	@echo "Testing:"
-	@echo "  make test             - Run all tests (unit + integration)"
-	@echo "  make unit-test        - Run Go unit tests"
+	@echo "  make test             - Run all tests"
 	@echo "  make integration-test - Run integration tests"
 	@echo ""
 	@echo "Benchmarking:"
@@ -23,28 +23,25 @@ help:
 
 # Build
 build:
-	@if [ ! -f ./go/threads ] || [ -n "$$(find ./go -name '*.go' -newer ./go/threads 2>/dev/null | head -1)" ]; then \
-		echo "Building threads..."; \
-		$(MAKE) -C go build; \
-	fi
+	cargo build
+
+release:
+	cargo build --release
 
 # Test targets
-test: unit-test integration-test
-
-unit-test:
-	@echo "=== Unit Tests ==="
-	cd go && go test ./...
+test:
+	cargo test
 
 integration-test: build
 	@echo "=== Integration Tests ==="
-	./test/run_tests.sh ./go/threads
+	./test/run_tests.sh ./target/debug/threads
 
 # Benchmark
-benchmark: build
+benchmark: release
 	@echo "=== Benchmark ==="
 	./test/benchmark/bench.sh
 
 # Clean
 clean:
-	$(MAKE) -C go clean 2>/dev/null || true
+	cargo clean
 	rm -rf ./test/results/* 2>/dev/null || true
