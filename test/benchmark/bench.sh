@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Benchmark threads (Go implementation)
+# Benchmark threads (Rust implementation)
 # Usage: ./bench.sh [iterations] [workspace_size]
 set -uo pipefail
 
@@ -23,16 +23,16 @@ if [[ ! -d "$WORKSPACE" ]] || [[ ! -f "$WORKSPACE/.bench-size" ]] || [[ "$(cat "
     echo
 fi
 
-# Build Go
-THREADS_BIN="$ROOT_DIR/go/threads-bench"
-if [[ -f "$ROOT_DIR/go/go.mod" ]] && command -v go &>/dev/null; then
-    echo "Building Go..."
-    if ! (cd "$ROOT_DIR/go" && go build -o threads-bench ./cmd/threads); then
-        echo "ERROR: Go build failed" >&2
+# Build Rust
+THREADS_BIN="$ROOT_DIR/target/release/threads"
+if [[ -f "$ROOT_DIR/Cargo.toml" ]] && command -v cargo &>/dev/null; then
+    echo "Building Rust (release)..."
+    if ! (cd "$ROOT_DIR" && cargo build --release --quiet); then
+        echo "ERROR: Rust build failed" >&2
         exit 1
     fi
 else
-    echo "ERROR: Go implementation or go command not found" >&2
+    echo "ERROR: Rust implementation or cargo command not found" >&2
     exit 1
 fi
 

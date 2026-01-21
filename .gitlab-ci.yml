@@ -37,22 +37,6 @@ integration-test:
       - test/results/
     expire_in: 1 week
 
-# Dev release - push to Package Registry on main
-dev-release:
-  stage: release
-  image: rust:latest
-  before_script:
-    - apt-get update && apt-get install -y curl musl-tools
-    - rustup target add x86_64-unknown-linux-musl
-  script:
-    - cargo build --release --target x86_64-unknown-linux-musl
-    - |
-      curl --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-           --upload-file target/x86_64-unknown-linux-musl/release/threads \
-           "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/threads/dev/threads-linux-amd64"
-  rules:
-    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
-
 # Tagged release - create GitLab Release
 # Note: Cross-platform builds done locally, binaries uploaded manually
 release:
