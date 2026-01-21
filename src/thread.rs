@@ -473,3 +473,117 @@ pub fn count_matching_items(content: &str, section: &str, hash: &str) -> usize {
 
     count
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn test_extract_id_from_path() {
+        let cases = vec![
+            ("abc123-my-thread.md", Some("abc123")),
+            ("/path/to/abc123-my-thread.md", Some("abc123")),
+            ("deadbe-another-one.md", Some("deadbe")),
+            ("no-id-here.md", None),
+            ("ABC123-uppercase.md", None), // only lowercase hex
+            ("ab123-too-short.md", None),  // need 6 chars
+            ("abc1234-too-long.md", None), // only 6 chars
+        ];
+
+        for (path, want) in cases {
+            let got = extract_id_from_path(Path::new(path));
+            assert_eq!(
+                got.as_deref(),
+                want,
+                "extract_id_from_path({:?}) = {:?}, want {:?}",
+                path,
+                got,
+                want
+            );
+        }
+    }
+
+    #[test]
+    fn test_extract_name_from_path() {
+        let cases = vec![
+            ("abc123-my-thread.md", "my-thread"),
+            ("/path/to/abc123-my-thread.md", "my-thread"),
+            ("abc123-multi-word-name.md", "multi-word-name"),
+            ("no-id-here.md", "no-id-here"),
+        ];
+
+        for (path, want) in cases {
+            let got = extract_name_from_path(Path::new(path));
+            assert_eq!(
+                got, want,
+                "extract_name_from_path({:?}) = {:?}, want {:?}",
+                path, got, want
+            );
+        }
+    }
+
+    #[test]
+    fn test_base_status() {
+        let cases = vec![
+            ("active", "active"),
+            ("blocked (waiting for review)", "blocked"),
+            ("resolved (done)", "resolved"),
+            ("paused (vacation)", "paused"),
+            ("idea", "idea"),
+        ];
+
+        for (status, want) in cases {
+            let got = base_status(status);
+            assert_eq!(
+                got, want,
+                "base_status({:?}) = {:?}, want {:?}",
+                status, got, want
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_terminal() {
+        let cases = vec![
+            ("active", false),
+            ("blocked", false),
+            ("blocked (waiting)", false),
+            ("resolved", true),
+            ("resolved (done)", true),
+            ("superseded", true),
+            ("deferred", true),
+            ("rejected", true),
+        ];
+
+        for (status, want) in cases {
+            let got = is_terminal(status);
+            assert_eq!(
+                got, want,
+                "is_terminal({:?}) = {:?}, want {:?}",
+                status, got, want
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_valid_status() {
+        let cases = vec![
+            ("active", true),
+            ("blocked", true),
+            ("blocked (reason)", true),
+            ("resolved", true),
+            ("invalid", false),
+            ("random", false),
+        ];
+
+        for (status, want) in cases {
+            let got = is_valid_status(status);
+            assert_eq!(
+                got, want,
+                "is_valid_status({:?}) = {:?}, want {:?}",
+                status, got, want
+            );
+        }
+    }
+}

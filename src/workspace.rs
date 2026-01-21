@@ -650,3 +650,29 @@ pub fn extract_project(git_root: &Path, thread_path: &Path) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_slugify() {
+        let cases = vec![
+            ("Hello World", "hello-world"),
+            ("My Feature Request", "my-feature-request"),
+            ("Fix: bug in parser", "fix-bug-in-parser"),
+            ("Remove   extra   spaces", "remove-extra-spaces"),
+            ("Trailing hyphens---", "trailing-hyphens"),
+            ("---Leading hyphens", "leading-hyphens"),
+            ("Special!@#$%chars", "special-chars"),
+            ("MixedCASE", "mixedcase"),
+            ("already-kebab-case", "already-kebab-case"),
+            ("123 numbers first", "123-numbers-first"),
+        ];
+
+        for (title, want) in cases {
+            let got = slugify(title);
+            assert_eq!(got, want, "slugify({:?}) = {:?}, want {:?}", title, got, want);
+        }
+    }
+}
