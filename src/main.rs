@@ -13,7 +13,7 @@ mod workspace;
 
 #[derive(Parser)]
 #[command(name = "threads")]
-#[command(version)]
+#[command(version = env!("THREADS_VERSION"))]
 #[command(about = "Thread management for LLM workflows")]
 #[command(long_about = "threads - Persistent context management for LLM-assisted development.\n\nThreads are markdown files in .threads/ directories at workspace, category,\nor project level. Each thread tracks a single topic: a feature, bug,\nexploration, or decision.")]
 struct Cli {
