@@ -3,16 +3,12 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command;
 
-use chrono::{DateTime, Local};
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use colored::Colorize;
 use regex::Regex;
-use tabled::settings::object::Columns;
-use tabled::settings::style::HorizontalLine;
-use tabled::settings::{Alignment, Modify, Padding, Style};
-use tabled::Table;
 use termimad::MadSkin;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::output;
 use crate::thread::{self, Thread};
@@ -55,30 +51,29 @@ pub fn run(args: ReadArgs, ws: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Rich pretty output with header, body, and formatted sections
+/// Rich pretty output - single box with sections separated by horizontal lines
 fn output_pretty(file: &Path, ws: &Path) -> Result<(), String> {
     let thread = Thread::parse(file)?;
-    let term_width = output::terminal_width().min(100).saturating_sub(4);
+    let term_width = output::terminal_width().min(100);
 
     let rel_path = file
         .strip_prefix(ws)
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| file.to_string_lossy().to_string());
 
-    // Get timestamps from git
-    let (created_dt, updated_dt) = get_git_timestamps(ws, &rel_path);
+    // Get git history
+    let git_history = get_git_history(ws, &rel_path);
 
     // Count items
     let (log_count, todo_count, todo_done) = count_items(&thread.content);
 
-    // === Header ===
+    // === Section 1: Header (like info) ===
     let title = if !thread.name().is_empty() {
         thread.name().to_string()
     } else {
         thread::extract_name_from_path(file).replace('-', " ")
     };
 
-    // Stats line
     let todo_text = if todo_count == 0 {
         "0".dimmed().to_string()
     } else if todo_done == todo_count {
@@ -91,16 +86,13 @@ fn output_pretty(file: &Path, ws: &Path) -> Result<(), String> {
 
     let status_styled = output::style_status(&thread.base_status()).to_string();
     let stats = format!("{} · {} · {}", log_count, todo_text, status_styled);
-
     let title_line = format!("{}  {}", title.bold(), stats);
-    let header_content = if thread.frontmatter.desc.is_empty() {
+
+    let header = if thread.frontmatter.desc.is_empty() {
         title_line
     } else {
         format!("{}\n{}", title_line, thread.frontmatter.desc)
     };
-
-    // Dates line
-    let dates_line = format_dates(created_dt, updated_dt);
 
     // === Extract sections ===
     let body = thread::extract_section(&thread.content, "Body");
@@ -108,87 +100,131 @@ fn output_pretty(file: &Path, ws: &Path) -> Result<(), String> {
     let todos = thread::extract_section(&thread.content, "Todo");
     let log = thread::extract_section(&thread.content, "Log");
 
-    // === Build output sections ===
-    let mut sections: Vec<String> = Vec::new();
+    // === Build sections dynamically ===
+    let mut sections: Vec<String> = vec![header];
 
-    // Body section (rendered markdown, no header)
     if !body.is_empty() {
-        sections.push(render_body(&body, term_width));
+        sections.push(format_body(&body));
     }
-
-    // Notes section
     if !notes.is_empty() {
         sections.push(format_notes(&notes));
     }
-
-    // Todo section
     if !todos.is_empty() {
         sections.push(format_todos(&todos));
     }
-
-    // Log section
     if !log.is_empty() {
         sections.push(format_log(&log));
     }
 
-    // === Build table ===
-    let mut rows: Vec<Vec<String>> = vec![
-        vec![header_content],
-        vec![dates_line],
-    ];
+    // Footer: history + path
+    let history_content = format_history(&git_history, term_width.saturating_sub(4));
+    sections.push(format!("{}\n\n{}", history_content, rel_path.dimmed()));
 
-    if !sections.is_empty() {
-        rows.push(vec![sections.join("\n\n")]);
-    }
-
-    // Footer with path
-    rows.push(vec![rel_path.dimmed().to_string()]);
-
-    let mut table = Table::from_iter(rows);
-
-    // Horizontal lines after header and dates
-    let hline = HorizontalLine::new('─').left('├').right('┤').intersection('─');
-    let style = Style::rounded().horizontals([(1, hline.clone()), (2, hline)]);
-
-    table
-        .with(style)
-        .with(Padding::new(1, 1, 0, 0))
-        .with(Modify::new(Columns::single(0)).with(Alignment::left()));
-
-    println!("{}", table);
+    // === Render box with sections ===
+    print_boxed_sections(&sections, term_width);
 
     Ok(())
 }
 
-/// Format created/updated dates
-fn format_dates(created: Option<DateTime<Local>>, updated: Option<DateTime<Local>>) -> String {
-    let created_str = created
-        .map(|dt| output::format_relative_short(dt))
-        .unwrap_or_else(|| "?".to_string());
-    let updated_str = updated
-        .map(|dt| output::format_relative_short(dt))
-        .unwrap_or_else(|| "?".to_string());
+/// Print sections in a rounded box with horizontal separators
+fn print_boxed_sections(sections: &[String], max_width: usize) {
+    let inner_width = max_width.saturating_sub(4); // Account for "│ " and " │"
 
-    if created_str == updated_str {
-        format!("{} {}", "created".dimmed(), created_str)
-    } else {
-        format!(
-            "{} {}  {} {}",
-            "created".dimmed(),
-            created_str,
-            "updated".dimmed(),
-            updated_str
-        )
+    // Top border
+    println!("╭{}╮", "─".repeat(max_width - 2));
+
+    for (i, section) in sections.iter().enumerate() {
+        // Print section content with padding
+        for line in section.lines() {
+            // Wrap or truncate long lines
+            let wrapped_lines = wrap_line(line, inner_width);
+            for wrapped in wrapped_lines {
+                let visible_width = strip_ansi_width(&wrapped);
+                let padding = inner_width.saturating_sub(visible_width);
+                println!("│ {}{} │", wrapped, " ".repeat(padding));
+            }
+        }
+
+        // Separator between sections (not after last)
+        if i < sections.len() - 1 {
+            println!("├{}┤", "─".repeat(max_width - 2));
+        }
     }
+
+    // Bottom border
+    println!("╰{}╯", "─".repeat(max_width - 2));
 }
 
-/// Render body markdown content (simplified - just clean up for terminal)
-fn render_body(body: &str, _width: usize) -> String {
+/// Wrap a line to fit within max_width (respecting ANSI codes)
+fn wrap_line(line: &str, max_width: usize) -> Vec<String> {
+    let visible_width = strip_ansi_width(line);
+    if visible_width <= max_width {
+        return vec![line.to_string()];
+    }
+
+    // Simple truncation with ellipsis for now
+    // (Full word-wrapping with ANSI is complex)
+    let mut result = String::new();
+    let mut visible_count = 0;
+    let mut in_escape = false;
+
+    for c in line.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+            result.push(c);
+        } else if in_escape {
+            result.push(c);
+            if c == 'm' {
+                in_escape = false;
+            }
+        } else {
+            let char_width = c.width().unwrap_or(0);
+            if visible_count + char_width > max_width.saturating_sub(1) {
+                result.push('…');
+                break;
+            }
+            visible_count += char_width;
+            result.push(c);
+        }
+    }
+
+    // Reset any open ANSI codes
+    if result.contains("\x1b[") {
+        result.push_str("\x1b[0m");
+    }
+
+    vec![result]
+}
+
+/// Calculate visible width of a string, ignoring ANSI escape codes
+fn strip_ansi_width(s: &str) -> usize {
+    // Simple ANSI escape code stripper
+    let mut visible = String::new();
+    let mut in_escape = false;
+
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' {
+                in_escape = false;
+            }
+        } else {
+            visible.push(c);
+        }
+    }
+
+    visible.width()
+}
+
+/// Format body section - render markdown
+fn format_body(body: &str) -> String {
+    let header = "Body".bold().to_string();
     let skin = MadSkin::default();
-    // Use termimad to render but capture to string
     let mut buf = Vec::new();
     skin.write_text_on(&mut buf, body).ok();
-    String::from_utf8_lossy(&buf).trim().to_string()
+    let rendered = String::from_utf8_lossy(&buf).trim().to_string();
+    format!("{}\n{}", header, rendered)
 }
 
 /// Format notes section with dimmed hashes
@@ -272,15 +308,22 @@ fn format_log(log: &str) -> String {
     format!("{}\n{}", header, formatted.join("\n"))
 }
 
-/// Get git timestamps for a file
-fn get_git_timestamps(ws: &Path, rel_path: &str) -> (Option<DateTime<Local>>, Option<DateTime<Local>>) {
+/// Git log entry
+struct GitLogEntry {
+    relative_time: String,
+    hash: String,
+    message: String,
+}
+
+/// Get git history for a file
+fn get_git_history(ws: &Path, rel_path: &str) -> Vec<GitLogEntry> {
     let output = Command::new("git")
         .args([
             "-C",
             &ws.to_string_lossy(),
             "log",
             "--follow",
-            "--format=%ct",
+            "--format=%cr\t%h\t%s",
             "--",
             rel_path,
         ])
@@ -288,27 +331,88 @@ fn get_git_timestamps(ws: &Path, rel_path: &str) -> (Option<DateTime<Local>>, Op
 
     let output = match output {
         Ok(o) if o.status.success() => o,
-        _ => return (None, None),
+        _ => return Vec::new(),
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let lines: Vec<&str> = stdout.lines().collect();
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() >= 3 {
+                Some(GitLogEntry {
+                    relative_time: shorten_relative_time(parts[0]),
+                    hash: parts[1].to_string(),
+                    message: parts[2..].join("\t"),
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
 
-    if lines.is_empty() {
-        return (None, None);
+/// Shorten git's relative time: "3 hours ago" -> "3h"
+fn shorten_relative_time(s: &str) -> String {
+    let s = s.trim();
+    if s.contains("second") {
+        "now".to_string()
+    } else if let Some(n) = s.strip_suffix(" minutes ago").or(s.strip_suffix(" minute ago")) {
+        format!("{}m", n)
+    } else if let Some(n) = s.strip_suffix(" hours ago").or(s.strip_suffix(" hour ago")) {
+        format!("{}h", n)
+    } else if let Some(n) = s.strip_suffix(" days ago").or(s.strip_suffix(" day ago")) {
+        format!("{}d", n)
+    } else if let Some(n) = s.strip_suffix(" weeks ago").or(s.strip_suffix(" week ago")) {
+        format!("{}w", n)
+    } else if let Some(n) = s.strip_suffix(" months ago").or(s.strip_suffix(" month ago")) {
+        format!("{}mo", n)
+    } else if let Some(n) = s.strip_suffix(" years ago").or(s.strip_suffix(" year ago")) {
+        format!("{}y", n)
+    } else {
+        s.to_string()
+    }
+}
+
+/// Format git history section (like info command)
+fn format_history(history: &[GitLogEntry], max_width: usize) -> String {
+    let header = "History".bold().to_string();
+
+    if history.is_empty() {
+        return format!("{}\n{}", header, "No commits (untracked)".dimmed());
     }
 
-    let parse_ts = |s: &str| -> Option<DateTime<Local>> {
-        s.parse::<i64>()
-            .ok()
-            .and_then(|ts| DateTime::from_timestamp(ts, 0))
-            .map(|dt| dt.with_timezone(&Local))
+    let total = history.len();
+    let lines: Vec<String> = if total <= 5 {
+        history.iter().map(|e| format_git_entry(e, max_width)).collect()
+    } else {
+        // Show first 4 + ellipsis + initial commit
+        let mut lines: Vec<String> = history
+            .iter()
+            .take(4)
+            .map(|e| format_git_entry(e, max_width))
+            .collect();
+        lines.push(format!("... {} more commits ...", total - 5).dimmed().to_string());
+        if let Some(initial) = history.last() {
+            lines.push(format_git_entry(initial, max_width));
+        }
+        lines
     };
 
-    let updated = parse_ts(lines[0]);
-    let created = parse_ts(lines[lines.len() - 1]);
+    format!("{}\n{}", header, lines.join("\n"))
+}
 
-    (created, updated)
+/// Format a single git log entry
+fn format_git_entry(entry: &GitLogEntry, max_width: usize) -> String {
+    let time_str = format!("{:>3}", entry.relative_time);
+    let hash_str = output::style_id(&entry.hash).to_string();
+
+    // Calculate remaining space for message
+    let prefix_len = 3 + 1 + 7 + 1; // time + space + hash + space
+    let msg_max = max_width.saturating_sub(prefix_len);
+    let message = output::truncate_back(&entry.message, msg_max);
+
+    format!("{} {} {}", time_str.dimmed(), hash_str, message)
 }
 
 /// Count log entries and todo items

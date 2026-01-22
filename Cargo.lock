@@ -1328,6 +1328,7 @@ dependencies = [
  "tabled",
  "termimad",
  "terminal_size",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]
