@@ -1,5 +1,8 @@
+use std::fs;
 use std::path::Path;
+use std::time::SystemTime;
 
+use chrono::{DateTime, Local};
 use clap::Args;
 use serde::Serialize;
 
@@ -54,6 +57,10 @@ struct ThreadInfo {
     name: String,
     title: String,
     desc: String,
+    created: String,
+    updated: String,
+    #[serde(skip)]
+    updated_ts: i64, // for sorting
     #[serde(skip_serializing_if = "Option::is_none")]
     path_absolute: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -208,6 +215,9 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
 
         let is_pwd = rel_path == pwd_rel;
 
+        // Get file timestamps
+        let (created, updated, updated_ts) = get_file_timestamps(&thread_path);
+
         results.push(ThreadInfo {
             id: t.id().to_string(),
             status: base_status,
@@ -215,6 +225,9 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             name,
             title,
             desc: t.frontmatter.desc.clone(),
+            created,
+            updated,
+            updated_ts,
             path_absolute: if include_absolute {
                 Some(thread_path.to_string_lossy().to_string())
             } else {
@@ -223,6 +236,9 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             is_pwd,
         });
     }
+
+    // Sort by updated timestamp, most recent first
+    results.sort_by(|a, b| b.updated_ts.cmp(&a.updated_ts));
 
     match format {
         OutputFormat::Fancy => output_fancy(
@@ -304,15 +320,21 @@ fn output_fancy(
     }
 
     // Print table header
-    println!("{:<6} {:<10} {:<24} NAME", "ID", "STATUS", "PATH");
-    println!("{:<6} {:<10} {:<24} ----", "--", "------", "----");
+    println!(
+        "{:<6} {:<10} {:<10} {:<10} {:<24} NAME",
+        "ID", "STATUS", "CREATED", "UPDATED", "PATH"
+    );
+    println!(
+        "{:<6} {:<10} {:<10} {:<10} {:<24} ----",
+        "--", "------", "-------", "-------", "----"
+    );
 
     for t in results {
         let path_display = truncate(&t.path, 22);
         let pwd_marker = if t.is_pwd { " ←" } else { "" };
         println!(
-            "{:<6} {:<10} {:<24} {}{}",
-            t.id, t.status, path_display, t.title, pwd_marker
+            "{:<6} {:<10} {:<10} {:<10} {:<24} {}{}",
+            t.id, t.status, t.created, t.updated, path_display, t.title, pwd_marker
         );
     }
 
@@ -388,15 +410,21 @@ fn output_plain(
     }
 
     // Print table header
-    println!("{:<6} {:<10} {:<24} NAME", "ID", "STATUS", "PATH");
-    println!("{:<6} {:<10} {:<24} ----", "--", "------", "----");
+    println!(
+        "{:<6} {:<10} {:<10} {:<10} {:<24} NAME",
+        "ID", "STATUS", "CREATED", "UPDATED", "PATH"
+    );
+    println!(
+        "{:<6} {:<10} {:<10} {:<10} {:<24} ----",
+        "--", "------", "-------", "-------", "----"
+    );
 
     for t in results {
         let path_display = truncate(&t.path, 22);
         let pwd_marker = if t.is_pwd { " ← PWD" } else { "" };
         println!(
-            "{:<6} {:<10} {:<24} {}{}",
-            t.id, t.status, path_display, t.title, pwd_marker
+            "{:<6} {:<10} {:<10} {:<10} {:<24} {}{}",
+            t.id, t.status, t.created, t.updated, path_display, t.title, pwd_marker
         );
     }
 
@@ -463,4 +491,39 @@ fn truncate(s: &str, max_chars: usize) -> String {
         let truncated: String = s.chars().take(max_chars - 1).collect();
         format!("{}…", truncated)
     }
+}
+
+/// Get file timestamps (created, updated) as formatted strings and raw timestamp for sorting
+fn get_file_timestamps(path: &Path) -> (String, String, i64) {
+    let metadata = match fs::metadata(path) {
+        Ok(m) => m,
+        Err(_) => return ("?".to_string(), "?".to_string(), 0),
+    };
+
+    let format_time = |time: SystemTime| -> String {
+        let datetime: DateTime<Local> = time.into();
+        datetime.format("%Y-%m-%d").to_string()
+    };
+
+    let updated = metadata
+        .modified()
+        .map(|t| format_time(t))
+        .unwrap_or_else(|_| "?".to_string());
+
+    let updated_ts = metadata
+        .modified()
+        .map(|t| {
+            t.duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+
+    // macOS and some filesystems support creation time; fall back to modified if unavailable
+    let created = metadata
+        .created()
+        .map(|t| format_time(t))
+        .unwrap_or_else(|_| updated.clone());
+
+    (created, updated, updated_ts)
 }

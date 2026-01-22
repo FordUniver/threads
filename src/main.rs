@@ -33,6 +33,7 @@ enum Commands {
     New(cmd::new::NewArgs),
 
     /// Move thread to new location
+    #[command(alias = "mv")]
     Move(cmd::move_cmd::MoveArgs),
 
     /// Commit thread changes
@@ -48,6 +49,7 @@ enum Commands {
     Stats(cmd::stats::StatsArgs),
 
     /// Read thread content
+    #[command(alias = "cat", alias = "show")]
     Read(cmd::read::ReadArgs),
 
     /// Print thread file path
