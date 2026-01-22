@@ -2,9 +2,12 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use clap::Args;
+use colored::Colorize;
 use serde::Serialize;
+use tabled::settings::Style;
+use tabled::{Table, Tabled};
 
-use crate::output::OutputFormat;
+use crate::output::{self, OutputFormat};
 use crate::thread::Thread;
 use crate::workspace::{self, FindOptions};
 
@@ -26,8 +29,8 @@ pub struct StatsArgs {
     #[arg(short = 'u', long = "up", value_name = "N")]
     up: Option<Option<usize>>,
 
-    /// Output format (auto-detects TTY for fancy vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "fancy")]
+    /// Output format (auto-detects TTY for pretty vs plain)
+    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
     format: OutputFormat,
 
     /// Output as JSON (shorthand for --format=json)
@@ -164,14 +167,23 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
 
     match format {
-        OutputFormat::Fancy => output_fancy(&sorted, total, &filter_path, &search_dir),
+        OutputFormat::Pretty => output_pretty(&sorted, total, &filter_path, &search_dir),
         OutputFormat::Plain => output_plain(&sorted, total, git_root, &filter_path, &search_dir),
         OutputFormat::Json => output_json(&sorted, total, git_root, &filter_path),
         OutputFormat::Yaml => output_yaml(&sorted, total, git_root, &filter_path),
     }
 }
 
-fn output_fancy(
+/// Row data for stats table
+#[derive(Tabled)]
+struct StatsRow {
+    #[tabled(rename = "STATUS")]
+    status: String,
+    #[tabled(rename = "COUNT")]
+    count: String,
+}
+
+fn output_pretty(
     sorted: &[(String, usize)],
     total: usize,
     filter_path: &str,
@@ -185,24 +197,44 @@ fn output_fancy(
 
     let search_suffix = search_dir.description();
 
-    println!("Stats for threads in {}{}", path_desc, search_suffix);
+    println!(
+        "{} {}{}",
+        "Stats for threads in".bold(),
+        path_desc,
+        search_suffix.dimmed()
+    );
     println!();
 
     if total == 0 {
-        println!("No threads found.");
+        println!("{}", "No threads found.".dimmed());
         if !search_dir.is_searching() {
-            println!("Hint: use -r to include nested directories, -u to search parents");
+            println!(
+                "{}",
+                "Hint: use -r to include nested directories, -u to search parents".dimmed()
+            );
         }
         return Ok(());
     }
 
-    println!("| Status     | Count |");
-    println!("|------------|-------|");
-    for (status, count) in sorted {
-        println!("| {:<10} | {:>5} |", status, count);
-    }
-    println!("|------------|-------|");
-    println!("| {:<10} | {:>5} |", "Total", total);
+    // Build table rows with styled status
+    let mut rows: Vec<StatsRow> = sorted
+        .iter()
+        .map(|(status, count)| StatsRow {
+            status: output::style_status(status).to_string(),
+            count: count.to_string(),
+        })
+        .collect();
+
+    // Add total row
+    rows.push(StatsRow {
+        status: "Total".bold().to_string(),
+        count: total.to_string().bold().to_string(),
+    });
+
+    let mut table = Table::new(rows);
+    table.with(Style::rounded());
+
+    println!("{}", table);
 
     Ok(())
 }
@@ -241,13 +273,12 @@ fn output_plain(
         return Ok(());
     }
 
-    println!("| Status     | Count |");
-    println!("|------------|-------|");
+    // Plain pipe-delimited format
+    println!("STATUS | COUNT");
     for (status, count) in sorted {
-        println!("| {:<10} | {:>5} |", status, count);
+        println!("{} | {}", status, count);
     }
-    println!("|------------|-------|");
-    println!("| {:<10} | {:>5} |", "Total", total);
+    println!("Total | {}", total);
 
     Ok(())
 }

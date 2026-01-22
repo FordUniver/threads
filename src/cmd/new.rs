@@ -43,8 +43,8 @@ pub struct NewArgs {
     #[arg(short = 'm', long)]
     m: Option<String>,
 
-    /// Output format (auto-detects TTY for fancy vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "fancy")]
+    /// Output format (auto-detects TTY for pretty vs plain)
+    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
     format: OutputFormat,
 
     /// Output as JSON (shorthand for --format=json)
@@ -157,7 +157,7 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
     let rel_path = workspace::path_relative_to_git_root(git_root, &thread_path);
 
     match format {
-        OutputFormat::Fancy | OutputFormat::Plain => {
+        OutputFormat::Pretty | OutputFormat::Plain => {
             println!("Created thread in {}: {}", scope.level_desc, id);
             println!("  → {}", rel_path);
 
@@ -196,7 +196,7 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
             git::generate_commit_message(git_root, &[thread_path.to_string_lossy().to_string()])
         });
         git::auto_commit(git_root, &thread_path, &msg)?;
-    } else if matches!(format, OutputFormat::Fancy | OutputFormat::Plain) {
+    } else if matches!(format, OutputFormat::Pretty | OutputFormat::Plain) {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
             id, id

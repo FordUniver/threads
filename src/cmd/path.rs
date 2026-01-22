@@ -13,8 +13,8 @@ pub struct PathArgs {
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// Output format (auto-detects TTY for fancy vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "fancy")]
+    /// Output format (auto-detects TTY for pretty vs plain)
+    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
     format: OutputFormat,
 
     /// Output as JSON (shorthand for --format=json)
@@ -41,7 +41,7 @@ pub fn run(args: PathArgs, ws: &Path) -> Result<(), String> {
     let rel_path = workspace::path_relative_to_git_root(ws, &file);
 
     match format {
-        OutputFormat::Fancy | OutputFormat::Plain => {
+        OutputFormat::Pretty | OutputFormat::Plain => {
             println!("{}", abs_path.display());
         }
         OutputFormat::Json => {

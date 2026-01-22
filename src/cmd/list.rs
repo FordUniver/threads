@@ -1,12 +1,14 @@
 use std::fs;
 use std::path::Path;
-use std::time::SystemTime;
 
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Utc};
 use clap::Args;
+use colored::Colorize;
 use serde::Serialize;
+use tabled::settings::Style;
+use tabled::{Table, Tabled};
 
-use crate::output::OutputFormat;
+use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
 use crate::workspace::{self, FindOptions};
 
@@ -40,8 +42,8 @@ pub struct ListArgs {
     #[arg(long)]
     status: Option<String>,
 
-    /// Output format (auto-detects TTY for fancy vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "fancy")]
+    /// Output format (auto-detects TTY for pretty vs plain)
+    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
     format: OutputFormat,
 
     /// Output as JSON (shorthand for --format=json)
@@ -49,7 +51,7 @@ pub struct ListArgs {
     json: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 struct ThreadInfo {
     id: String,
     status: String,
@@ -57,14 +59,56 @@ struct ThreadInfo {
     name: String,
     title: String,
     desc: String,
-    created: String,
-    updated: String,
     #[serde(skip)]
-    updated_ts: i64, // for sorting
+    created_dt: Option<DateTime<Local>>,
+    #[serde(skip)]
+    updated_dt: Option<DateTime<Local>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     path_absolute: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     is_pwd: bool,
+}
+
+impl ThreadInfo {
+    /// Format date for plain mode (YYYY-MM-DD)
+    fn created_plain(&self) -> String {
+        self.created_dt
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| "?".to_string())
+    }
+
+    fn updated_plain(&self) -> String {
+        self.updated_dt
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| "?".to_string())
+    }
+
+    /// Format date for pretty mode (short: "3h", "2d", "1w")
+    fn updated_short(&self) -> String {
+        self.updated_dt
+            .map(output::format_relative_short)
+            .unwrap_or_else(|| "?".to_string())
+    }
+
+    /// Format date for JSON/YAML (ISO 8601)
+    fn created_iso(&self) -> String {
+        self.created_dt
+            .map(|dt| dt.with_timezone(&Utc).to_rfc3339())
+            .unwrap_or_default()
+    }
+
+    fn updated_iso(&self) -> String {
+        self.updated_dt
+            .map(|dt| dt.with_timezone(&Utc).to_rfc3339())
+            .unwrap_or_default()
+    }
+
+    /// Get timestamp for sorting (most recent first)
+    fn updated_ts(&self) -> i64 {
+        self.updated_dt
+            .map(|dt| dt.timestamp())
+            .unwrap_or(0)
+    }
 }
 
 /// Describes the search direction for output display.
@@ -216,7 +260,7 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
         let is_pwd = rel_path == pwd_rel;
 
         // Get file timestamps
-        let (created, updated, updated_ts) = get_file_timestamps(&thread_path);
+        let (created_dt, updated_dt) = get_file_timestamps(&thread_path);
 
         results.push(ThreadInfo {
             id: t.id().to_string(),
@@ -225,9 +269,8 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             name,
             title,
             desc: t.frontmatter.desc.clone(),
-            created,
-            updated,
-            updated_ts,
+            created_dt,
+            updated_dt,
             path_absolute: if include_absolute {
                 Some(thread_path.to_string_lossy().to_string())
             } else {
@@ -238,10 +281,10 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
     }
 
     // Sort by updated timestamp, most recent first
-    results.sort_by(|a, b| b.updated_ts.cmp(&a.updated_ts));
+    results.sort_by_key(|t| std::cmp::Reverse(t.updated_ts()));
 
     match format {
-        OutputFormat::Fancy => output_fancy(
+        OutputFormat::Pretty => output_pretty(
             &results,
             git_root,
             &filter_path,
@@ -264,7 +307,54 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
     }
 }
 
-fn output_fancy(
+/// Row data for tabled output
+#[derive(Tabled)]
+struct TableRow {
+    #[tabled(rename = "ID")]
+    id: String,
+    #[tabled(rename = "STATUS")]
+    status: String,
+    #[tabled(rename = "AGE")]
+    age: String,
+    #[tabled(rename = "PATH")]
+    path: String,
+    #[tabled(rename = "TITLE")]
+    title: String,
+}
+
+/// Build filter description for summary line
+fn build_filter_desc(
+    include_closed: bool,
+    status_filter: Option<&str>,
+    search: Option<&str>,
+    search_dir: &SearchDirection,
+) -> String {
+    let mut parts = Vec::new();
+
+    // Status filter
+    if let Some(s) = status_filter {
+        parts.push(format!("status={}", s));
+    } else if !include_closed {
+        parts.push("open".to_string()); // "open" = non-terminal, not "active"
+    } else {
+        parts.push("all statuses".to_string());
+    }
+
+    // Search filter
+    if let Some(s) = search {
+        parts.push(format!("search=\"{}\"", s));
+    }
+
+    // Direction
+    let dir_desc = search_dir.description();
+    if !dir_desc.is_empty() {
+        parts.push(dir_desc.trim().to_string());
+    }
+
+    parts.join(", ")
+}
+
+fn output_pretty(
     results: &[ThreadInfo],
     git_root: &Path,
     filter_path: &str,
@@ -273,7 +363,7 @@ fn output_fancy(
     include_closed: bool,
     status_filter: Option<&str>,
 ) -> Result<(), String> {
-    // Fancy header: repo-name (rel/path/to/pwd)
+    // Header: repo-name (path) with PWD marker
     let repo_name = git_root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
@@ -285,58 +375,60 @@ fn output_fancy(
         format!(" ({})", filter_path)
     };
 
+    // PWD marker uses bold (not cyan - cyan is for status)
     let pwd_marker = if filter_path == pwd_rel {
-        " ← PWD"
+        " ← PWD".bold().to_string()
     } else {
-        ""
-    };
-
-    println!("{}{}{}", repo_name, path_desc, pwd_marker);
-    println!();
-
-    let status_desc = if let Some(s) = status_filter {
-        format!("{} ", s)
-    } else if include_closed {
         String::new()
-    } else {
-        "active ".to_string()
     };
 
-    let search_suffix = search_dir.description();
+    println!("{}{}{}", repo_name.bold(), path_desc.dimmed(), pwd_marker);
 
+    // Filter disclosure - always show what filters are active
+    let filter_desc = build_filter_desc(include_closed, status_filter, None, search_dir);
     println!(
-        "Showing {} {}threads{}",
-        results.len(),
-        status_desc,
-        search_suffix
+        "{} threads ({})",
+        results.len().to_string().bold(),
+        filter_desc.dimmed()
     );
     println!();
 
     if results.is_empty() {
         if !search_dir.is_searching() {
-            println!("Hint: use -r to include nested directories, -u to search parents");
+            println!(
+                "{}",
+                "Hint: use -r to include nested directories, -u to search parents".dimmed()
+            );
         }
         return Ok(());
     }
 
-    // Print table header
-    println!(
-        "{:<6} {:<10} {:<10} {:<10} {:<24} NAME",
-        "ID", "STATUS", "CREATED", "UPDATED", "PATH"
-    );
-    println!(
-        "{:<6} {:<10} {:<10} {:<10} {:<24} ----",
-        "--", "------", "-------", "-------", "----"
-    );
+    // Build table rows
+    let term_width = output::terminal_width();
+    let title_max = term_width.saturating_sub(50).max(20); // Leave room for other columns
 
-    for t in results {
-        let path_display = truncate(&t.path, 22);
-        let pwd_marker = if t.is_pwd { " ←" } else { "" };
-        println!(
-            "{:<6} {:<10} {:<10} {:<10} {:<24} {}{}",
-            t.id, t.status, t.created, t.updated, path_display, t.title, pwd_marker
-        );
-    }
+    let rows: Vec<TableRow> = results
+        .iter()
+        .map(|t| {
+            let short_path = output::shortest_path(&t.path, pwd_rel);
+            let path_display = output::truncate_front(&short_path, 20);
+            // PWD paths are bold, others dimmed
+            let path_styled = output::style_path(&path_display, t.is_pwd);
+
+            TableRow {
+                id: output::style_id(&t.id).to_string(),
+                status: output::style_status(&t.status).to_string(),
+                age: t.updated_short(),
+                path: path_styled,
+                title: output::truncate_back(&t.title, title_max),
+            }
+        })
+        .collect();
+
+    let mut table = Table::new(rows);
+    table.with(Style::rounded());
+
+    println!("{}", table);
 
     Ok(())
 }
@@ -366,40 +458,21 @@ fn output_plain(
         filter_path.to_string()
     };
 
-    let status_desc = if let Some(s) = status_filter {
-        s.to_string()
-    } else if include_closed {
-        String::new()
-    } else {
-        "active".to_string()
-    };
-
-    let search_suffix = search_dir.description();
-
     let pwd_suffix = if filter_path == pwd_rel {
         " ← PWD"
     } else {
         ""
     };
 
-    if !status_desc.is_empty() {
-        println!(
-            "Showing {} {} threads in {}{}{}",
-            results.len(),
-            status_desc,
-            path_desc,
-            search_suffix,
-            pwd_suffix
-        );
-    } else {
-        println!(
-            "Showing {} threads in {} (all statuses){}{}",
-            results.len(),
-            path_desc,
-            search_suffix,
-            pwd_suffix
-        );
-    }
+    // Full filter disclosure
+    let filter_desc = build_filter_desc(include_closed, status_filter, None, search_dir);
+    println!(
+        "Showing {} threads in {}{} ({})",
+        results.len(),
+        path_desc,
+        pwd_suffix,
+        filter_desc
+    );
     println!();
 
     if results.is_empty() {
@@ -409,26 +482,51 @@ fn output_plain(
         return Ok(());
     }
 
-    // Print table header
-    println!(
-        "{:<6} {:<10} {:<10} {:<10} {:<24} NAME",
-        "ID", "STATUS", "CREATED", "UPDATED", "PATH"
-    );
-    println!(
-        "{:<6} {:<10} {:<10} {:<10} {:<24} ----",
-        "--", "------", "-------", "-------", "----"
-    );
+    // Pipe-delimited format, no truncation, full paths
+    println!("ID | STATUS | CREATED | UPDATED | PATH | TITLE");
 
     for t in results {
-        let path_display = truncate(&t.path, 22);
-        let pwd_marker = if t.is_pwd { " ← PWD" } else { "" };
         println!(
-            "{:<6} {:<10} {:<10} {:<10} {:<24} {}{}",
-            t.id, t.status, t.created, t.updated, path_display, t.title, pwd_marker
+            "{} | {} | {} | {} | {} | {}",
+            t.id, t.status, t.created_plain(), t.updated_plain(), t.path, t.title
         );
     }
 
     Ok(())
+}
+
+/// Serializable thread info with ISO 8601 dates for JSON/YAML
+#[derive(Serialize)]
+struct ThreadInfoJson {
+    id: String,
+    status: String,
+    path: String,
+    name: String,
+    title: String,
+    desc: String,
+    created: String,
+    updated: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path_absolute: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    is_pwd: bool,
+}
+
+impl From<&ThreadInfo> for ThreadInfoJson {
+    fn from(t: &ThreadInfo) -> Self {
+        Self {
+            id: t.id.clone(),
+            status: t.status.clone(),
+            path: t.path.clone(),
+            name: t.name.clone(),
+            title: t.title.clone(),
+            desc: t.desc.clone(),
+            created: t.created_iso(),
+            updated: t.updated_iso(),
+            path_absolute: t.path_absolute.clone(),
+            is_pwd: t.is_pwd,
+        }
+    }
 }
 
 fn output_json(results: &[ThreadInfo], git_root: &Path, pwd_rel: &str) -> Result<(), String> {
@@ -436,19 +534,21 @@ fn output_json(results: &[ThreadInfo], git_root: &Path, pwd_rel: &str) -> Result
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| String::new());
 
+    let threads: Vec<ThreadInfoJson> = results.iter().map(ThreadInfoJson::from).collect();
+
     #[derive(Serialize)]
-    struct JsonOutput<'a> {
+    struct JsonOutput {
         pwd: String,
         git_root: String,
-        pwd_relative: &'a str,
-        threads: &'a [ThreadInfo],
+        pwd_relative: String,
+        threads: Vec<ThreadInfoJson>,
     }
 
     let output = JsonOutput {
         pwd,
         git_root: git_root.to_string_lossy().to_string(),
-        pwd_relative: pwd_rel,
-        threads: results,
+        pwd_relative: pwd_rel.to_string(),
+        threads,
     };
 
     let json = serde_json::to_string_pretty(&output)
@@ -462,19 +562,21 @@ fn output_yaml(results: &[ThreadInfo], git_root: &Path, pwd_rel: &str) -> Result
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|_| String::new());
 
+    let threads: Vec<ThreadInfoJson> = results.iter().map(ThreadInfoJson::from).collect();
+
     #[derive(Serialize)]
-    struct YamlOutput<'a> {
+    struct YamlOutput {
         pwd: String,
         git_root: String,
-        pwd_relative: &'a str,
-        threads: &'a [ThreadInfo],
+        pwd_relative: String,
+        threads: Vec<ThreadInfoJson>,
     }
 
     let output = YamlOutput {
         pwd,
         git_root: git_root.to_string_lossy().to_string(),
-        pwd_relative: pwd_rel,
-        threads: results,
+        pwd_relative: pwd_rel.to_string(),
+        threads,
     };
 
     let yaml =
@@ -483,47 +585,21 @@ fn output_yaml(results: &[ThreadInfo], git_root: &Path, pwd_rel: &str) -> Result
     Ok(())
 }
 
-fn truncate(s: &str, max_chars: usize) -> String {
-    let char_count = s.chars().count();
-    if char_count <= max_chars {
-        s.to_string()
-    } else {
-        let truncated: String = s.chars().take(max_chars - 1).collect();
-        format!("{}…", truncated)
-    }
-}
-
-/// Get file timestamps (created, updated) as formatted strings and raw timestamp for sorting
-fn get_file_timestamps(path: &Path) -> (String, String, i64) {
+/// Get file timestamps as DateTime values
+fn get_file_timestamps(path: &Path) -> (Option<DateTime<Local>>, Option<DateTime<Local>>) {
     let metadata = match fs::metadata(path) {
         Ok(m) => m,
-        Err(_) => return ("?".to_string(), "?".to_string(), 0),
+        Err(_) => return (None, None),
     };
 
-    let updated = metadata
-        .modified()
-        .map(format_time)
-        .unwrap_or_else(|_| "?".to_string());
-
-    let updated_ts = metadata
-        .modified()
-        .map(|t| {
-            t.duration_since(SystemTime::UNIX_EPOCH)
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0)
-        })
-        .unwrap_or(0);
+    let updated: Option<DateTime<Local>> = metadata.modified().ok().map(|t| t.into());
 
     // macOS and some filesystems support creation time; fall back to modified if unavailable
-    let created = metadata
+    let created: Option<DateTime<Local>> = metadata
         .created()
-        .map(format_time)
-        .unwrap_or_else(|_| updated.clone());
+        .ok()
+        .map(|t| t.into())
+        .or(updated);
 
-    (created, updated, updated_ts)
-}
-
-fn format_time(time: SystemTime) -> String {
-    let datetime: DateTime<Local> = time.into();
-    datetime.format("%Y-%m-%d").to_string()
+    (created, updated)
 }

@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use clap::Args;
+use colored::Colorize;
 use serde::Serialize;
 
 use crate::output::OutputFormat;
@@ -17,8 +18,8 @@ pub struct ValidateArgs {
     #[arg(short = 'r', long)]
     recursive: bool,
 
-    /// Output format (auto-detects TTY for fancy vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "fancy")]
+    /// Output format (auto-detects TTY for pretty vs plain)
+    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
     format: OutputFormat,
 
     /// Output as JSON (shorthand for --format=json)
@@ -95,11 +96,44 @@ pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
     }
 
     match format {
-        OutputFormat::Fancy | OutputFormat::Plain => {
-            for r in &results {
-                if r.valid {
-                    println!("OK: {}", r.path);
-                } else {
+        OutputFormat::Pretty => {
+            // Summary line
+            let total = results.len();
+            let ok = total - errors;
+            if errors == 0 {
+                println!(
+                    "Validated {} threads: {}",
+                    total.to_string().bold(),
+                    "all OK ✓".green()
+                );
+            } else {
+                println!(
+                    "Validated {} threads: {} OK, {}",
+                    total.to_string().bold(),
+                    ok.to_string().green(),
+                    format!("{} with issues", errors).yellow()
+                );
+                println!();
+                // Only show offenders
+                for r in results.iter().filter(|r| !r.valid) {
+                    println!("  {} {}", "⚠".yellow(), r.path);
+                    for issue in &r.issues {
+                        println!("    {}", issue.dimmed());
+                    }
+                }
+            }
+        }
+        OutputFormat::Plain => {
+            // Summary line
+            let total = results.len();
+            let ok = total - errors;
+            if errors == 0 {
+                println!("Validated {} threads: all OK", total);
+            } else {
+                println!("Validated {} threads: {} OK, {} with issues", total, ok, errors);
+                println!();
+                // Only show offenders
+                for r in results.iter().filter(|r| !r.valid) {
                     println!("WARN: {}: {}", r.path, r.issues.join(", "));
                 }
             }

@@ -141,7 +141,7 @@ Blocked status supports reasons: `blocked (waiting on review)`
 All commands support multiple output formats:
 
 ```bash
-threads list --format fancy   # Default: colored table
+threads list --format pretty  # Default: colored table
 threads list --format plain   # Plain text
 threads list --format json    # JSON
 threads list --format yaml    # YAML
