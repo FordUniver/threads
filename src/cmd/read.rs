@@ -27,6 +27,14 @@ pub struct ReadArgs {
     /// Force pretty output (rich formatting even when not TTY)
     #[arg(long)]
     pretty: bool,
+
+    /// Override terminal width (for testing)
+    #[arg(long, hide = true)]
+    width: Option<usize>,
+
+    /// Debug: print width calculations
+    #[arg(long, hide = true)]
+    debug_widths: bool,
 }
 
 pub fn run(args: ReadArgs, ws: &Path) -> Result<(), String> {
@@ -43,7 +51,7 @@ pub fn run(args: ReadArgs, ws: &Path) -> Result<(), String> {
     let use_pretty = args.pretty || std::io::stdout().is_terminal();
 
     if use_pretty {
-        output_pretty(&file, ws)?;
+        output_pretty(&file, ws, args.width, args.debug_widths)?;
     } else {
         // Non-TTY without --pretty: raw markdown
         print!("{}", content);
@@ -52,9 +60,18 @@ pub fn run(args: ReadArgs, ws: &Path) -> Result<(), String> {
 }
 
 /// Rich pretty output - single box with sections separated by horizontal lines
-fn output_pretty(file: &Path, ws: &Path) -> Result<(), String> {
+fn output_pretty(
+    file: &Path,
+    ws: &Path,
+    width_override: Option<usize>,
+    debug: bool,
+) -> Result<(), String> {
     let thread = Thread::parse(file)?;
-    let term_width = output::terminal_width().min(100);
+    let term_width = width_override.unwrap_or_else(|| output::terminal_width().min(100));
+
+    if debug {
+        eprintln!("DEBUG: term_width={}", term_width);
+    }
 
     let rel_path = file
         .strip_prefix(ws)
@@ -121,26 +138,40 @@ fn output_pretty(file: &Path, ws: &Path) -> Result<(), String> {
     sections.push(format!("{}\n\n{}", history_content, rel_path.dimmed()));
 
     // === Render box with sections ===
-    print_boxed_sections(&sections, term_width);
+    print_boxed_sections(&sections, term_width, debug);
 
     Ok(())
 }
 
 /// Print sections in a rounded box with horizontal separators
-fn print_boxed_sections(sections: &[String], max_width: usize) {
+fn print_boxed_sections(sections: &[String], max_width: usize, debug: bool) {
     let inner_width = max_width.saturating_sub(4); // Account for "│ " and " │"
+
+    if debug {
+        eprintln!("DEBUG: max_width={}, inner_width={}", max_width, inner_width);
+    }
 
     // Top border
     println!("╭{}╮", "─".repeat(max_width - 2));
 
     for (i, section) in sections.iter().enumerate() {
         // Print section content with padding
-        for line in section.lines() {
+        for (line_num, line) in section.lines().enumerate() {
             // Wrap or truncate long lines
             let wrapped_lines = wrap_line(line, inner_width);
             for wrapped in wrapped_lines {
                 let visible_width = strip_ansi_width(&wrapped);
                 let padding = inner_width.saturating_sub(visible_width);
+                let total = 4 + visible_width + padding; // "│ " + content + padding + " │"
+
+                if debug && total != max_width {
+                    eprintln!(
+                        "DEBUG: section={} line={}: visible_width={}, padding={}, total={} (expected {})",
+                        i, line_num, visible_width, padding, total, max_width
+                    );
+                    eprintln!("DEBUG:   content: {:?}", &wrapped[..wrapped.len().min(50)]);
+                }
+
                 println!("│ {}{} │", wrapped, " ".repeat(padding));
             }
         }
