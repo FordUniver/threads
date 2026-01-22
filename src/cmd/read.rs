@@ -3,6 +3,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command;
 
+use chrono::{Local, NaiveDateTime};
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use colored::Colorize;
@@ -81,29 +82,15 @@ fn output_pretty(
     // Get git history
     let git_history = get_git_history(ws, &rel_path);
 
-    // Count items
-    let (log_count, todo_count, todo_done) = count_items(&thread.content);
-
-    // === Section 1: Header (like info) ===
+    // === Section 1: Header ===
     let title = if !thread.name().is_empty() {
         thread.name().to_string()
     } else {
         thread::extract_name_from_path(file).replace('-', " ")
     };
 
-    let todo_text = if todo_count == 0 {
-        "0".dimmed().to_string()
-    } else if todo_done == todo_count {
-        format!("{}/{} ✓", todo_done, todo_count).green().to_string()
-    } else if todo_done > 0 {
-        format!("{}/{}", todo_done, todo_count).yellow().to_string()
-    } else {
-        format!("0/{}", todo_count)
-    };
-
     let status_styled = output::style_status(&thread.base_status()).to_string();
-    let stats = format!("{} · {} · {}", log_count, todo_text, status_styled);
-    let title_line = format!("{}  {}", title.bold(), stats);
+    let title_line = format!("{}  {}", title.bold(), status_styled);
 
     let header = if thread.frontmatter.desc.is_empty() {
         title_line
@@ -307,7 +294,7 @@ fn format_todos(todos: &str) -> String {
         .join("\n")
 }
 
-/// Format log section with highlighted timestamps
+/// Format log section with relative timestamps
 fn format_log(log: &str) -> String {
     // New format: - **2026-01-22 12:25:00** message
     let full_ts_re = Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*(.*)$").unwrap();
@@ -315,11 +302,12 @@ fn format_log(log: &str) -> String {
     let time_re = Regex::new(r"^- \*\*(\d{2}:\d{2})\*\*(.*)$").unwrap();
     let date_re = Regex::new(r"^### (\d{4}-\d{2}-\d{2})$").unwrap();
 
+    let now = Local::now().naive_local();
     let mut current_date = String::new();
 
     log.lines()
         .filter_map(|line| {
-            // Skip old date headers (they'll be incorporated into entries)
+            // Skip old date headers
             if let Some(caps) = date_re.captures(line) {
                 current_date = caps[1].to_string();
                 return None;
@@ -327,22 +315,25 @@ fn format_log(log: &str) -> String {
 
             // New format: full timestamp
             if let Some(caps) = full_ts_re.captures(line) {
-                let ts = &caps[1];
+                let ts_str = &caps[1];
                 let rest = &caps[2];
-                return Some(format!("{} {}", ts.cyan(), rest.trim()));
+                let relative = timestamp_to_relative(ts_str, &now);
+                return Some(format!("{:>4} {}", relative.cyan(), rest.trim()));
             }
 
             // Old format: time only (use current_date context)
             if let Some(caps) = time_re.captures(line) {
                 let time = &caps[1];
                 let rest = &caps[2];
-                if current_date.is_empty() {
-                    return Some(format!("{} {}", time.cyan(), rest.trim()));
+                if !current_date.is_empty() {
+                    let ts_str = format!("{} {}:00", current_date, time);
+                    let relative = timestamp_to_relative(&ts_str, &now);
+                    return Some(format!("{:>4} {}", relative.cyan(), rest.trim()));
                 }
-                return Some(format!("{} {}:{}", current_date.cyan(), time.cyan(), rest.trim()));
+                return Some(format!("{:>4} {}", time.cyan(), rest.trim()));
             }
 
-            // Keep other lines (empty lines, etc) but skip pure whitespace
+            // Skip empty lines
             if line.trim().is_empty() {
                 None
             } else {
@@ -351,6 +342,34 @@ fn format_log(log: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Convert timestamp string to relative time (e.g., "8m", "2h", "3d")
+fn timestamp_to_relative(ts_str: &str, now: &NaiveDateTime) -> String {
+    let parsed = NaiveDateTime::parse_from_str(ts_str, "%Y-%m-%d %H:%M:%S");
+    let dt = match parsed {
+        Ok(dt) => dt,
+        Err(_) => return ts_str.to_string(),
+    };
+
+    let duration = *now - dt;
+    let secs = duration.num_seconds();
+
+    if secs < 60 {
+        "now".to_string()
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h", secs / 3600)
+    } else if secs < 604800 {
+        format!("{}d", secs / 86400)
+    } else if secs < 2592000 {
+        format!("{}w", secs / 604800)
+    } else if secs < 31536000 {
+        format!("{}mo", secs / 2592000)
+    } else {
+        format!("{}y", secs / 31536000)
+    }
 }
 
 /// Git log entry
@@ -456,39 +475,3 @@ fn format_git_entry(entry: &GitLogEntry, max_width: usize) -> String {
     format!("{} {} {}", time_str.dimmed(), hash_str, message)
 }
 
-/// Count log entries and todo items
-fn count_items(content: &str) -> (usize, usize, usize) {
-    let mut log_count = 0;
-    let mut todo_count = 0;
-    let mut todo_done = 0;
-    let mut in_log = false;
-    let mut in_todo = false;
-
-    for line in content.lines() {
-        if line.starts_with("## Log") {
-            in_log = true;
-            in_todo = false;
-        } else if line.starts_with("## Todo") {
-            in_todo = true;
-            in_log = false;
-        } else if line.starts_with("## ") {
-            in_log = false;
-            in_todo = false;
-        }
-
-        if in_log && line.starts_with("- **") {
-            log_count += 1;
-        }
-
-        if in_todo {
-            if line.starts_with("- [ ]") {
-                todo_count += 1;
-            } else if line.starts_with("- [x]") {
-                todo_count += 1;
-                todo_done += 1;
-            }
-        }
-    }
-
-    (log_count, todo_count, todo_done)
-}
