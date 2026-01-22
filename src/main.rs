@@ -52,6 +52,9 @@ enum Commands {
     #[command(alias = "cat", alias = "show")]
     Read(cmd::read::ReadArgs),
 
+    /// Show thread info summary
+    Info(cmd::info::InfoArgs),
+
     /// Print thread file path
     Path(cmd::path::PathArgs),
 
@@ -154,6 +157,7 @@ fn main() {
         Commands::Git(args) => cmd::git_cmd::run(args, &ws),
         Commands::Stats(args) => cmd::stats::run(args, &ws),
         Commands::Read(args) => cmd::read::run(args, &ws),
+        Commands::Info(args) => cmd::info::run(args, &ws),
         Commands::Path(args) => cmd::path::run(args, &ws),
         Commands::Status(args) => cmd::status::run(args, &ws),
         Commands::Update(args) => cmd::update::run(args, &ws),

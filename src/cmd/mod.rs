@@ -1,6 +1,7 @@
 pub mod body;
 pub mod commit;
 pub mod git_cmd;
+pub mod info;
 pub mod list;
 pub mod log;
 pub mod move_cmd;
