@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command;
 
@@ -8,10 +7,11 @@ use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use colored::Colorize;
 use regex::Regex;
+use serde::Serialize;
 use termimad::MadSkin;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::output;
+use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
 use crate::workspace;
 
@@ -21,13 +21,13 @@ pub struct ReadArgs {
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// Output raw markdown (skip rendering)
-    #[arg(long)]
-    raw: bool,
+    /// Output format (auto-detects TTY for pretty vs plain)
+    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
+    format: OutputFormat,
 
-    /// Force pretty output (rich formatting even when not TTY)
+    /// Output as JSON (shorthand for --format=json)
     #[arg(long)]
-    pretty: bool,
+    json: bool,
 
     /// Override terminal width (for testing)
     #[arg(long, hide = true)]
@@ -42,21 +42,85 @@ pub fn run(args: ReadArgs, ws: &Path) -> Result<(), String> {
     let file = workspace::find_by_ref(ws, &args.id)?;
     let content = fs::read_to_string(&file).map_err(|e| format!("reading file: {}", e))?;
 
-    // Raw mode: just print content
-    if args.raw {
-        print!("{}", content);
-        return Ok(());
-    }
-
-    // Pretty mode: when --pretty flag OR when TTY (auto-detect)
-    let use_pretty = args.pretty || std::io::stdout().is_terminal();
-
-    if use_pretty {
-        output_pretty(&file, ws, args.width, args.debug_widths)?;
+    // Resolve format (handle --json shorthand and TTY auto-detection)
+    let format = if args.json {
+        OutputFormat::Json
     } else {
-        // Non-TTY without --pretty: raw markdown
-        print!("{}", content);
+        args.format.resolve()
+    };
+
+    match format {
+        OutputFormat::Pretty => {
+            output_pretty(&file, ws, args.width, args.debug_widths)?;
+        }
+        OutputFormat::Plain => {
+            // Plain: raw markdown content
+            print!("{}", content);
+        }
+        OutputFormat::Json | OutputFormat::Yaml => {
+            let thread = Thread::parse(&file)?;
+            let rel_path = file
+                .strip_prefix(ws)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| file.to_string_lossy().to_string());
+
+            output_structured(&thread, &rel_path, &content, format)?;
+        }
     }
+    Ok(())
+}
+
+/// Structured output data for JSON/YAML
+#[derive(Serialize)]
+struct ThreadOutput {
+    id: String,
+    name: String,
+    status: String,
+    desc: String,
+    path: String,
+    body: String,
+    notes: String,
+    todo: String,
+    log: String,
+    raw: String,
+}
+
+/// Output thread as JSON or YAML
+fn output_structured(
+    thread: &Thread,
+    rel_path: &str,
+    raw_content: &str,
+    format: OutputFormat,
+) -> Result<(), String> {
+    let output = ThreadOutput {
+        id: thread.frontmatter.id.clone(),
+        name: thread.name().to_string(),
+        status: thread.frontmatter.status.clone(),
+        desc: thread.frontmatter.desc.clone(),
+        path: rel_path.to_string(),
+        body: thread::extract_section(&thread.content, "Body"),
+        notes: thread::extract_section(&thread.content, "Notes"),
+        todo: thread::extract_section(&thread.content, "Todo"),
+        log: thread::extract_section(&thread.content, "Log"),
+        raw: raw_content.to_string(),
+    };
+
+    match format {
+        OutputFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&output).map_err(|e| format!("JSON error: {}", e))?
+            );
+        }
+        OutputFormat::Yaml => {
+            print!(
+                "{}",
+                serde_yaml::to_string(&output).map_err(|e| format!("YAML error: {}", e))?
+            );
+        }
+        _ => unreachable!(),
+    }
+
     Ok(())
 }
 

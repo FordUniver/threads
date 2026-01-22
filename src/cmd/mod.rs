@@ -1,5 +1,5 @@
 pub mod body;
-pub mod commit;
+pub mod cache;
 pub mod git_cmd;
 pub mod info;
 pub mod list;

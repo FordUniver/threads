@@ -16,13 +16,13 @@ pub struct NoteArgs {
     /// Action: add, edit, remove
     action: String,
 
-    /// Text or hash (depending on action)
+    /// Note text (for add) or hash reference (for edit/remove)
     #[arg(default_value = "")]
-    arg1: String,
+    text: String,
 
-    /// New text for edit action
+    /// New text when editing (edit action only)
     #[arg(default_value = "")]
-    arg2: String,
+    new_text: String,
 
     /// Commit after editing
     #[arg(long)]
@@ -40,10 +40,10 @@ pub fn run(args: NoteArgs, ws: &Path) -> Result<(), String> {
 
     match args.action.as_str() {
         "add" => {
-            if args.arg1.is_empty() {
+            if args.text.is_empty() {
                 return Err("usage: threads note <id> add \"text\"".to_string());
             }
-            let text = &args.arg1;
+            let text = &args.text;
 
             let (new_content, hash) = thread::add_note(&t.content, text);
             t.content = new_content;
@@ -55,11 +55,11 @@ pub fn run(args: NoteArgs, ws: &Path) -> Result<(), String> {
             println!("Added note: {} (id: {})", text, hash);
         }
         "edit" => {
-            if args.arg1.is_empty() || args.arg2.is_empty() {
+            if args.text.is_empty() || args.new_text.is_empty() {
                 return Err("usage: threads note <id> edit <hash> \"new text\"".to_string());
             }
-            let hash = &args.arg1;
-            let new_text = &args.arg2;
+            let hash = &args.text;
+            let new_text = &args.new_text;
 
             // Check for ambiguous hash
             let count = thread::count_matching_items(&t.content, "Notes", hash);
@@ -78,10 +78,10 @@ pub fn run(args: NoteArgs, ws: &Path) -> Result<(), String> {
             println!("Edited note {}", hash);
         }
         "remove" => {
-            if args.arg1.is_empty() {
+            if args.text.is_empty() {
                 return Err("usage: threads note <id> remove <hash>".to_string());
             }
-            let hash = &args.arg1;
+            let hash = &args.text;
 
             // Check for ambiguous hash
             let count = thread::count_matching_items(&t.content, "Notes", hash);

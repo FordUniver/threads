@@ -1,10 +1,10 @@
-use std::io::{self, Read};
 use std::path::Path;
 
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
 use crate::git;
+use crate::input;
 use crate::thread::{self, Thread};
 use crate::workspace;
 
@@ -32,7 +32,7 @@ pub fn run(args: LogArgs, ws: &Path) -> Result<(), String> {
 
     // Read entry from stdin if not provided
     if entry.is_empty() {
-        entry = read_stdin_if_available();
+        entry = input::read_stdin(true);
     }
 
     if entry.is_empty() {
@@ -64,19 +64,4 @@ pub fn run(args: LogArgs, ws: &Path) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn read_stdin_if_available() -> String {
-    if is_stdin_piped() {
-        let mut buffer = String::new();
-        if io::stdin().read_to_string(&mut buffer).is_ok() {
-            return buffer.trim().to_string();
-        }
-    }
-    String::new()
-}
-
-fn is_stdin_piped() -> bool {
-    use std::io::IsTerminal;
-    !io::stdin().is_terminal()
 }

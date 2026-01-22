@@ -81,15 +81,18 @@ pub fn is_git_root(path: &Path) -> bool {
 
 /// Find all thread file paths within the git root.
 /// Scans recursively, respecting git boundaries (stops at nested git repos).
+/// Paths are canonicalized and deduplicated to handle symlinks correctly.
 pub fn find_all_threads(git_root: &Path) -> Result<Vec<PathBuf>, String> {
     let mut threads = Vec::new();
     find_threads_recursive(git_root, git_root, &mut threads)?;
     threads.sort();
+    threads.dedup();
     Ok(threads)
 }
 
 /// Recursively find .threads directories and collect thread files.
 /// Stops at nested git repositories (directories containing .git).
+/// Paths are canonicalized to handle symlinks correctly.
 fn find_threads_recursive(
     dir: &Path,
     git_root: &Path,
@@ -104,7 +107,9 @@ fn find_threads_recursive(
                 if path.extension().is_some_and(|e| e == "md") {
                     // Skip archive subdirectory
                     if !path.to_string_lossy().contains("/archive/") {
-                        threads.push(path);
+                        // Canonicalize to resolve symlinks and avoid duplicates
+                        let canonical = path.canonicalize().unwrap_or(path);
+                        threads.push(canonical);
                     }
                 }
             }
@@ -171,6 +176,7 @@ pub fn find_threads_with_options(
 }
 
 /// Collect threads from .threads directory at the given path.
+/// Paths are canonicalized to handle symlinks correctly.
 fn collect_threads_at_path(dir: &Path, threads: &mut Vec<PathBuf>) {
     let threads_dir = dir.join(".threads");
     if threads_dir.is_dir() {
@@ -180,7 +186,9 @@ fn collect_threads_at_path(dir: &Path, threads: &mut Vec<PathBuf>) {
                 if path.extension().is_some_and(|e| e == "md") {
                     // Skip archive subdirectory
                     if !path.to_string_lossy().contains("/archive/") {
-                        threads.push(path);
+                        // Canonicalize to resolve symlinks and avoid duplicates
+                        let canonical = path.canonicalize().unwrap_or(path);
+                        threads.push(canonical);
                     }
                 }
             }

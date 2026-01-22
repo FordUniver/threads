@@ -8,6 +8,7 @@ use clap_complete::{generate, Shell};
 mod cache;
 mod cmd;
 mod git;
+mod input;
 mod output;
 mod thread;
 mod workspace;
@@ -37,13 +38,13 @@ enum Commands {
     #[command(alias = "mv")]
     Move(cmd::move_cmd::MoveArgs),
 
-    /// Commit thread changes
-    Commit(cmd::commit::CommitArgs),
-
     /// Validate thread files
     Validate(cmd::validate::ValidateArgs),
 
-    /// Show pending thread changes
+    /// Manage timestamp cache
+    Cache(cmd::cache::CacheArgs),
+
+    /// Git operations (status, commit)
     Git(cmd::git_cmd::GitArgs),
 
     /// Show thread count by status
@@ -153,8 +154,8 @@ fn main() {
         Commands::List(args) => cmd::list::run(args, &ws),
         Commands::New(args) => cmd::new::run(args, &ws),
         Commands::Move(args) => cmd::move_cmd::run(args, &ws),
-        Commands::Commit(args) => cmd::commit::run(args, &ws),
         Commands::Validate(args) => cmd::validate::run(args, &ws),
+        Commands::Cache(args) => cmd::cache::run(args, &ws),
         Commands::Git(args) => cmd::git_cmd::run(args, &ws),
         Commands::Stats(args) => cmd::stats::run(args, &ws),
         Commands::Read(args) => cmd::read::run(args, &ws),

@@ -1,5 +1,4 @@
 use std::fs;
-use std::io::{self, Read};
 use std::path::Path;
 
 use chrono::Local;
@@ -7,6 +6,7 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::git;
+use crate::input;
 use crate::output::OutputFormat;
 use crate::thread;
 use crate::workspace;
@@ -101,7 +101,7 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
 
     // Read body from stdin if available and not provided via flag
     let body = if args.body.is_empty() {
-        read_stdin_if_available()
+        input::read_stdin(false)
     } else {
         args.body.clone()
     };
@@ -206,21 +206,4 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-fn read_stdin_if_available() -> String {
-    // Check if stdin has data available (non-blocking check)
-    // On Unix, we can check if stdin is a tty
-    if is_stdin_piped() {
-        let mut buffer = String::new();
-        if io::stdin().read_to_string(&mut buffer).is_ok() {
-            return buffer;
-        }
-    }
-    String::new()
-}
-
-fn is_stdin_piped() -> bool {
-    use std::io::IsTerminal;
-    !io::stdin().is_terminal()
 }
