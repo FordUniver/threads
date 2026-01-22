@@ -231,43 +231,24 @@ pub fn generate_hash(text: &str) -> String {
     format!("{:02x}{:02x}", result[0], result[1])
 }
 
-/// Insert a log entry with timestamp
+/// Insert a log entry with full timestamp
 pub fn insert_log_entry(content: &str, entry: &str) -> String {
-    let today = Local::now().format("%Y-%m-%d").to_string();
-    let timestamp = Local::now().format("%H:%M").to_string();
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let bullet_entry = format!("- **{}** {}", timestamp, entry);
-    let heading = format!("### {}", today);
-
-    // Check if today's heading exists
-    let today_pattern = format!("### {}", today);
-    if content.contains(&today_pattern) {
-        // Insert after today's heading
-        let re = Regex::new(&format!(r"(?m)(^### {})\n", regex::escape(&today))).unwrap();
-        return re
-            .replace(
-                content,
-                format!("$1\n\n{}\n", escape_for_replacement(&bullet_entry)),
-            )
-            .to_string();
-    }
 
     // Check if Log section exists
     if LOG_SECTION_RE.is_match(content) {
-        // Insert new heading after ## Log
+        // Insert after ## Log
         return LOG_SECTION_RE
             .replace(
                 content,
-                format!(
-                    "## Log\n\n{}\n\n{}",
-                    heading,
-                    escape_for_replacement(&bullet_entry)
-                ),
+                format!("## Log\n\n{}", escape_for_replacement(&bullet_entry)),
             )
             .to_string();
     }
 
     // No Log section - append one
-    format!("{}\n## Log\n\n{}\n\n{}\n", content, heading, bullet_entry)
+    format!("{}\n## Log\n\n{}\n", content, bullet_entry)
 }
 
 /// Ensure a section exists, placing it before another section

@@ -250,12 +250,10 @@ fn strip_ansi_width(s: &str) -> usize {
 
 /// Format body section - render markdown
 fn format_body(body: &str) -> String {
-    let header = "Body".bold().to_string();
     let skin = MadSkin::default();
     let mut buf = Vec::new();
     skin.write_text_on(&mut buf, body).ok();
-    let rendered = String::from_utf8_lossy(&buf).trim().to_string();
-    format!("{}\n{}", header, rendered)
+    String::from_utf8_lossy(&buf).trim().to_string()
 }
 
 /// Format notes section with dimmed hashes
@@ -284,19 +282,18 @@ fn format_notes(notes: &str) -> String {
 
 /// Format todo section with colored checkboxes
 fn format_todos(todos: &str) -> String {
-    let header = "Todo".bold().to_string();
     let hash_re = Regex::new(r"<!--\s*([a-f0-9]{4})\s*-->").unwrap();
 
-    let formatted: Vec<String> = todos
+    todos
         .lines()
         .map(|line| {
             let mut line = line.to_string();
 
-            // Color checkboxes
+            // Replace checkboxes with unicode squares
             if line.contains("- [x]") {
-                line = line.replace("- [x]", &format!("- {}", "[x]".green()));
+                line = line.replace("- [x]", &"☑".green().to_string());
             } else if line.contains("- [ ]") {
-                line = line.replace("- [ ]", &format!("- {}", "[ ]".yellow()));
+                line = line.replace("- [ ]", &"☐".yellow().to_string());
             }
 
             // Dim the hash comment
@@ -306,37 +303,54 @@ fn format_todos(todos: &str) -> String {
                 })
                 .to_string()
         })
-        .collect();
-
-    format!("{}\n{}", header, formatted.join("\n"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Format log section with highlighted timestamps
 fn format_log(log: &str) -> String {
-    let header = "Log".bold().to_string();
-    let time_re = Regex::new(r"^(- \*\*)(\d{2}:\d{2})(\*\*)(.*)$").unwrap();
-    let date_re = Regex::new(r"^(### )(\d{4}-\d{2}-\d{2})$").unwrap();
+    // New format: - **2026-01-22 12:25:00** message
+    let full_ts_re = Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*(.*)$").unwrap();
+    // Old format: - **12:25** message (under ### date header)
+    let time_re = Regex::new(r"^- \*\*(\d{2}:\d{2})\*\*(.*)$").unwrap();
+    let date_re = Regex::new(r"^### (\d{4}-\d{2}-\d{2})$").unwrap();
 
-    let formatted: Vec<String> = log
-        .lines()
-        .map(|line| {
-            // Format date headers
+    let mut current_date = String::new();
+
+    log.lines()
+        .filter_map(|line| {
+            // Skip old date headers (they'll be incorporated into entries)
             if let Some(caps) = date_re.captures(line) {
-                return format!("{}{}", "### ".dimmed(), caps[2].to_string().cyan());
+                current_date = caps[1].to_string();
+                return None;
             }
 
-            // Format time entries
+            // New format: full timestamp
+            if let Some(caps) = full_ts_re.captures(line) {
+                let ts = &caps[1];
+                let rest = &caps[2];
+                return Some(format!("{} {}", ts.cyan(), rest.trim()));
+            }
+
+            // Old format: time only (use current_date context)
             if let Some(caps) = time_re.captures(line) {
-                let time = &caps[2];
-                let rest = &caps[4];
-                return format!("- {} {}", time.cyan().bold(), rest.trim());
+                let time = &caps[1];
+                let rest = &caps[2];
+                if current_date.is_empty() {
+                    return Some(format!("{} {}", time.cyan(), rest.trim()));
+                }
+                return Some(format!("{} {}:{}", current_date.cyan(), time.cyan(), rest.trim()));
             }
 
-            line.to_string()
+            // Keep other lines (empty lines, etc) but skip pure whitespace
+            if line.trim().is_empty() {
+                None
+            } else {
+                Some(line.to_string())
+            }
         })
-        .collect();
-
-    format!("{}\n{}", header, formatted.join("\n"))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Git log entry
@@ -407,15 +421,13 @@ fn shorten_relative_time(s: &str) -> String {
 
 /// Format git history section (like info command)
 fn format_history(history: &[GitLogEntry], max_width: usize) -> String {
-    let header = "History".bold().to_string();
-
     if history.is_empty() {
-        return format!("{}\n{}", header, "No commits (untracked)".dimmed());
+        return "No commits (untracked)".dimmed().to_string();
     }
 
     let total = history.len();
-    let lines: Vec<String> = if total <= 5 {
-        history.iter().map(|e| format_git_entry(e, max_width)).collect()
+    if total <= 5 {
+        history.iter().map(|e| format_git_entry(e, max_width)).collect::<Vec<_>>().join("\n")
     } else {
         // Show first 4 + ellipsis + initial commit
         let mut lines: Vec<String> = history
@@ -427,10 +439,8 @@ fn format_history(history: &[GitLogEntry], max_width: usize) -> String {
         if let Some(initial) = history.last() {
             lines.push(format_git_entry(initial, max_width));
         }
-        lines
-    };
-
-    format!("{}\n{}", header, lines.join("\n"))
+        lines.join("\n")
+    }
 }
 
 /// Format a single git log entry
