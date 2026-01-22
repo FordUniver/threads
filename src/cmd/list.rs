@@ -4,10 +4,12 @@ use std::path::Path;
 use chrono::{DateTime, Local, Utc};
 use clap::Args;
 use colored::Colorize;
+use git2::Repository;
 use serde::Serialize;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
+use crate::git;
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
 use crate::workspace::{self, FindOptions};
@@ -152,6 +154,9 @@ impl SearchDirection {
 }
 
 pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
+    // Open repository for git-based timestamps
+    let repo = workspace::open()?;
+
     // Determine output format (handle --json shorthand)
     let format = if args.json {
         OutputFormat::Json
@@ -259,8 +264,8 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
 
         let is_pwd = rel_path == pwd_rel;
 
-        // Get file timestamps
-        let (created_dt, updated_dt) = get_file_timestamps(&thread_path);
+        // Get timestamps: created from filesystem, updated from git
+        let (created_dt, updated_dt) = get_timestamps(&repo, git_root, &thread_path);
 
         results.push(ThreadInfo {
             id: t.id().to_string(),
@@ -585,21 +590,30 @@ fn output_yaml(results: &[ThreadInfo], git_root: &Path, pwd_rel: &str) -> Result
     Ok(())
 }
 
-/// Get file timestamps as DateTime values
-fn get_file_timestamps(path: &Path) -> (Option<DateTime<Local>>, Option<DateTime<Local>>) {
-    let metadata = match fs::metadata(path) {
-        Ok(m) => m,
-        Err(_) => return (None, None),
-    };
-
-    let updated: Option<DateTime<Local>> = metadata.modified().ok().map(|t| t.into());
-
-    // macOS and some filesystems support creation time; fall back to modified if unavailable
-    let created: Option<DateTime<Local>> = metadata
-        .created()
+/// Get timestamps: created from filesystem, updated from git (last commit date)
+fn get_timestamps(
+    repo: &Repository,
+    git_root: &Path,
+    path: &Path,
+) -> (Option<DateTime<Local>>, Option<DateTime<Local>>) {
+    // Created: use filesystem creation time
+    let created_dt: Option<DateTime<Local>> = fs::metadata(path)
         .ok()
-        .map(|t| t.into())
-        .or(updated);
+        .and_then(|m| m.created().ok())
+        .map(|t| t.into());
 
-    (created, updated)
+    // Updated: use git last commit date, fall back to filesystem mtime
+    let rel_path = path.strip_prefix(git_root).unwrap_or(path);
+    let updated_dt: Option<DateTime<Local>> = git::last_commit_date(repo, rel_path)
+        .and_then(|secs| DateTime::from_timestamp(secs, 0))
+        .map(|dt| dt.with_timezone(&Local))
+        .or_else(|| {
+            // Fall back to filesystem mtime for uncommitted files
+            fs::metadata(path)
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .map(|t| t.into())
+        });
+
+    (created_dt.or(updated_dt), updated_dt)
 }
