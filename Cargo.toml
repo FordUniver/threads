@@ -15,6 +15,9 @@ regex = "1"
 md-5 = "0.10"
 serde_json = "1"
 
+[package.metadata]
+tools-release = true
+
 [profile.release]
 opt-level = "z"
 lto = true
