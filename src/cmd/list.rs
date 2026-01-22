@@ -500,14 +500,9 @@ fn get_file_timestamps(path: &Path) -> (String, String, i64) {
         Err(_) => return ("?".to_string(), "?".to_string(), 0),
     };
 
-    let format_time = |time: SystemTime| -> String {
-        let datetime: DateTime<Local> = time.into();
-        datetime.format("%Y-%m-%d").to_string()
-    };
-
     let updated = metadata
         .modified()
-        .map(&format_time)
+        .map(format_time)
         .unwrap_or_else(|_| "?".to_string());
 
     let updated_ts = metadata
@@ -526,4 +521,9 @@ fn get_file_timestamps(path: &Path) -> (String, String, i64) {
         .unwrap_or_else(|_| updated.clone());
 
     (created, updated, updated_ts)
+}
+
+fn format_time(time: SystemTime) -> String {
+    let datetime: DateTime<Local> = time.into();
+    datetime.format("%Y-%m-%d").to_string()
 }

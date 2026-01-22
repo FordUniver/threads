@@ -78,14 +78,9 @@ fn get_timestamps(path: &Path) -> (String, String) {
         Err(_) => return ("?".to_string(), "?".to_string()),
     };
 
-    let format_time = |time: SystemTime| -> String {
-        let datetime: DateTime<Local> = time.into();
-        datetime.format("%Y-%m-%d").to_string()
-    };
-
     let updated = metadata
         .modified()
-        .map(&format_time)
+        .map(format_time)
         .unwrap_or_else(|_| "?".to_string());
 
     let created = metadata
@@ -94,6 +89,11 @@ fn get_timestamps(path: &Path) -> (String, String) {
         .unwrap_or_else(|_| updated.clone());
 
     (created, updated)
+}
+
+fn format_time(time: SystemTime) -> String {
+    let datetime: DateTime<Local> = time.into();
+    datetime.format("%Y-%m-%d").to_string()
 }
 
 fn get_git_status(ws: &Path, rel_path: &str) -> String {
