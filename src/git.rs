@@ -373,32 +373,3 @@ impl std::fmt::Display for FileStatus {
     }
 }
 
-/// Get the timestamp of the last commit that touched a file.
-/// Returns None if the file has never been committed.
-pub fn last_commit_date(repo: &Repository, rel_path: &Path) -> Option<i64> {
-    let mut revwalk = repo.revwalk().ok()?;
-    revwalk.push_head().ok()?;
-    revwalk.set_sorting(git2::Sort::TIME).ok()?;
-
-    for oid in revwalk.flatten() {
-        let commit = repo.find_commit(oid).ok()?;
-        let tree = commit.tree().ok()?;
-
-        // For the first commit (no parent), check if file exists in tree
-        let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
-
-        // Check if this commit touched our file by comparing trees
-        let diff = repo
-            .diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)
-            .ok()?;
-
-        for delta in diff.deltas() {
-            let dominated_paths: [Option<&Path>; 2] = [delta.new_file().path(), delta.old_file().path()];
-            if dominated_paths.iter().flatten().any(|p| *p == rel_path) {
-                return Some(commit.time().seconds());
-            }
-        }
-    }
-
-    None
-}

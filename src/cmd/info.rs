@@ -41,6 +41,8 @@ struct GitLogEntry {
     message: String,
     insertions: usize,
     deletions: usize,
+    /// Unix timestamp (seconds since epoch)
+    timestamp: i64,
 }
 
 impl std::fmt::Display for GitLogEntry {
@@ -117,10 +119,12 @@ pub fn run(args: InfoArgs, ws: &Path) -> Result<(), String> {
         crate::thread::extract_name_from_path(&file).replace('-', " ")
     };
 
-    let (created_dt, updated_dt) = get_timestamps(&file);
     let git_status = get_git_status(&repo, &rel_path);
     let (log_count, todo_count, todo_done) = count_items(&thread.content);
     let git_history = get_git_history(ws, &rel_path);
+
+    // Get timestamps from git history (created = initial commit, updated = most recent)
+    let (created_dt, updated_dt) = get_timestamps_from_history(&git_history, &file);
 
     let info = ThreadInfoData {
         id: thread.id().to_string(),
@@ -183,22 +187,34 @@ fn output_pretty(info: &ThreadInfoData) -> Result<(), String> {
     };
 
     // Build history section with diff stats
+    // Always show initial commit: first 4 entries + "..." + initial commit
     let history_header = "History".bold().to_string();
     let history_lines: Vec<String> = if info.git_history.is_empty() {
         vec!["No commits (untracked)".dimmed().to_string()]
     } else {
-        let max_entries = 5;
         let total = info.git_history.len();
-        let mut lines: Vec<String> = info.git_history
-            .iter()
-            .take(max_entries)
-            .map(|entry| format_git_entry(entry, term_width))
-            .collect();
+        if total <= 5 {
+            // Show all commits
+            info.git_history
+                .iter()
+                .map(|entry| format_git_entry(entry, term_width))
+                .collect()
+        } else {
+            // Show first 4 + ellipsis + initial commit
+            let mut lines: Vec<String> = info.git_history
+                .iter()
+                .take(4)
+                .map(|entry| format_git_entry(entry, term_width))
+                .collect();
 
-        if total > max_entries {
-            lines.push(format!("... {} more commits", total - max_entries).dimmed().to_string());
+            lines.push(format!("... {} more commits ...", total - 5).dimmed().to_string());
+
+            // Always show initial commit (last entry)
+            if let Some(initial) = info.git_history.last() {
+                lines.push(format_git_entry(initial, term_width));
+            }
+            lines
         }
-        lines
     };
     let history_content = format!("{}\n{}", history_header, history_lines.join("\n"));
 
@@ -415,16 +431,33 @@ fn output_yaml(info: &ThreadInfoData) -> Result<(), String> {
     Ok(())
 }
 
-fn get_timestamps(path: &Path) -> (Option<DateTime<Local>>, Option<DateTime<Local>>) {
-    let metadata = match fs::metadata(path) {
-        Ok(m) => m,
-        Err(_) => return (None, None),
-    };
+/// Get timestamps from git history.
+/// Created = initial commit (last in history), Updated = most recent commit (first in history).
+/// Falls back to filesystem times for uncommitted files.
+fn get_timestamps_from_history(
+    history: &[GitLogEntry],
+    path: &Path,
+) -> (Option<DateTime<Local>>, Option<DateTime<Local>>) {
+    if history.is_empty() {
+        // No git history - use filesystem times
+        let metadata = match fs::metadata(path) {
+            Ok(m) => m,
+            Err(_) => return (None, None),
+        };
+        let updated: Option<DateTime<Local>> = metadata.modified().ok().map(|t| t.into());
+        let created: Option<DateTime<Local>> = metadata.created().ok().map(|t| t.into()).or(updated);
+        return (created, updated);
+    }
 
-    let updated: Option<DateTime<Local>> = metadata.modified().ok().map(|t| t.into());
-    let created: Option<DateTime<Local>> = metadata.created().ok().map(|t| t.into()).or(updated);
+    // Most recent commit = first entry (updated)
+    let updated_dt = DateTime::from_timestamp(history[0].timestamp, 0)
+        .map(|dt| dt.with_timezone(&Local));
 
-    (created, updated)
+    // Initial commit = last entry (created)
+    let created_dt = DateTime::from_timestamp(history.last().unwrap().timestamp, 0)
+        .map(|dt| dt.with_timezone(&Local));
+
+    (created_dt, updated_dt)
 }
 
 fn get_git_status(repo: &Repository, rel_path: &str) -> String {
@@ -469,17 +502,16 @@ fn count_items(content: &str) -> (usize, usize, usize) {
 }
 
 fn get_git_history(ws: &Path, rel_path: &str) -> Vec<GitLogEntry> {
-    // Get commits with relative time, hash, message, and numstat for diff
-    // Format: relative_time<TAB>hash<TAB>message
+    // Get commits with timestamp, relative time, hash, message, and numstat for diff
+    // Format: timestamp<TAB>relative_time<TAB>hash<TAB>message
     let output = Command::new("git")
         .args([
             "-C",
             &ws.to_string_lossy(),
             "log",
-            "--format=%cr\t%h\t%s",
+            "--format=%ct\t%cr\t%h\t%s",
             "--numstat",
             "--follow",
-            "-10",
             "--",
             rel_path,
         ])
@@ -501,9 +533,30 @@ fn get_git_history(ws: &Path, rel_path: &str) -> Vec<GitLogEntry> {
 
         let parts: Vec<&str> = line.split('\t').collect();
 
-        // Commit lines have 3+ parts where second part is a 7-char hash (hex)
+        // Commit lines have 4+ parts: timestamp, relative_time, hash, message
         // Numstat lines have 3 parts where first two are numbers
-        if parts.len() >= 3 {
+        if parts.len() >= 4 {
+            // Check if first part is a timestamp (all digits)
+            if let Ok(ts) = parts[0].parse::<i64>() {
+                // This is a commit line: timestamp<TAB>relative_time<TAB>hash<TAB>message
+                // Save previous entry if exists
+                if let Some(entry) = current_entry.take() {
+                    entries.push(entry);
+                }
+
+                // Shorten relative time: "3 hours ago" -> "3h", "2 days ago" -> "2d"
+                let rel_time = shorten_relative_time(parts[1]);
+
+                current_entry = Some(GitLogEntry {
+                    relative_time: rel_time,
+                    hash: parts[2].to_string(),
+                    message: parts[3..].join("\t"),
+                    insertions: 0,
+                    deletions: 0,
+                    timestamp: ts,
+                });
+            }
+        } else if parts.len() >= 2 {
             // Check if this is a numstat line (first two parts are numbers)
             if let (Ok(ins), Ok(del)) = (parts[0].parse::<usize>(), parts[1].parse::<usize>()) {
                 // This is a numstat line
@@ -511,23 +564,6 @@ fn get_git_history(ws: &Path, rel_path: &str) -> Vec<GitLogEntry> {
                     entry.insertions += ins;
                     entry.deletions += del;
                 }
-            } else {
-                // This is a commit line: relative_time<TAB>hash<TAB>message
-                // Save previous entry if exists
-                if let Some(entry) = current_entry.take() {
-                    entries.push(entry);
-                }
-
-                // Shorten relative time: "3 hours ago" -> "3h", "2 days ago" -> "2d"
-                let rel_time = shorten_relative_time(parts[0]);
-
-                current_entry = Some(GitLogEntry {
-                    relative_time: rel_time,
-                    hash: parts[1].to_string(),
-                    message: parts[2..].join("\t"),
-                    insertions: 0,
-                    deletions: 0,
-                });
             }
         }
     }

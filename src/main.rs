@@ -5,6 +5,7 @@ use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::env::CompleteEnv;
 use clap_complete::{generate, Shell};
 
+mod cache;
 mod cmd;
 mod git;
 mod output;

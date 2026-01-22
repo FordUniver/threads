@@ -4,11 +4,11 @@ use std::path::Path;
 use chrono::{DateTime, Local, Utc};
 use clap::Args;
 use colored::Colorize;
-use git2::Repository;
 use serde::Serialize;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
+use crate::cache::TimestampCache;
 use crate::git;
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
@@ -86,6 +86,12 @@ impl ThreadInfo {
     }
 
     /// Format date for pretty mode (short: "3h", "2d", "1w")
+    fn created_short(&self) -> String {
+        self.created_dt
+            .map(output::format_relative_short)
+            .unwrap_or_else(|| "?".to_string())
+    }
+
     fn updated_short(&self) -> String {
         self.updated_dt
             .map(output::format_relative_short)
@@ -213,6 +219,13 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
     // Determine if we need absolute paths (for json/yaml)
     let include_absolute = matches!(format, OutputFormat::Json | OutputFormat::Yaml);
 
+    // Load and update timestamp cache
+    let mut cache = TimestampCache::load(git_root);
+    cache.update(&repo, &threads, git_root);
+
+    // Save cache (ignore errors - cache is optional)
+    let _ = cache.save(git_root);
+
     for thread_path in threads {
         let t = match Thread::parse(&thread_path) {
             Ok(t) => t,
@@ -264,8 +277,10 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
 
         let is_pwd = rel_path == pwd_rel;
 
-        // Get timestamps: created from filesystem, updated from git
-        let (created_dt, updated_dt) = get_timestamps(&repo, git_root, &thread_path);
+        // Get timestamps from cache, with fallback for uncommitted files
+        let thread_rel_path = thread_path.strip_prefix(git_root).unwrap_or(&thread_path);
+        let thread_rel_str = thread_rel_path.to_string_lossy();
+        let (created_dt, updated_dt) = get_timestamps(&repo, &cache, &thread_path, &thread_rel_str);
 
         results.push(ThreadInfo {
             id: t.id().to_string(),
@@ -319,8 +334,10 @@ struct TableRow {
     id: String,
     #[tabled(rename = "STATUS")]
     status: String,
-    #[tabled(rename = "AGE")]
-    age: String,
+    #[tabled(rename = "NEW")]
+    created: String,
+    #[tabled(rename = "MOD")]
+    modified: String,
     #[tabled(rename = "PATH")]
     path: String,
     #[tabled(rename = "TITLE")]
@@ -410,7 +427,7 @@ fn output_pretty(
 
     // Build table rows
     let term_width = output::terminal_width();
-    let title_max = term_width.saturating_sub(50).max(20); // Leave room for other columns
+    let title_max = term_width.saturating_sub(58).max(20); // Leave room for other columns (added NEW column)
 
     let rows: Vec<TableRow> = results
         .iter()
@@ -423,7 +440,8 @@ fn output_pretty(
             TableRow {
                 id: output::style_id(&t.id).to_string(),
                 status: output::style_status(&t.status).to_string(),
-                age: t.updated_short(),
+                created: t.created_short(),
+                modified: t.updated_short(),
                 path: path_styled,
                 title: output::truncate_back(&t.title, title_max),
             }
@@ -590,30 +608,47 @@ fn output_yaml(results: &[ThreadInfo], git_root: &Path, pwd_rel: &str) -> Result
     Ok(())
 }
 
-/// Get timestamps: created from filesystem, updated from git (last commit date)
+/// Get timestamps from cache, handling uncommitted modifications.
 fn get_timestamps(
-    repo: &Repository,
-    git_root: &Path,
-    path: &Path,
+    repo: &git2::Repository,
+    cache: &TimestampCache,
+    abs_path: &Path,
+    rel_path: &str,
 ) -> (Option<DateTime<Local>>, Option<DateTime<Local>>) {
-    // Created: use filesystem creation time
-    let created_dt: Option<DateTime<Local>> = fs::metadata(path)
-        .ok()
-        .and_then(|m| m.created().ok())
-        .map(|t| t.into());
+    // Check if file has uncommitted changes
+    let has_uncommitted_changes = git::has_changes(repo, Path::new(rel_path));
 
-    // Updated: use git last commit date, fall back to filesystem mtime
-    let rel_path = path.strip_prefix(git_root).unwrap_or(path);
-    let updated_dt: Option<DateTime<Local>> = git::last_commit_date(repo, rel_path)
-        .and_then(|secs| DateTime::from_timestamp(secs, 0))
-        .map(|dt| dt.with_timezone(&Local))
-        .or_else(|| {
-            // Fall back to filesystem mtime for uncommitted files
-            fs::metadata(path)
+    if let Some(cached) = cache.get(rel_path) {
+        // File is in cache (has been committed at some point)
+        let created_dt = DateTime::from_timestamp(cached.created, 0)
+            .map(|dt| dt.with_timezone(&Local));
+
+        let modified_dt = if has_uncommitted_changes {
+            // File has uncommitted changes - use filesystem mtime
+            fs::metadata(abs_path)
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .map(|t| t.into())
-        });
+        } else {
+            // File is clean - use git commit date
+            DateTime::from_timestamp(cached.modified, 0)
+                .map(|dt| dt.with_timezone(&Local))
+        };
 
-    (created_dt.or(updated_dt), updated_dt)
+        (created_dt, modified_dt)
+    } else {
+        // File not in cache (never committed) - use filesystem times
+        let metadata = fs::metadata(abs_path).ok();
+
+        let created_dt: Option<DateTime<Local>> = metadata
+            .as_ref()
+            .and_then(|m| m.created().ok())
+            .map(|t| t.into());
+
+        let modified_dt: Option<DateTime<Local>> = metadata
+            .and_then(|m| m.modified().ok())
+            .map(|t| t.into());
+
+        (created_dt.or(modified_dt), modified_dt)
+    }
 }
