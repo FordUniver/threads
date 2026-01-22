@@ -110,9 +110,9 @@ test:unit:verbose:
 test:integration:
   stage: test
   needs: [build]
-  image: rust:${RUST_VERSION}
+  image: debian:bookworm-slim
   before_script:
-    - apt-get update && apt-get install -y gawk jq
+    - apt-get update && apt-get install -y gawk jq curl ca-certificates
     - curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
   script:
     - ./target/release/threads --version
@@ -132,9 +132,9 @@ test:integration:verbose:
   stage: test
   needs: [build, test:integration]
   when: on_failure
-  image: rust:${RUST_VERSION}
+  image: debian:bookworm-slim
   before_script:
-    - apt-get update && apt-get install -y gawk jq
+    - apt-get update && apt-get install -y gawk jq curl ca-certificates
     - curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
   script:
     - DEBUG=1 ./test/run_tests.sh ./target/release/threads
