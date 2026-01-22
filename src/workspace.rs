@@ -3,10 +3,10 @@ use std::env;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::LazyLock;
 
 use clap_complete::engine::CompletionCandidate;
+use git2::Repository;
 use regex::Regex;
 
 use crate::thread;
@@ -43,31 +43,35 @@ static SLUGIFY_NON_ALNUM_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a
 
 static SLUGIFY_MULTI_DASH_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"-+").unwrap());
 
+/// Open the git repository from current directory.
+/// Returns an error if not in a git repository.
+pub fn open() -> Result<Repository, String> {
+    Repository::discover(".").map_err(|e| {
+        if e.code() == git2::ErrorCode::NotFound {
+            "Not in a git repository. threads requires a git repo to define scope.".to_string()
+        } else {
+            format!("Failed to open git repository: {}", e.message())
+        }
+    })
+}
+
+/// Get the git root (working directory) from an opened repository.
+pub fn git_root(repo: &Repository) -> PathBuf {
+    repo.workdir()
+        .expect("Repository should have a working directory")
+        .to_path_buf()
+}
+
 /// Find the git repository root from current directory.
 /// Returns an error if not in a git repository.
 pub fn find() -> Result<PathBuf, String> {
     find_git_root()
 }
 
-/// Find the git repository root using `git rev-parse --show-toplevel`.
+/// Find the git repository root using git2.
 pub fn find_git_root() -> Result<PathBuf, String> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .map_err(|e| format!("Failed to run git: {}", e))?;
-
-    if !output.status.success() {
-        return Err(
-            "Not in a git repository. threads requires a git repo to define scope.".to_string(),
-        );
-    }
-
-    let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if root.is_empty() {
-        return Err("Git root is empty".to_string());
-    }
-
-    Ok(PathBuf::from(root))
+    let repo = open()?;
+    Ok(git_root(&repo))
 }
 
 /// Check if a directory is a git root (contains .git).

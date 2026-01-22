@@ -6,12 +6,14 @@ use chrono::{DateTime, Local, Utc};
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use colored::Colorize;
+use git2::Repository;
 use serde::Serialize;
 use tabled::settings::object::Columns;
-use tabled::settings::{Alignment, Modify, Padding, Style};
 use tabled::settings::style::HorizontalLine;
+use tabled::settings::{Alignment, Modify, Padding, Style};
 use tabled::Table;
 
+use crate::git;
 use crate::output::{self, OutputFormat};
 use crate::thread::Thread;
 use crate::workspace;
@@ -98,6 +100,9 @@ pub fn run(args: InfoArgs, ws: &Path) -> Result<(), String> {
         args.format.resolve()
     };
 
+    // Open repository for git operations
+    let repo = workspace::open()?;
+
     let file = workspace::find_by_ref(ws, &args.id)?;
     let thread = Thread::parse(&file)?;
 
@@ -113,7 +118,7 @@ pub fn run(args: InfoArgs, ws: &Path) -> Result<(), String> {
     };
 
     let (created_dt, updated_dt) = get_timestamps(&file);
-    let git_status = get_git_status(ws, &rel_path);
+    let git_status = get_git_status(&repo, &rel_path);
     let (log_count, todo_count, todo_done) = count_items(&thread.content);
     let git_history = get_git_history(ws, &rel_path);
 
@@ -422,46 +427,9 @@ fn get_timestamps(path: &Path) -> (Option<DateTime<Local>>, Option<DateTime<Loca
     (created, updated)
 }
 
-fn get_git_status(ws: &Path, rel_path: &str) -> String {
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &ws.to_string_lossy(),
-            "status",
-            "--porcelain",
-            "--",
-            rel_path,
-        ])
-        .output();
-
-    let output = match output {
-        Ok(o) if o.status.success() => o,
-        _ => return "unknown".to_string(),
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let line = stdout.trim();
-
-    if line.is_empty() {
-        return "clean".to_string();
-    }
-
-    if line.len() >= 2 {
-        let index = line.chars().next().unwrap_or(' ');
-        let worktree = line.chars().nth(1).unwrap_or(' ');
-
-        match (index, worktree) {
-            ('?', '?') => "untracked".to_string(),
-            ('A', _) => "staged (new)".to_string(),
-            ('M', ' ') => "staged".to_string(),
-            (' ', 'M') => "modified".to_string(),
-            ('M', 'M') => "staged + modified".to_string(),
-            ('D', _) | (_, 'D') => "deleted".to_string(),
-            _ => format!("changed ({}{})", index, worktree),
-        }
-    } else {
-        "changed".to_string()
-    }
+fn get_git_status(repo: &Repository, rel_path: &str) -> String {
+    let path = Path::new(rel_path);
+    git::file_status(repo, path).to_string()
 }
 
 fn count_items(content: &str) -> (usize, usize, usize) {

@@ -56,10 +56,12 @@ pub fn run(args: ReopenArgs, ws: &Path) -> Result<(), String> {
     );
 
     if args.commit {
+        let repo = workspace::open()?;
+        let rel_path = file.strip_prefix(ws).unwrap_or(&file);
         let msg = args.m.unwrap_or_else(|| {
-            git::generate_commit_message(ws, &[file.to_string_lossy().to_string()])
+            git::generate_commit_message(&repo, &[rel_path])
         });
-        git::auto_commit(ws, &file, &msg)?;
+        git::auto_commit(&repo, &file, &msg)?;
     } else {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",

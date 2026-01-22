@@ -59,9 +59,11 @@ pub fn run(args: MoveArgs, git_root: &Path) -> Result<(), String> {
 
     // Commit if requested
     if args.commit {
-        let rel_src = workspace::path_relative_to_git_root(git_root, &src_file);
+        let repo = workspace::open()?;
+        let rel_src_path = src_file.strip_prefix(git_root).unwrap_or(&src_file);
+        let rel_dest_path = dest_file.strip_prefix(git_root).unwrap_or(&dest_file);
 
-        git::add(git_root, &[&rel_src, &rel_dest])?;
+        git::add(&repo, &[rel_src_path, rel_dest_path])?;
 
         let msg = args.m.unwrap_or_else(|| {
             format!(
@@ -71,7 +73,7 @@ pub fn run(args: MoveArgs, git_root: &Path) -> Result<(), String> {
             )
         });
 
-        git::commit(git_root, &[rel_src, rel_dest], &msg)?;
+        git::commit(&repo, &[rel_src_path, rel_dest_path], &msg)?;
 
         eprintln!("Note: Changes are local. Push with 'git push' when ready.");
     } else {

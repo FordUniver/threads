@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
@@ -27,7 +27,10 @@ pub struct CommitArgs {
 }
 
 pub fn run(args: CommitArgs, ws: &Path) -> Result<(), String> {
-    let mut files = Vec::new();
+    // Open repository for git operations
+    let repo = workspace::open()?;
+
+    let mut files: Vec<PathBuf> = Vec::new();
 
     if args.pending {
         // Collect all thread files with uncommitted changes
@@ -36,16 +39,16 @@ pub fn run(args: CommitArgs, ws: &Path) -> Result<(), String> {
         for t in threads {
             let rel_path = t
                 .strip_prefix(ws)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| t.to_string_lossy().to_string());
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|_| t.clone());
 
-            if git::has_changes(ws, &rel_path) {
-                files.push(t.to_string_lossy().to_string());
+            if git::has_changes(&repo, &rel_path) {
+                files.push(t);
             }
         }
 
         // Also include deleted thread files
-        let deleted = git::find_deleted_thread_files(ws);
+        let deleted = git::find_deleted_thread_files(&repo);
         files.extend(deleted);
     } else {
         // Resolve provided IDs to files
@@ -57,14 +60,14 @@ pub fn run(args: CommitArgs, ws: &Path) -> Result<(), String> {
             let file = workspace::find_by_ref(ws, id)?;
             let rel_path = file
                 .strip_prefix(ws)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| file.to_string_lossy().to_string());
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|_| file.clone());
 
-            if !git::has_changes(ws, &rel_path) {
+            if !git::has_changes(&repo, &rel_path) {
                 println!("No changes in thread: {}", id);
                 continue;
             }
-            files.push(file.to_string_lossy().to_string());
+            files.push(file);
         }
     }
 
@@ -73,11 +76,22 @@ pub fn run(args: CommitArgs, ws: &Path) -> Result<(), String> {
         return Ok(());
     }
 
+    // Convert to relative paths for git operations
+    let rel_paths: Vec<PathBuf> = files
+        .iter()
+        .map(|f| {
+            f.strip_prefix(ws)
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|_| f.clone())
+        })
+        .collect();
+
     // Generate commit message if not provided
     let msg = if let Some(m) = args.m {
         m
     } else {
-        let generated = git::generate_commit_message(ws, &files);
+        let path_refs: Vec<&Path> = rel_paths.iter().map(|p| p.as_path()).collect();
+        let generated = git::generate_commit_message(&repo, &path_refs);
         println!("Generated message: {}", generated);
 
         if !args.auto && is_terminal() {
@@ -98,17 +112,8 @@ pub fn run(args: CommitArgs, ws: &Path) -> Result<(), String> {
     };
 
     // Stage and commit
-    let rel_paths: Vec<String> = files
-        .iter()
-        .map(|f| {
-            Path::new(f)
-                .strip_prefix(ws)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| f.clone())
-        })
-        .collect();
-
-    git::commit(ws, &rel_paths, &msg)?;
+    let path_refs: Vec<&Path> = rel_paths.iter().map(|p| p.as_path()).collect();
+    git::commit(&repo, &path_refs, &msg)?;
 
     println!("Committed {} thread(s).", files.len());
     eprintln!("Note: Changes are local. Push with 'git push' when ready.");

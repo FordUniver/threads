@@ -192,10 +192,12 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
 
     // Commit if requested
     if args.commit {
+        let repo = workspace::open()?;
+        let rel_path = thread_path.strip_prefix(git_root).unwrap_or(&thread_path);
         let msg = args.m.unwrap_or_else(|| {
-            git::generate_commit_message(git_root, &[thread_path.to_string_lossy().to_string()])
+            git::generate_commit_message(&repo, &[rel_path])
         });
-        git::auto_commit(git_root, &thread_path, &msg)?;
+        git::auto_commit(&repo, &thread_path, &msg)?;
     } else if matches!(format, OutputFormat::Pretty | OutputFormat::Plain) {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",

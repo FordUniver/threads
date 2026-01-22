@@ -30,11 +30,14 @@ pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
     let name = t.name().to_string();
     let rel_path = file
         .strip_prefix(ws)
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| file.to_string_lossy().to_string());
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|_| file.clone());
+
+    // Open repository for git operations
+    let repo = workspace::open()?;
 
     // Check if file is tracked
-    let was_tracked = git::is_tracked(ws, &rel_path);
+    let was_tracked = git::is_tracked(&repo, &rel_path);
 
     // Remove file
     fs::remove_file(&file).map_err(|e| format!("removing file: {}", e))?;
@@ -50,14 +53,14 @@ pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
         let msg = args
             .m
             .unwrap_or_else(|| format!("threads: remove '{}'", name));
-        git::add(ws, &[&rel_path])?;
-        git::commit(ws, std::slice::from_ref(&rel_path), &msg)?;
+        git::add(&repo, &[rel_path.as_path()])?;
+        git::commit(&repo, &[rel_path.as_path()], &msg)?;
         eprintln!("Note: Changes are local. Push with 'git push' when ready.");
     } else {
         println!("Note: To commit this removal, run:");
         println!(
             "  git -C \"$WORKSPACE\" add \"{}\" && git -C \"$WORKSPACE\" commit -m \"threads: remove '{}'\"",
-            rel_path, name
+            rel_path.display(), name
         );
     }
 
