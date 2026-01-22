@@ -507,7 +507,7 @@ fn get_file_timestamps(path: &Path) -> (String, String, i64) {
 
     let updated = metadata
         .modified()
-        .map(|t| format_time(t))
+        .map(&format_time)
         .unwrap_or_else(|_| "?".to_string());
 
     let updated_ts = metadata
@@ -522,7 +522,7 @@ fn get_file_timestamps(path: &Path) -> (String, String, i64) {
     // macOS and some filesystems support creation time; fall back to modified if unavailable
     let created = metadata
         .created()
-        .map(|t| format_time(t))
+        .map(format_time)
         .unwrap_or_else(|_| updated.clone());
 
     (created, updated, updated_ts)

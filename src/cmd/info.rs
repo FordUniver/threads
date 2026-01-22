@@ -85,12 +85,12 @@ fn get_timestamps(path: &Path) -> (String, String) {
 
     let updated = metadata
         .modified()
-        .map(|t| format_time(t))
+        .map(&format_time)
         .unwrap_or_else(|_| "?".to_string());
 
     let created = metadata
         .created()
-        .map(|t| format_time(t))
+        .map(format_time)
         .unwrap_or_else(|_| updated.clone());
 
     (created, updated)
@@ -98,7 +98,14 @@ fn get_timestamps(path: &Path) -> (String, String) {
 
 fn get_git_status(ws: &Path, rel_path: &str) -> String {
     let output = Command::new("git")
-        .args(["-C", &ws.to_string_lossy(), "status", "--porcelain", "--", rel_path])
+        .args([
+            "-C",
+            &ws.to_string_lossy(),
+            "status",
+            "--porcelain",
+            "--",
+            rel_path,
+        ])
         .output();
 
     let output = match output {
