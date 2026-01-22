@@ -173,7 +173,7 @@ fn output_pretty(info: &ThreadInfoData) -> Result<(), String> {
     let right_side = format!("{} · {} · {}", info.log_count, todo_text, status_styled);
 
     // Title line: title followed by stats (no HFILL - table handles width)
-    let title = info.title.bold().to_string();
+    let title = info.title.cyan().bold().to_string();
     let title_line = format!("{}  {}", title, right_side);
 
     // Description (not bold)

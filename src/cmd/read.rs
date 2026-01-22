@@ -90,7 +90,7 @@ fn output_pretty(
     };
 
     let status_styled = output::style_status(&thread.base_status()).to_string();
-    let title_line = format!("{}  {}", title.bold(), status_styled);
+    let title_line = format!("{}  {}", title.cyan().bold(), status_styled);
 
     let header = if thread.frontmatter.desc.is_empty() {
         title_line
@@ -245,56 +245,65 @@ fn format_body(body: &str) -> String {
 
 /// Format notes section with dimmed hashes
 fn format_notes(notes: &str) -> String {
-    let header = "Notes".bold().to_string();
-    let hash_re = Regex::new(r"<!--\s*([a-f0-9]{4})\s*-->").unwrap();
-
-    let formatted: Vec<String> = notes
+    // Strip hash comments before rendering
+    let hash_re = Regex::new(r"\s*<!--\s*[a-f0-9]{4}\s*-->").unwrap();
+    let cleaned: String = notes
         .lines()
-        .map(|line| {
-            if line.starts_with("- ") {
-                // Dim the hash comment
-                hash_re
-                    .replace(line, |caps: &regex::Captures| {
-                        format!("<!-- {} -->", caps[1].to_string().dimmed())
-                    })
-                    .to_string()
-            } else {
-                line.to_string()
-            }
-        })
-        .collect();
+        .map(|line| hash_re.replace(line, "").to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    format!("{}\n{}", header, formatted.join("\n"))
+    // Render markdown
+    let skin = MadSkin::default();
+    let mut buf = Vec::new();
+    skin.write_text_on(&mut buf, &cleaned).ok();
+    String::from_utf8_lossy(&buf).trim().to_string()
 }
 
-/// Format todo section with colored checkboxes
+/// Format todo section with colored checkboxes and markdown
 fn format_todos(todos: &str) -> String {
-    let hash_re = Regex::new(r"<!--\s*([a-f0-9]{4})\s*-->").unwrap();
+    let hash_re = Regex::new(r"\s*<!--\s*[a-f0-9]{4}\s*-->").unwrap();
 
     todos
         .lines()
         .map(|line| {
-            let mut line = line.to_string();
+            // Strip hash comments
+            let line = hash_re.replace(line, "").to_string();
 
             // Replace checkboxes with unicode squares
             if line.contains("- [x]") {
-                line = line.replace("- [x]", &"☑".green().to_string());
+                let content = line.replace("- [x]", "").trim().to_string();
+                let rendered = render_inline_markdown(&content);
+                format!("{} {}", "☑".green(), rendered)
             } else if line.contains("- [ ]") {
-                line = line.replace("- [ ]", &"☐".yellow().to_string());
+                let content = line.replace("- [ ]", "").trim().to_string();
+                let rendered = render_inline_markdown(&content);
+                format!("{} {}", "☐".yellow(), rendered)
+            } else if line.trim().is_empty() {
+                String::new()
+            } else {
+                render_inline_markdown(&line)
             }
-
-            // Dim the hash comment
-            hash_re
-                .replace(&line, |caps: &regex::Captures| {
-                    format!("<!-- {} -->", caps[1].to_string().dimmed())
-                })
-                .to_string()
         })
+        .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// Format log section with relative timestamps
+/// Render inline markdown (bold, italic, code) without block formatting
+fn render_inline_markdown(text: &str) -> String {
+    let skin = MadSkin::default();
+    let mut buf = Vec::new();
+    skin.write_text_on(&mut buf, text).ok();
+    // Take first line only to avoid block formatting artifacts
+    String::from_utf8_lossy(&buf)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Format log section with relative timestamps and markdown
 fn format_log(log: &str) -> String {
     // New format: - **2026-01-22 12:25:00** message
     let full_ts_re = Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*(.*)$").unwrap();
@@ -318,26 +327,28 @@ fn format_log(log: &str) -> String {
                 let ts_str = &caps[1];
                 let rest = &caps[2];
                 let relative = timestamp_to_relative(ts_str, &now);
-                return Some(format!("{:>4} {}", relative.cyan(), rest.trim()));
+                let rendered = render_inline_markdown(rest.trim());
+                return Some(format!("{:>4} {}", relative.cyan(), rendered));
             }
 
             // Old format: time only (use current_date context)
             if let Some(caps) = time_re.captures(line) {
                 let time = &caps[1];
                 let rest = &caps[2];
+                let rendered = render_inline_markdown(rest.trim());
                 if !current_date.is_empty() {
                     let ts_str = format!("{} {}:00", current_date, time);
                     let relative = timestamp_to_relative(&ts_str, &now);
-                    return Some(format!("{:>4} {}", relative.cyan(), rest.trim()));
+                    return Some(format!("{:>4} {}", relative.cyan(), rendered));
                 }
-                return Some(format!("{:>4} {}", time.cyan(), rest.trim()));
+                return Some(format!("{:>4} {}", time.cyan(), rendered));
             }
 
             // Skip empty lines
             if line.trim().is_empty() {
                 None
             } else {
-                Some(line.to_string())
+                Some(render_inline_markdown(line))
             }
         })
         .collect::<Vec<_>>()
