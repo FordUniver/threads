@@ -11,14 +11,21 @@ test_stats_shows_counts() {
     create_thread "bbb001" "Blocked Thread" "blocked"
     create_thread "ccc001" "Resolved Thread" "resolved"
 
+    # Default: shows only open threads (excludes concluded like resolved)
     local output
     output=$(capture_stdout $THREADS_BIN stats)
 
-    # Should show counts for each status
     assert_contains "$output" "active" "should show active status"
     assert_contains "$output" "2" "should show 2 active threads"
     assert_contains "$output" "blocked" "should show blocked status"
-    assert_contains "$output" "resolved" "should show resolved status"
+    assert_not_contains "$output" "resolved" "should not show resolved (concluded) by default"
+
+    # With --include-concluded: shows all statuses
+    output=$(capture_stdout $THREADS_BIN stats -c)
+
+    assert_contains "$output" "active" "should show active status"
+    assert_contains "$output" "blocked" "should show blocked status"
+    assert_contains "$output" "resolved" "should show resolved with -c flag"
 
     teardown_test_workspace
     end_test

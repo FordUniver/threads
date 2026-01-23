@@ -4,6 +4,7 @@ use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
+use crate::args::FormatArgs;
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::{self, Thread};
@@ -26,13 +27,8 @@ pub struct StatusArgs {
     #[arg(short = 'm', long)]
     m: Option<String>,
 
-    /// Output format
-    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
-    format: OutputFormat,
-
-    /// Output as JSON (shorthand for --format=json)
-    #[arg(long, conflicts_with = "format")]
-    json: bool,
+    #[command(flatten)]
+    format: FormatArgs,
 }
 
 #[derive(Serialize)]
@@ -45,11 +41,7 @@ struct StatusOutput {
 }
 
 pub fn run(args: StatusArgs, ws: &Path) -> Result<(), String> {
-    let format = if args.json {
-        OutputFormat::Json
-    } else {
-        args.format.resolve()
-    };
+    let format = args.format.resolve();
 
     if !thread::is_valid_status(&args.new_status) {
         return Err(format!(

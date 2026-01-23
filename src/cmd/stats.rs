@@ -7,9 +7,10 @@ use serde::Serialize;
 use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
+use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
-use crate::workspace::{self, FindOptions};
+use crate::workspace;
 
 #[derive(Args)]
 pub struct StatsArgs {
@@ -17,29 +18,14 @@ pub struct StatsArgs {
     #[arg(default_value = "")]
     path: String,
 
-    /// Search subdirectories (unlimited depth, or specify N levels)
-    #[arg(short = 'd', long = "down", value_name = "N")]
-    down: Option<Option<usize>>,
+    #[command(flatten)]
+    direction: DirectionArgs,
 
-    /// Alias for --down (backward compatibility)
-    #[arg(short = 'r', long, conflicts_with = "down")]
-    recursive: bool,
+    #[command(flatten)]
+    filter: FilterArgs,
 
-    /// Search parent directories (up to git root, or specify N levels)
-    #[arg(short = 'u', long = "up", value_name = "N")]
-    up: Option<Option<usize>>,
-
-    /// Include concluded threads (resolved/superseded/deferred/rejected)
-    #[arg(short = 'c', long = "include-concluded")]
-    include_concluded: bool,
-
-    /// Output format (auto-detects TTY for pretty vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
-    format: OutputFormat,
-
-    /// Output as JSON (shorthand for --format=json)
-    #[arg(long, conflicts_with = "format")]
-    json: bool,
+    #[command(flatten)]
+    format: FormatArgs,
 }
 
 #[derive(Serialize)]
@@ -48,53 +34,8 @@ struct StatusCount {
     count: usize,
 }
 
-/// Describes the search direction for output display.
-#[derive(Clone)]
-struct SearchDirection {
-    down: Option<Option<usize>>,
-    up: Option<Option<usize>>,
-    has_down: bool,
-    has_up: bool,
-}
-
-impl SearchDirection {
-    fn description(&self) -> String {
-        let mut parts = Vec::new();
-
-        if self.has_down {
-            match self.down {
-                Some(Some(n)) => parts.push(format!("down {}", n)),
-                Some(None) | None => parts.push("recursive".to_string()),
-            }
-        }
-
-        if self.has_up {
-            match self.up {
-                Some(Some(n)) => parts.push(format!("up {}", n)),
-                Some(None) => parts.push("up".to_string()),
-                None => {}
-            }
-        }
-
-        if parts.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", parts.join(", "))
-        }
-    }
-
-    fn is_searching(&self) -> bool {
-        self.has_down || self.has_up
-    }
-}
-
 pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
-    // Determine output format (handle --json shorthand)
-    let format = if args.json {
-        OutputFormat::Json
-    } else {
-        args.format.resolve()
-    };
+    let format = args.format.resolve();
 
     // Parse path filter
     let path_filter = if args.path.is_empty() {
@@ -108,32 +49,8 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
     let filter_path = scope.path.clone();
     let start_path = scope.threads_dir.parent().unwrap_or(git_root);
 
-    // Determine search direction: --down/-d takes priority, then -r as alias
-    let down_opt = if args.down.is_some() {
-        args.down
-    } else if args.recursive {
-        Some(None) // unlimited depth
-    } else {
-        None
-    };
-
-    let mut options = FindOptions::new();
-
-    if let Some(depth) = down_opt {
-        options = options.with_down(depth);
-    }
-
-    if let Some(depth) = args.up {
-        options = options.with_up(depth);
-    }
-
-    // Track search direction for output
-    let search_dir = SearchDirection {
-        down: down_opt,
-        up: args.up,
-        has_down: down_opt.is_some(),
-        has_up: args.up.is_some(),
-    };
+    // Convert direction args to find options
+    let options = args.direction.to_find_options();
 
     // Find threads using options
     let threads = workspace::find_threads_with_options(start_path, git_root, &options)?;
@@ -145,7 +62,7 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
         let rel_path = workspace::parse_thread_path(git_root, &path);
 
         // Path filter: if not searching, only count threads at the specified level
-        if !search_dir.is_searching() && rel_path != filter_path {
+        if !args.direction.is_searching() && rel_path != filter_path {
             continue;
         }
         // Note: find_threads_with_options already handles direction/depth filtering
@@ -157,8 +74,8 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
 
         let status = t.base_status();
 
-        // Filter out terminal threads unless --include-concluded
-        if !args.include_concluded && thread::is_terminal(&status) {
+        // Filter out closed threads unless --include-closed
+        if !args.filter.include_closed() && thread::is_closed(&status) {
             continue;
         }
 
@@ -176,21 +93,23 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
     let mut sorted: Vec<_> = counts.into_iter().collect();
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
 
+    let include_closed = args.filter.include_closed();
+
     match format {
         OutputFormat::Pretty => output_pretty(
             &sorted,
             total,
             &filter_path,
-            &search_dir,
-            args.include_concluded,
+            &args.direction,
+            include_closed,
         ),
         OutputFormat::Plain => output_plain(
             &sorted,
             total,
             git_root,
             &filter_path,
-            &search_dir,
-            args.include_concluded,
+            &args.direction,
+            include_closed,
         ),
         OutputFormat::Json => output_json(&sorted, total, git_root, &filter_path),
         OutputFormat::Yaml => output_yaml(&sorted, total, git_root, &filter_path),
@@ -207,18 +126,18 @@ struct StatsRow {
 }
 
 /// Build filter description for summary line
-fn build_filter_desc(include_concluded: bool, search_dir: &SearchDirection) -> String {
+fn build_filter_desc(include_closed: bool, direction: &DirectionArgs) -> String {
     let mut parts = Vec::new();
 
-    if !include_concluded {
+    if !include_closed {
         parts.push("open".to_string());
     } else {
         parts.push("all statuses".to_string());
     }
 
-    let dir_desc = search_dir.description();
+    let dir_desc = direction.description();
     if !dir_desc.is_empty() {
-        parts.push(dir_desc.trim().to_string());
+        parts.push(dir_desc);
     }
 
     parts.join(", ")
@@ -228,8 +147,8 @@ fn output_pretty(
     sorted: &[(String, usize)],
     total: usize,
     filter_path: &str,
-    search_dir: &SearchDirection,
-    include_concluded: bool,
+    direction: &DirectionArgs,
+    include_closed: bool,
 ) -> Result<(), String> {
     let path_desc = if filter_path == "." {
         "repo root".to_string()
@@ -237,7 +156,7 @@ fn output_pretty(
         filter_path.to_string()
     };
 
-    let filter_desc = build_filter_desc(include_concluded, search_dir);
+    let filter_desc = build_filter_desc(include_closed, direction);
 
     println!(
         "{} {} ({})",
@@ -249,7 +168,7 @@ fn output_pretty(
 
     if total == 0 {
         println!("{}", "No threads found.".dimmed());
-        if !search_dir.is_searching() {
+        if !direction.is_searching() {
             println!(
                 "{}",
                 "Hint: use -r to include nested directories, -u to search parents".dimmed()
@@ -286,8 +205,8 @@ fn output_plain(
     total: usize,
     git_root: &Path,
     filter_path: &str,
-    search_dir: &SearchDirection,
-    include_concluded: bool,
+    direction: &DirectionArgs,
+    include_closed: bool,
 ) -> Result<(), String> {
     let pwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -303,14 +222,14 @@ fn output_plain(
         filter_path.to_string()
     };
 
-    let filter_desc = build_filter_desc(include_concluded, search_dir);
+    let filter_desc = build_filter_desc(include_closed, direction);
 
     println!("Stats for threads in {} ({})", path_desc, filter_desc);
     println!();
 
     if total == 0 {
         println!("No threads found.");
-        if !search_dir.is_searching() {
+        if !direction.is_searching() {
             println!("Hint: use -r to include nested directories, -u to search parents");
         }
         return Ok(());

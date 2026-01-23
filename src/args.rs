@@ -137,24 +137,24 @@ impl DirectionArgs {
 
 /// Common filter flags for thread status filtering.
 ///
-/// Provides --include-concluded/-c flag for showing terminal threads.
+/// Provides --include-closed/-c flag for showing closed threads.
 #[derive(Args, Clone, Debug, Default)]
 pub struct FilterArgs {
-    /// Include concluded threads (resolved/superseded/deferred/rejected)
-    #[arg(short = 'c', long = "include-concluded", global = true)]
-    pub include_concluded: bool,
+    /// Include closed threads (resolved/superseded/deferred/rejected)
+    #[arg(short = 'c', long = "include-closed", global = true)]
+    pub include_closed: bool,
 
     /// Hidden alias for backward compatibility
-    #[arg(long = "include-closed", hide = true, global = true)]
-    include_closed: bool,
+    #[arg(long = "include-concluded", hide = true, global = true)]
+    include_concluded: bool,
 }
 
 impl FilterArgs {
-    /// Check if concluded/terminal threads should be included.
+    /// Check if closed threads should be included.
     ///
-    /// Returns true if either --include-concluded or --include-closed is set.
-    pub fn include_concluded(&self) -> bool {
-        self.include_concluded || self.include_closed
+    /// Returns true if either --include-closed or --include-concluded is set.
+    pub fn include_closed(&self) -> bool {
+        self.include_closed || self.include_concluded
     }
 }
 
@@ -232,31 +232,31 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_include_concluded() {
+    fn test_filter_include_closed() {
         // Neither flag
         let args = FilterArgs::default();
-        assert!(!args.include_concluded());
+        assert!(!args.include_closed());
 
-        // include_concluded
-        let args = FilterArgs {
-            include_concluded: true,
-            ..Default::default()
-        };
-        assert!(args.include_concluded());
-
-        // include_closed (backward compat)
+        // include_closed
         let args = FilterArgs {
             include_closed: true,
             ..Default::default()
         };
-        assert!(args.include_concluded());
+        assert!(args.include_closed());
+
+        // include_concluded (backward compat)
+        let args = FilterArgs {
+            include_concluded: true,
+            ..Default::default()
+        };
+        assert!(args.include_closed());
 
         // Both (shouldn't happen but handle gracefully)
         let args = FilterArgs {
             include_concluded: true,
             include_closed: true,
         };
-        assert!(args.include_concluded());
+        assert!(args.include_closed());
     }
 
     #[test]

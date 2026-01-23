@@ -21,11 +21,11 @@ static NOTES_SECTION_RE: LazyLock<Regex> =
 static TODO_SECTION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)(^## Todo)\n").unwrap());
 
-/// Terminal statuses
-pub const TERMINAL_STATUSES: &[&str] = &["resolved", "superseded", "deferred", "rejected"];
+/// Closed statuses (threads that don't need attention)
+pub const CLOSED_STATUSES: &[&str] = &["resolved", "superseded", "deferred", "rejected"];
 
-/// Active statuses
-pub const ACTIVE_STATUSES: &[&str] = &["idea", "planning", "active", "blocked", "paused"];
+/// Open statuses (threads that need attention)
+pub const OPEN_STATUSES: &[&str] = &["idea", "planning", "active", "blocked", "paused"];
 
 /// Frontmatter represents the YAML frontmatter of a thread
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -200,16 +200,16 @@ pub fn base_status(status: &str) -> String {
     }
 }
 
-/// Check if a status is terminal
-pub fn is_terminal(status: &str) -> bool {
+/// Check if a status is closed
+pub fn is_closed(status: &str) -> bool {
     let base = base_status(status);
-    TERMINAL_STATUSES.contains(&base.as_str())
+    CLOSED_STATUSES.contains(&base.as_str())
 }
 
 /// Check if a status is valid
 pub fn is_valid_status(status: &str) -> bool {
     let base = base_status(status);
-    ACTIVE_STATUSES.contains(&base.as_str()) || TERMINAL_STATUSES.contains(&base.as_str())
+    OPEN_STATUSES.contains(&base.as_str()) || CLOSED_STATUSES.contains(&base.as_str())
 }
 
 /// Escape $ characters in replacement strings for regex ($ is backreference, $$ is literal $)
@@ -541,7 +541,7 @@ mod tests {
     }
 
     #[test]
-    fn test_is_terminal() {
+    fn test_is_closed() {
         let cases = vec![
             ("active", false),
             ("blocked", false),
@@ -554,10 +554,10 @@ mod tests {
         ];
 
         for (status, want) in cases {
-            let got = is_terminal(status);
+            let got = is_closed(status);
             assert_eq!(
                 got, want,
-                "is_terminal({:?}) = {:?}, want {:?}",
+                "is_closed({:?}) = {:?}, want {:?}",
                 status, got, want
             );
         }

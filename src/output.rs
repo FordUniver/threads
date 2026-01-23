@@ -7,7 +7,7 @@ use clap::ValueEnum;
 use colored::{ColoredString, Colorize};
 
 /// Output format for commands.
-#[derive(Clone, Copy, Default, ValueEnum, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
 pub enum OutputFormat {
     /// Human-optimized: colors, boxes, relative dates
     #[default]
@@ -40,7 +40,7 @@ impl OutputFormat {
 /// - Green: active work
 /// - Yellow: blocked/waiting
 /// - Blue: planning phase (NOT cyan - cyan reserved for UI markers)
-/// - Dimmed: terminal/closed states
+/// - Dimmed: closed states
 pub fn style_status(status: &str) -> ColoredString {
     match status {
         "active" => status.green(),

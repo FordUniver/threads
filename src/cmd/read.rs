@@ -11,6 +11,7 @@ use serde::Serialize;
 use termimad::MadSkin;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use crate::args::FormatArgs;
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
 use crate::workspace;
@@ -21,13 +22,8 @@ pub struct ReadArgs {
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// Output format (auto-detects TTY for pretty vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
-    format: OutputFormat,
-
-    /// Output as JSON (shorthand for --format=json)
-    #[arg(long)]
-    json: bool,
+    #[command(flatten)]
+    format: FormatArgs,
 
     /// Override terminal width (for testing)
     #[arg(long, hide = true)]
@@ -42,12 +38,7 @@ pub fn run(args: ReadArgs, ws: &Path) -> Result<(), String> {
     let file = workspace::find_by_ref(ws, &args.id)?;
     let content = fs::read_to_string(&file).map_err(|e| format!("reading file: {}", e))?;
 
-    // Resolve format (handle --json shorthand and TTY auto-detection)
-    let format = if args.json {
-        OutputFormat::Json
-    } else {
-        args.format.resolve()
-    };
+    let format = args.format.resolve();
 
     match format {
         OutputFormat::Pretty => {

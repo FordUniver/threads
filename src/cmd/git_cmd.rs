@@ -6,6 +6,7 @@ use clap_complete::engine::ArgValueCompleter;
 use colored::Colorize;
 use serde::Serialize;
 
+use crate::args::FormatArgs;
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread;
@@ -21,13 +22,8 @@ pub struct GitArgs {
 enum GitAction {
     /// Show pending thread changes (default)
     Status {
-        /// Output format
-        #[arg(short = 'f', long, value_enum, default_value = "pretty")]
-        format: OutputFormat,
-
-        /// Output as JSON (shorthand for --format=json)
-        #[arg(long, conflicts_with = "format")]
-        json: bool,
+        #[command(flatten)]
+        format: FormatArgs,
     },
 
     /// Commit thread changes
@@ -52,8 +48,8 @@ enum GitAction {
 
 pub fn run(args: GitArgs, ws: &Path) -> Result<(), String> {
     match args.action {
-        None => status(ws, OutputFormat::Pretty, false),
-        Some(GitAction::Status { format, json }) => status(ws, format, json),
+        None => status(ws, FormatArgs::default()),
+        Some(GitAction::Status { format }) => status(ws, format),
         Some(GitAction::Commit {
             ids,
             pending,
@@ -75,12 +71,8 @@ struct PendingThread {
     change_type: String,
 }
 
-fn status(ws: &Path, format: OutputFormat, json: bool) -> Result<(), String> {
-    let format = if json {
-        OutputFormat::Json
-    } else {
-        format.resolve()
-    };
+fn status(ws: &Path, format_args: FormatArgs) -> Result<(), String> {
+    let format = format_args.resolve();
 
     let repo = workspace::open()?;
     let threads = workspace::find_all_threads(ws)?;

@@ -5,6 +5,7 @@ use chrono::Local;
 use clap::Args;
 use serde::Serialize;
 
+use crate::args::FormatArgs;
 use crate::git;
 use crate::input;
 use crate::output::OutputFormat;
@@ -43,13 +44,8 @@ pub struct NewArgs {
     #[arg(short = 'm', long)]
     m: Option<String>,
 
-    /// Output format (auto-detects TTY for pretty vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
-    format: OutputFormat,
-
-    /// Output as JSON (shorthand for --format=json)
-    #[arg(long, conflicts_with = "format")]
-    json: bool,
+    #[command(flatten)]
+    format: FormatArgs,
 }
 
 #[derive(Serialize)]
@@ -60,11 +56,7 @@ struct NewOutput {
 }
 
 pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
-    let format = if args.json {
-        OutputFormat::Json
-    } else {
-        args.format.resolve()
-    };
+    let format = args.format.resolve();
 
     // Validate status early
     if !thread::is_valid_status(&args.status) {

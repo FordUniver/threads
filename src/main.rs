@@ -79,8 +79,9 @@ enum Commands {
     /// Add log entry
     Log(cmd::log::LogArgs),
 
-    /// Mark thread resolved
-    Resolve(cmd::resolve::ResolveArgs),
+    /// Mark thread closed
+    #[command(alias = "resolve")]
+    Close(cmd::resolve::ResolveArgs),
 
     /// Reopen resolved thread
     Reopen(cmd::reopen::ReopenArgs),
@@ -168,7 +169,7 @@ fn main() {
         Commands::Note(args) => cmd::note::run(args, &ws),
         Commands::Todo(args) => cmd::todo::run(args, &ws),
         Commands::Log(args) => cmd::log::run(args, &ws),
-        Commands::Resolve(args) => cmd::resolve::run(args, &ws),
+        Commands::Close(args) => cmd::resolve::run(args, &ws),
         Commands::Reopen(args) => cmd::reopen::run(args, &ws),
         Commands::Remove(args) => cmd::remove::run(args, &ws),
         Commands::Completion(_) => unreachable!(), // Handled above

@@ -9,9 +9,10 @@ use colored::Colorize;
 use regex::Regex;
 use serde::Serialize;
 
+use crate::args::{DirectionArgs, FormatArgs};
 use crate::output::OutputFormat;
 use crate::thread::{self, extract_id_from_path, Frontmatter};
-use crate::workspace::{self, FindOptions};
+use crate::workspace;
 
 // ============================================================================
 // Regexes for validation
@@ -92,25 +93,11 @@ pub struct ValidateArgs {
     #[arg(short = 'a', long, global = true)]
     all: bool,
 
-    /// Search subdirectories (unlimited depth, or specify N levels)
-    #[arg(short = 'd', long = "down", value_name = "N", global = true)]
-    down: Option<Option<usize>>,
+    #[command(flatten)]
+    direction: DirectionArgs,
 
-    /// Alias for --down (consistency with list/stats)
-    #[arg(short = 'r', long, conflicts_with = "down", global = true)]
-    recursive: bool,
-
-    /// Search parent directories (up to git root, or specify N levels)
-    #[arg(short = 'u', long = "up", value_name = "N", global = true)]
-    up: Option<Option<usize>>,
-
-    /// Output format (auto-detects TTY for pretty vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "pretty", global = true)]
-    format: OutputFormat,
-
-    /// Output as JSON (shorthand for --format=json)
-    #[arg(long, conflicts_with = "format", global = true)]
-    json: bool,
+    #[command(flatten)]
+    format: FormatArgs,
 }
 
 #[derive(Subcommand)]
@@ -245,11 +232,7 @@ pub struct ValidationSummary {
 // ============================================================================
 
 pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
-    let format = if args.json {
-        OutputFormat::Json
-    } else {
-        args.format.resolve()
-    };
+    let format = args.format.resolve();
 
     // Collect thread files to validate
     let files = collect_files(&args, ws)?;
@@ -300,25 +283,7 @@ fn collect_files(args: &ValidateArgs, ws: &Path) -> Result<Vec<PathBuf>, String>
         let scope = workspace::infer_scope(ws, path_filter)?;
         let start_path = scope.threads_dir.parent().unwrap_or(ws);
 
-        // Determine search direction: --down/-d takes priority, then -r as alias
-        let down_opt = if args.down.is_some() {
-            args.down
-        } else if args.recursive {
-            Some(None) // unlimited depth
-        } else {
-            None
-        };
-
-        let mut options = FindOptions::new();
-
-        if let Some(depth) = down_opt {
-            options = options.with_down(depth);
-        }
-
-        if let Some(depth) = args.up {
-            options = options.with_up(depth);
-        }
-
+        let options = args.direction.to_find_options();
         workspace::find_threads_with_options(start_path, ws, &options)
     }
 }

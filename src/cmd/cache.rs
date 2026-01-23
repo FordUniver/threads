@@ -4,6 +4,7 @@ use std::path::Path;
 use clap::{Args, Subcommand};
 use colored::Colorize;
 
+use crate::args::FormatArgs;
 use crate::cache::TimestampCache;
 use crate::output::OutputFormat;
 use crate::workspace;
@@ -18,13 +19,8 @@ pub struct CacheArgs {
 enum CacheAction {
     /// Show cache status and statistics
     Status {
-        /// Output format
-        #[arg(short = 'f', long, value_enum, default_value = "pretty")]
-        format: OutputFormat,
-
-        /// Output as JSON (shorthand for --format=json)
-        #[arg(long, conflicts_with = "format")]
-        json: bool,
+        #[command(flatten)]
+        format: FormatArgs,
     },
 
     /// Clear the timestamp cache
@@ -33,7 +29,7 @@ enum CacheAction {
 
 pub fn run(args: CacheArgs, ws: &Path) -> Result<(), String> {
     match args.action {
-        CacheAction::Status { format, json } => status(ws, format, json),
+        CacheAction::Status { format } => status(ws, format),
         CacheAction::Clear => clear(ws),
     }
 }
@@ -42,12 +38,8 @@ fn cache_path(ws: &Path) -> std::path::PathBuf {
     ws.join(".threads-config").join("cache.json")
 }
 
-fn status(ws: &Path, format: OutputFormat, json: bool) -> Result<(), String> {
-    let format = if json {
-        OutputFormat::Json
-    } else {
-        format.resolve()
-    };
+fn status(ws: &Path, format_args: FormatArgs) -> Result<(), String> {
+    let format = format_args.resolve();
 
     let path = cache_path(ws);
     let exists = path.exists();
