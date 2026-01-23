@@ -5,7 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::env_bool;
+use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::Thread;
@@ -48,7 +48,7 @@ struct UpdateOutput {
     committed: bool,
 }
 
-pub fn run(args: UpdateArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: UpdateArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
     if args.title.is_none() && args.desc.is_none() {
@@ -94,7 +94,7 @@ pub fn run(args: UpdateArgs, ws: &Path) -> Result<(), String> {
                 println!("Updated desc: {}", desc);
             }
             println!("  → {}", rel_path);
-            if !committed && !env_bool("THREADS_QUIET").unwrap_or(false) {
+            if !committed && !is_quiet(config) {
                 println!(
                     "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
                     id, id

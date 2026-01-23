@@ -8,7 +8,7 @@ use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
 use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
-use crate::config::env_bool;
+use crate::config::{is_quiet, root_name, Config};
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
 use crate::workspace;
@@ -35,7 +35,7 @@ struct StatusCount {
     count: usize,
 }
 
-pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
+pub fn run(args: StatsArgs, git_root: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
     // Parse path filter
@@ -103,6 +103,7 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
             &filter_path,
             &args.direction,
             include_closed,
+            config,
         ),
         OutputFormat::Plain => output_plain(
             &sorted,
@@ -111,6 +112,7 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
             &filter_path,
             &args.direction,
             include_closed,
+            config,
         ),
         OutputFormat::Json => output_json(&sorted, total, git_root, &filter_path),
         OutputFormat::Yaml => output_yaml(&sorted, total, git_root, &filter_path),
@@ -150,9 +152,10 @@ fn output_pretty(
     filter_path: &str,
     direction: &DirectionArgs,
     include_closed: bool,
+    config: &Config,
 ) -> Result<(), String> {
     let path_desc = if filter_path == "." {
-        "repo root".to_string()
+        root_name(config).to_string()
     } else {
         filter_path.to_string()
     };
@@ -169,7 +172,7 @@ fn output_pretty(
 
     if total == 0 {
         println!("{}", "No threads found.".dimmed());
-        if !direction.is_searching() && !env_bool("THREADS_QUIET").unwrap_or(false) {
+        if !direction.is_searching() && !is_quiet(config) {
             println!(
                 "{}",
                 "Hint: use -r to include nested directories, -u to search parents".dimmed()
@@ -208,6 +211,7 @@ fn output_plain(
     filter_path: &str,
     direction: &DirectionArgs,
     include_closed: bool,
+    config: &Config,
 ) -> Result<(), String> {
     let pwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -218,7 +222,7 @@ fn output_plain(
     println!();
 
     let path_desc = if filter_path == "." {
-        "repo root".to_string()
+        root_name(config).to_string()
     } else {
         filter_path.to_string()
     };
@@ -230,7 +234,7 @@ fn output_plain(
 
     if total == 0 {
         println!("No threads found.");
-        if !direction.is_searching() && !env_bool("THREADS_QUIET").unwrap_or(false) {
+        if !direction.is_searching() && !is_quiet(config) {
             println!("Hint: use -r to include nested directories, -u to search parents");
         }
         return Ok(());

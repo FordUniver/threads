@@ -598,6 +598,24 @@ pub fn resolve_section_name<'a>(sections: &'a SectionsConfig, canonical: &str) -
     }
 }
 
+/// Check if quiet mode is enabled (suppress hints).
+///
+/// Checks both config.behavior.quiet and THREADS_QUIET env var.
+pub fn is_quiet(config: &Config) -> bool {
+    config.behavior.quiet || env_bool("THREADS_QUIET").unwrap_or(false)
+}
+
+/// Get the display name for the repo root.
+///
+/// Returns config.display.root_name if set, otherwise "repo root".
+pub fn root_name(config: &Config) -> &str {
+    config
+        .display
+        .root_name
+        .as_deref()
+        .unwrap_or("repo root")
+}
+
 /// Generate a template manifest with comments.
 pub fn template_manifest() -> String {
     r#"# threads configuration manifest

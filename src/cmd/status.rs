@@ -5,7 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::{env_bool, Config};
+use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::{self, Thread};
@@ -94,7 +94,7 @@ pub fn run(args: StatusArgs, ws: &Path, config: &Config) -> Result<(), String> {
                 "Changed: {} → {} ({})",
                 old_status, args.new_status, rel_path
             );
-            if !committed && !env_bool("THREADS_QUIET").unwrap_or(false) {
+            if !committed && !is_quiet(config) {
                 println!(
                     "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
                     id, id

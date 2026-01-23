@@ -6,7 +6,7 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::{env_bool, env_string, Config};
+use crate::config::{env_bool, env_string, is_quiet, resolve_section_name, Config};
 use crate::git;
 use crate::input;
 use crate::output::OutputFormat;
@@ -101,7 +101,7 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
     }
 
     // Warn if no description provided (unless quiet mode)
-    if args.desc.is_empty() && !env_bool("THREADS_QUIET").unwrap_or(false) {
+    if args.desc.is_empty() && !is_quiet(config) {
         eprintln!("Warning: No --desc provided. Add one with: threads update <id> --desc \"...\"");
     }
 
@@ -149,18 +149,34 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
     content.push_str(&format!("status: {}\n", status));
     content.push_str("---\n\n");
 
-    if !body.is_empty() {
-        content.push_str(&body);
-        if !body.ends_with('\n') {
+    // Add Body section if enabled
+    if let Some(body_name) = resolve_section_name(&config.sections, "Body") {
+        content.push_str(&format!("## {}\n\n", body_name));
+        if !body.is_empty() {
+            content.push_str(&body);
+            if !body.ends_with('\n') {
+                content.push('\n');
+            }
             content.push('\n');
         }
-        content.push('\n');
     }
 
-    content.push_str("## Todo\n\n");
-    content.push_str("## Log\n\n");
-    content.push_str(&format!("### {}\n\n", today));
-    content.push_str(&format!("- **{}** Created thread.\n", timestamp));
+    // Add Notes section if enabled (empty by default)
+    if let Some(notes_name) = resolve_section_name(&config.sections, "Notes") {
+        content.push_str(&format!("## {}\n\n", notes_name));
+    }
+
+    // Add Todo section if enabled
+    if let Some(todo_name) = resolve_section_name(&config.sections, "Todo") {
+        content.push_str(&format!("## {}\n\n", todo_name));
+    }
+
+    // Add Log section if enabled
+    if let Some(log_name) = resolve_section_name(&config.sections, "Log") {
+        content.push_str(&format!("## {}\n\n", log_name));
+        content.push_str(&format!("### {}\n\n", today));
+        content.push_str(&format!("- **{}** Created thread.\n", timestamp));
+    }
 
     // Write file
     fs::write(&thread_path, &content).map_err(|e| format!("writing thread file: {}", e))?;
@@ -173,7 +189,7 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
             println!("Created thread in {}: {}", scope.level_desc, id);
             println!("  → {}", rel_path);
 
-            if body.is_empty() && !env_bool("THREADS_QUIET").unwrap_or(false) {
+            if body.is_empty() && !is_quiet(config) {
                 eprintln!(
                     "Hint: Add body with: echo \"content\" | threads body {} --set",
                     id
@@ -211,9 +227,7 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
             .m
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &thread_path, &msg)?;
-    } else if matches!(format, OutputFormat::Pretty | OutputFormat::Plain)
-        && !env_bool("THREADS_QUIET").unwrap_or(false)
-    {
+    } else if matches!(format, OutputFormat::Pretty | OutputFormat::Plain) && !is_quiet(config) {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
             id, id

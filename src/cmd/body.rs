@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::{env_bool, resolve_section_name, Config};
+use crate::config::{env_bool, is_quiet, resolve_section_name, Config};
 use crate::git;
 use crate::input;
 use crate::thread::{self, Thread};
@@ -51,6 +51,13 @@ pub fn run(args: BodyArgs, ws: &Path, config: &Config) -> Result<(), String> {
 
     let mut t = Thread::parse(&file)?;
 
+    // Ensure section exists (may be missing in old threads or with renamed sections)
+    // Insert Body before Notes or Todo, whichever comes first
+    let insert_before = resolve_section_name(&config.sections, "Notes")
+        .or_else(|| resolve_section_name(&config.sections, "Todo"))
+        .unwrap_or("Todo");
+    t.content = thread::ensure_section(&t.content, section_name, insert_before);
+
     if set_mode {
         t.content = thread::replace_section(&t.content, section_name, &content);
     } else {
@@ -70,7 +77,7 @@ pub fn run(args: BodyArgs, ws: &Path, config: &Config) -> Result<(), String> {
             .m
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &file, &msg)?;
-    } else if !env_bool("THREADS_QUIET").unwrap_or(false) {
+    } else if !is_quiet(config) {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
             args.id, args.id

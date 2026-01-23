@@ -6,7 +6,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::env_bool;
+use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::Thread;
@@ -39,7 +39,7 @@ struct RemoveOutput {
     committed: bool,
 }
 
-pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: RemoveArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
     let file = workspace::find_by_ref(ws, &args.id)?;
@@ -78,7 +78,7 @@ pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
             println!("Removed: {}", rel_path_str);
-            if !env_bool("THREADS_QUIET").unwrap_or(false) {
+            if !is_quiet(config) {
                 if !was_tracked {
                     println!("Note: Thread was never committed to git, no commit needed.");
                 } else if !committed {

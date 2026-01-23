@@ -10,7 +10,7 @@ use tabled::{Table, Tabled};
 
 use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
 use crate::cache::TimestampCache;
-use crate::config::env_bool;
+use crate::config::{is_quiet, root_name, Config};
 use crate::git;
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
@@ -104,7 +104,7 @@ impl ThreadInfo {
     }
 }
 
-pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
+pub fn run(args: ListArgs, git_root: &Path, config: &Config) -> Result<(), String> {
     // Open repository for git-based timestamps
     let repo = workspace::open()?;
 
@@ -231,6 +231,7 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             &args.direction,
             include_closed,
             args.status.as_deref(),
+            config,
         ),
         OutputFormat::Plain => output_plain(
             &results,
@@ -240,6 +241,7 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             &args.direction,
             include_closed,
             args.status.as_deref(),
+            config,
         ),
         OutputFormat::Json => output_json(&results, git_root, &pwd_rel),
         OutputFormat::Yaml => output_yaml(&results, git_root, &pwd_rel),
@@ -303,6 +305,7 @@ fn output_pretty(
     direction: &DirectionArgs,
     include_closed: bool,
     status_filter: Option<&str>,
+    config: &Config,
 ) -> Result<(), String> {
     // Header: repo-name (path) with PWD marker
     let repo_name = git_root
@@ -335,7 +338,7 @@ fn output_pretty(
     println!();
 
     if results.is_empty() {
-        if !direction.is_searching() && !env_bool("THREADS_QUIET").unwrap_or(false) {
+        if !direction.is_searching() && !is_quiet(config) {
             println!(
                 "{}",
                 "Hint: use -r to include nested directories, -u to search parents".dimmed()
@@ -383,6 +386,7 @@ fn output_plain(
     direction: &DirectionArgs,
     include_closed: bool,
     status_filter: Option<&str>,
+    config: &Config,
 ) -> Result<(), String> {
     // Plain header: explicit context
     let pwd = std::env::current_dir()
@@ -395,7 +399,7 @@ fn output_plain(
     println!();
 
     let path_desc = if filter_path == "." {
-        "repo root".to_string()
+        root_name(config).to_string()
     } else {
         filter_path.to_string()
     };
@@ -418,7 +422,7 @@ fn output_plain(
     println!();
 
     if results.is_empty() {
-        if !direction.is_searching() && !env_bool("THREADS_QUIET").unwrap_or(false) {
+        if !direction.is_searching() && !is_quiet(config) {
             println!("Hint: use -r to include nested directories, -u to search parents");
         }
         return Ok(());

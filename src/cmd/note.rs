@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::{env_bool, resolve_section_name, Config};
+use crate::config::{env_bool, is_quiet, resolve_section_name, Config};
 use crate::git;
 use crate::thread::{self, Thread};
 use crate::workspace;
@@ -122,7 +122,7 @@ pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
             .m
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &file, &msg)?;
-    } else if !env_bool("THREADS_QUIET").unwrap_or(false) {
+    } else if !is_quiet(config) {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
             args.id, args.id

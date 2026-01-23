@@ -455,6 +455,31 @@ EOF
     end_test
 }
 
+# Test: display.root_name customizes output
+test_display_root_name() {
+    begin_test "display.root_name customizes repo root display"
+    setup_test_workspace
+
+    # Create manifest with custom root_name
+    mkdir -p "$TEST_WS/.threads-config"
+    cat > "$TEST_WS/.threads-config/manifest.yaml" <<EOF
+display:
+  root_name: "workspace root"
+EOF
+
+    # Create a thread so list has something
+    create_thread "aaa001" "Test Thread" "active"
+
+    # Use plain format to check root_name (it shows "Showing X threads in <root_name>")
+    local output
+    output=$(capture_stdout $THREADS_BIN list --format=plain)
+
+    assert_contains "$output" "workspace root" "should use custom root_name in output"
+
+    teardown_test_workspace
+    end_test
+}
+
 # ============================================================================
 # Run all tests
 # ============================================================================
@@ -473,6 +498,7 @@ test_config_show
 test_config_env
 test_config_schema
 test_config_init
+test_display_root_name
 
 # Section tests
 test_section_disabled

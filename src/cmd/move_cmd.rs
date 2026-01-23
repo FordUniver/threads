@@ -6,7 +6,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::env_bool;
+use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::Thread;
@@ -42,7 +42,7 @@ struct MoveOutput {
     committed: bool,
 }
 
-pub fn run(args: MoveArgs, git_root: &Path) -> Result<(), String> {
+pub fn run(args: MoveArgs, git_root: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
     // Find source thread
@@ -105,7 +105,7 @@ pub fn run(args: MoveArgs, git_root: &Path) -> Result<(), String> {
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
             println!("Moved: {} → {}", rel_src, rel_dest);
-            if !committed && !env_bool("THREADS_QUIET").unwrap_or(false) {
+            if !committed && !is_quiet(config) {
                 println!(
                     "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
                     id, id
