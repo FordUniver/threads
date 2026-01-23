@@ -8,6 +8,7 @@ use clap_complete::{generate, Shell};
 mod args;
 mod cache;
 mod cmd;
+mod config;
 mod git;
 mod input;
 mod output;
