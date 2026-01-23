@@ -30,8 +30,8 @@ threads todo abc123 add "Implement JWT validation"
 # Log progress
 threads log abc123 "Completed initial implementation"
 
-# Mark resolved
-threads resolve abc123
+# Mark closed
+threads close abc123
 ```
 
 ## Thread Format
@@ -107,8 +107,8 @@ Nested git repositories are respected as boundaries: the tool won't traverse int
 | `note <id> <action>` | Manage notes (add/edit/remove) |
 | `todo <id> <action>` | Manage todos (add/check/uncheck/remove) |
 | `log <id> <entry>` | Add timestamped log entry |
-| `resolve <id>` | Mark thread resolved |
-| `reopen <id>` | Reopen resolved thread |
+| `close <id>` | Mark thread closed (alias: `resolve`) |
+| `reopen <id>` | Reopen closed thread |
 | `remove <id>` | Remove thread entirely |
 
 ### Directional Search
@@ -130,9 +130,9 @@ threads list -r
 
 ### Status Values
 
-**Active:** `idea`, `planning`, `active`, `blocked`, `paused`
+**Open:** `idea`, `planning`, `active`, `blocked`, `paused`
 
-**Terminal:** `resolved`, `superseded`, `deferred`, `rejected`
+**Closed:** `resolved`, `superseded`, `deferred`, `rejected`
 
 Blocked status supports reasons: `blocked (waiting on review)`
 
@@ -146,6 +146,68 @@ threads list --format plain   # Plain text
 threads list --format json    # JSON
 threads list --format yaml    # YAML
 threads list --json           # Shorthand for --format=json
+```
+
+## Configuration
+
+Configuration is resolved in order (later wins): defaults → user config → project manifest → environment → CLI flags.
+
+### Environment Variables
+
+Standard variables:
+
+| Variable | Effect |
+|----------|--------|
+| `NO_COLOR` | Disable colored output (any non-empty value) |
+| `FORCE_COLOR` | Force colored output even without TTY |
+
+Thread-specific variables:
+
+| Variable | Effect |
+|----------|--------|
+| `THREADS_FORMAT` | Default output format (`pretty`, `plain`, `json`, `yaml`) |
+| `THREADS_QUIET` | Suppress hints and suggestions |
+| `THREADS_DOWN` | Default `--down` depth for list/stats |
+| `THREADS_INCLUDE_CLOSED` | Include closed threads by default |
+| `THREADS_AUTO_COMMIT` | Auto-commit after mutations |
+| `THREADS_DEFAULT_STATUS` | Default status for new threads |
+
+### Project Manifest
+
+Create `.threads-config/manifest.yaml` in your repository:
+
+```yaml
+# Status definitions
+status:
+  open: [idea, planning, active, blocked, paused]
+  closed: [resolved, superseded, deferred, rejected]
+
+# Default values
+defaults:
+  new: idea           # threads new
+  closed: resolved    # threads close
+  open: active        # threads reopen
+
+# Display settings
+display:
+  root_name: "project root"  # Custom name for repo root in output
+
+# Behavior settings
+behavior:
+  auto_commit: false
+  quiet: false
+```
+
+Manifests can be placed at any level; nested manifests override parent settings.
+
+### Config Introspection
+
+```bash
+threads config show              # Show resolved configuration
+threads config show --effective  # Show with value sources
+threads config env               # List all environment variables
+threads config schema            # JSON schema for manifest validation
+threads config init              # Create template manifest
 ```
 
 ## Shell Completion
@@ -183,6 +245,7 @@ threads/
 ├── src/
 │   ├── main.rs             # Entry point and CLI
 │   ├── cmd/                # Command implementations
+│   ├── config.rs           # Configuration loading
 │   ├── git.rs              # Git operations
 │   ├── output.rs           # Output formatting
 │   ├── thread.rs           # Thread parsing
