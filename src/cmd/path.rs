@@ -4,6 +4,7 @@ use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
+use crate::args::FormatArgs;
 use crate::output::OutputFormat;
 use crate::workspace;
 
@@ -13,13 +14,8 @@ pub struct PathArgs {
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// Output format (auto-detects TTY for pretty vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
-    format: OutputFormat,
-
-    /// Output as JSON (shorthand for --format=json)
-    #[arg(long, conflicts_with = "format")]
-    json: bool,
+    #[command(flatten)]
+    format: FormatArgs,
 }
 
 #[derive(Serialize)]
@@ -29,11 +25,7 @@ struct PathOutput {
 }
 
 pub fn run(args: PathArgs, ws: &Path) -> Result<(), String> {
-    let format = if args.json {
-        OutputFormat::Json
-    } else {
-        args.format.resolve()
-    };
+    let format = args.format.resolve();
 
     let file = workspace::find_by_ref(ws, &args.id)?;
 

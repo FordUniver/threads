@@ -13,6 +13,7 @@ use tabled::settings::style::HorizontalLine;
 use tabled::settings::{Alignment, Modify, Padding, Style};
 use tabled::Table;
 
+use crate::args::FormatArgs;
 use crate::git;
 use crate::output::{self, OutputFormat};
 use crate::thread::Thread;
@@ -24,13 +25,8 @@ pub struct InfoArgs {
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// Output format
-    #[arg(short = 'f', long, value_enum, default_value = "pretty")]
-    format: OutputFormat,
-
-    /// Output as JSON (shorthand for --format=json)
-    #[arg(long, conflicts_with = "format")]
-    json: bool,
+    #[command(flatten)]
+    format: FormatArgs,
 }
 
 /// Git log entry with diff stats
@@ -96,11 +92,7 @@ impl ThreadInfoData {
 }
 
 pub fn run(args: InfoArgs, ws: &Path) -> Result<(), String> {
-    let format = if args.json {
-        OutputFormat::Json
-    } else {
-        args.format.resolve()
-    };
+    let format = args.format.resolve();
 
     // Open repository for git operations
     let repo = workspace::open()?;
