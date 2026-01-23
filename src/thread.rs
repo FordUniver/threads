@@ -200,16 +200,32 @@ pub fn base_status(status: &str) -> String {
     }
 }
 
-/// Check if a status is closed
+/// Check if a status is closed (using default status lists)
 pub fn is_closed(status: &str) -> bool {
     let base = base_status(status);
     CLOSED_STATUSES.contains(&base.as_str())
 }
 
-/// Check if a status is valid
+/// Check if a status is closed (using config status lists)
+pub fn is_closed_with_config(status: &str, closed_statuses: &[String]) -> bool {
+    let base = base_status(status);
+    closed_statuses.iter().any(|s| s == &base)
+}
+
+/// Check if a status is valid (using default status lists)
 pub fn is_valid_status(status: &str) -> bool {
     let base = base_status(status);
     OPEN_STATUSES.contains(&base.as_str()) || CLOSED_STATUSES.contains(&base.as_str())
+}
+
+/// Check if a status is valid (using config status lists)
+pub fn is_valid_status_with_config(
+    status: &str,
+    open_statuses: &[String],
+    closed_statuses: &[String],
+) -> bool {
+    let base = base_status(status);
+    open_statuses.iter().any(|s| s == &base) || closed_statuses.iter().any(|s| s == &base)
 }
 
 /// Escape $ characters in replacement strings for regex ($ is backreference, $$ is literal $)

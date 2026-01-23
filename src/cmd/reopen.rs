@@ -5,7 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::env_bool;
+use crate::config::{env_bool, Config};
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::{self, Thread};
@@ -42,13 +42,31 @@ struct ReopenOutput {
     committed: bool,
 }
 
-pub fn run(args: ReopenArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: ReopenArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
-    if !thread::is_valid_status(&args.status) {
+    // Resolve status: CLI flag > config default
+    let new_status = if args.status != "active" {
+        // User explicitly set --status
+        args.status.clone()
+    } else {
+        config.defaults.open.clone()
+    };
+
+    // Validate status using config status lists
+    if !thread::is_valid_status_with_config(&new_status, &config.status.open, &config.status.closed)
+    {
+        let all_statuses: Vec<&str> = config
+            .status
+            .open
+            .iter()
+            .chain(config.status.closed.iter())
+            .map(|s| s.as_str())
+            .collect();
         return Err(format!(
-            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, rejected",
-            args.status
+            "Invalid status '{}'. Must be one of: {}",
+            new_status,
+            all_statuses.join(", ")
         ));
     }
 
@@ -60,7 +78,7 @@ pub fn run(args: ReopenArgs, ws: &Path) -> Result<(), String> {
     let id = t.id().to_string();
 
     // Update status
-    t.set_frontmatter_field("status", &args.status)?;
+    t.set_frontmatter_field("status", &new_status)?;
 
     // Add log entry
     t.content = thread::insert_log_entry(&t.content, "Reopened.");
@@ -84,7 +102,7 @@ pub fn run(args: ReopenArgs, ws: &Path) -> Result<(), String> {
 
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
-            println!("Reopened: {} → {} ({})", old_status, args.status, rel_path);
+            println!("Reopened: {} → {} ({})", old_status, new_status, rel_path);
             if !committed && !env_bool("THREADS_QUIET").unwrap_or(false) {
                 println!(
                     "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
@@ -96,7 +114,7 @@ pub fn run(args: ReopenArgs, ws: &Path) -> Result<(), String> {
             let output = ReopenOutput {
                 id,
                 old_status,
-                new_status: args.status,
+                new_status,
                 path: rel_path,
                 committed,
             };
@@ -108,7 +126,7 @@ pub fn run(args: ReopenArgs, ws: &Path) -> Result<(), String> {
             let output = ReopenOutput {
                 id,
                 old_status,
-                new_status: args.status,
+                new_status,
                 path: rel_path,
                 committed,
             };

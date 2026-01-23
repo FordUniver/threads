@@ -156,25 +156,29 @@ fn main() {
         }
     };
 
+    // Load config
+    let cwd = std::env::current_dir().unwrap_or_else(|_| ws.clone());
+    let loaded_config = config::load_config(&ws, &cwd);
+
     let result = match cli.command {
         Commands::List(args) => cmd::list::run(args, &ws),
-        Commands::New(args) => cmd::new::run(args, &ws),
+        Commands::New(args) => cmd::new::run(args, &ws, &loaded_config.config),
         Commands::Move(args) => cmd::move_cmd::run(args, &ws),
-        Commands::Validate(args) => cmd::validate::run(args, &ws),
+        Commands::Validate(args) => cmd::validate::run(args, &ws, &loaded_config.config),
         Commands::Cache(args) => cmd::cache::run(args, &ws),
         Commands::Git(args) => cmd::git_cmd::run(args, &ws),
         Commands::Stats(args) => cmd::stats::run(args, &ws),
         Commands::Read(args) => cmd::read::run(args, &ws),
         Commands::Info(args) => cmd::info::run(args, &ws),
         Commands::Path(args) => cmd::path::run(args, &ws),
-        Commands::Status(args) => cmd::status::run(args, &ws),
+        Commands::Status(args) => cmd::status::run(args, &ws, &loaded_config.config),
         Commands::Update(args) => cmd::update::run(args, &ws),
         Commands::Body(args) => cmd::body::run(args, &ws),
         Commands::Note(args) => cmd::note::run(args, &ws),
         Commands::Todo(args) => cmd::todo::run(args, &ws),
         Commands::Log(args) => cmd::log::run(args, &ws),
-        Commands::Close(args) => cmd::resolve::run(args, &ws),
-        Commands::Reopen(args) => cmd::reopen::run(args, &ws),
+        Commands::Close(args) => cmd::resolve::run(args, &ws, &loaded_config.config),
+        Commands::Reopen(args) => cmd::reopen::run(args, &ws, &loaded_config.config),
         Commands::Remove(args) => cmd::remove::run(args, &ws),
         Commands::Config(args) => cmd::config_cmd::run(args, &ws),
         Commands::Completion(_) => unreachable!(), // Handled above

@@ -6,7 +6,7 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::{env_bool, env_string};
+use crate::config::{env_bool, env_string, Config};
 use crate::git;
 use crate::input;
 use crate::output::OutputFormat;
@@ -56,24 +56,33 @@ struct NewOutput {
     path_absolute: String,
 }
 
-pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
+pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
-    // Resolve status: CLI flag > THREADS_DEFAULT_STATUS env > default ("idea")
+    // Resolve status: CLI flag > THREADS_DEFAULT_STATUS env > config default > hardcoded default
+    let default_status = &config.defaults.new;
     let status = if args.status != "idea" {
         // User explicitly set --status
         args.status.clone()
     } else if let Some(env_status) = env_string("THREADS_DEFAULT_STATUS") {
         env_status
     } else {
-        args.status.clone()
+        default_status.clone()
     };
 
-    // Validate status early
-    if !thread::is_valid_status(&status) {
+    // Validate status early using config status lists
+    if !thread::is_valid_status_with_config(&status, &config.status.open, &config.status.closed) {
+        let all_statuses: Vec<&str> = config
+            .status
+            .open
+            .iter()
+            .chain(config.status.closed.iter())
+            .map(|s| s.as_str())
+            .collect();
         return Err(format!(
-            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, rejected",
-            status
+            "Invalid status '{}'. Must be one of: {}",
+            status,
+            all_statuses.join(", ")
         ));
     }
 

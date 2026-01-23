@@ -77,6 +77,39 @@ pub fn style_status(status: &str) -> ColoredString {
     }
 }
 
+/// Style status using config colors.
+///
+/// Color names supported: green, yellow, blue, red, cyan, magenta, white, dim/dimmed
+pub fn style_status_with_config(
+    status: &str,
+    colors: Option<&crate::config::StatusColors>,
+) -> ColoredString {
+    let color = colors.and_then(|c| match status {
+        "active" => c.active.as_deref(),
+        "blocked" => c.blocked.as_deref(),
+        "paused" => c.paused.as_deref(),
+        "idea" => c.idea.as_deref(),
+        "planning" => c.planning.as_deref(),
+        "resolved" => c.resolved.as_deref(),
+        "superseded" => c.superseded.as_deref(),
+        "deferred" => c.deferred.as_deref(),
+        "rejected" => c.rejected.as_deref(),
+        _ => None,
+    });
+
+    match color {
+        Some("green") => status.green(),
+        Some("yellow") => status.yellow(),
+        Some("blue") => status.blue(),
+        Some("red") => status.red(),
+        Some("cyan") => status.cyan(),
+        Some("magenta") => status.magenta(),
+        Some("white") => status.white(),
+        Some("dim") | Some("dimmed") => status.dimmed(),
+        Some(_) | None => style_status(status), // fallback to defaults
+    }
+}
+
 /// Style for IDs and hashes - always dimmed.
 pub fn style_id(id: &str) -> ColoredString {
     id.dimmed()

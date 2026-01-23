@@ -10,6 +10,7 @@ use regex::Regex;
 use serde::Serialize;
 
 use crate::args::{DirectionArgs, FormatArgs};
+use crate::config::Config;
 use crate::output::OutputFormat;
 use crate::thread::{self, extract_id_from_path, Frontmatter};
 use crate::workspace;
@@ -231,7 +232,7 @@ pub struct ValidationSummary {
 // Main Entry Point
 // ============================================================================
 
-pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: ValidateArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
     // Collect thread files to validate
@@ -259,7 +260,7 @@ pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
     }
 
     // Validate all files
-    let summary = validate_all(&files, ws);
+    let summary = validate_all(&files, ws, config);
 
     // Dispatch to subcommand
     match args.action {
@@ -613,7 +614,7 @@ fn output_stats_yaml(summary: &ValidationSummary, stats: &[IssueStat]) -> Result
 // Validation Logic
 // ============================================================================
 
-fn validate_all(files: &[PathBuf], ws: &Path) -> ValidationSummary {
+fn validate_all(files: &[PathBuf], ws: &Path, config: &Config) -> ValidationSummary {
     let mut results: Vec<FileResult> = Vec::new();
     let mut ids_seen: HashMap<String, PathBuf> = HashMap::new();
 
@@ -639,7 +640,7 @@ fn validate_all(files: &[PathBuf], ws: &Path) -> ValidationSummary {
         };
 
         // Validate frontmatter
-        let fm_result = validate_frontmatter(&content, path);
+        let fm_result = validate_frontmatter(&content, path, config);
         issues.extend(fm_result.issues);
 
         // Check for duplicate IDs (E007)
@@ -692,7 +693,7 @@ struct FrontmatterResult {
     issues: Vec<Issue>,
 }
 
-fn validate_frontmatter(content: &str, path: &Path) -> FrontmatterResult {
+fn validate_frontmatter(content: &str, path: &Path, config: &Config) -> FrontmatterResult {
     let mut issues = Vec::new();
 
     // E001: Check for frontmatter delimiters
@@ -768,8 +769,10 @@ fn validate_frontmatter(content: &str, path: &Path) -> FrontmatterResult {
         }
     }
 
-    // E006: Validate status
-    if !fm.status.is_empty() && !thread::is_valid_status(&fm.status) {
+    // E006: Validate status using config status lists
+    if !fm.status.is_empty()
+        && !thread::is_valid_status_with_config(&fm.status, &config.status.open, &config.status.closed)
+    {
         let base = thread::base_status(&fm.status);
         issues.push(Issue::error("E006", format!("invalid status '{}'", base)));
     }

@@ -5,7 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::env_bool;
+use crate::config::{env_bool, Config};
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::{self, Thread};
@@ -37,7 +37,7 @@ struct ResolveOutput {
     committed: bool,
 }
 
-pub fn run(args: ResolveArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: ResolveArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
     let file = workspace::find_by_ref(ws, &args.id)?;
@@ -47,11 +47,17 @@ pub fn run(args: ResolveArgs, ws: &Path) -> Result<(), String> {
     let old_status = t.status().to_string();
     let id = t.id().to_string();
 
-    // Update status
-    t.set_frontmatter_field("status", "resolved")?;
+    // Update status using config default
+    let closed_status = &config.defaults.closed;
+    t.set_frontmatter_field("status", closed_status)?;
 
     // Add log entry
-    t.content = thread::insert_log_entry(&t.content, "Resolved.");
+    let log_msg = if closed_status == "resolved" {
+        "Resolved.".to_string()
+    } else {
+        format!("Closed ({}).", closed_status)
+    };
+    t.content = thread::insert_log_entry(&t.content, &log_msg);
 
     t.write()?;
 
@@ -72,7 +78,7 @@ pub fn run(args: ResolveArgs, ws: &Path) -> Result<(), String> {
 
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
-            println!("Resolved: {} → resolved ({})", old_status, rel_path);
+            println!("Closed: {} → {} ({})", old_status, closed_status, rel_path);
             if !committed && !env_bool("THREADS_QUIET").unwrap_or(false) {
                 println!(
                     "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",

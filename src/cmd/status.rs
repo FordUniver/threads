@@ -5,7 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::env_bool;
+use crate::config::{env_bool, Config};
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::{self, Thread};
@@ -41,13 +41,26 @@ struct StatusOutput {
     committed: bool,
 }
 
-pub fn run(args: StatusArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: StatusArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
-    if !thread::is_valid_status(&args.new_status) {
+    // Validate status using config status lists
+    if !thread::is_valid_status_with_config(
+        &args.new_status,
+        &config.status.open,
+        &config.status.closed,
+    ) {
+        let all_statuses: Vec<&str> = config
+            .status
+            .open
+            .iter()
+            .chain(config.status.closed.iter())
+            .map(|s| s.as_str())
+            .collect();
         return Err(format!(
-            "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, rejected",
-            args.new_status
+            "Invalid status '{}'. Must be one of: {}",
+            args.new_status,
+            all_statuses.join(", ")
         ));
     }
 
