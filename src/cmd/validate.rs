@@ -9,7 +9,7 @@ use colored::Colorize;
 use regex::Regex;
 use serde::Serialize;
 
-use crate::args::{DirectionArgs, FormatArgs};
+use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
 use crate::config::Config;
 use crate::output::OutputFormat;
 use crate::thread::{self, extract_id_from_path, Frontmatter};
@@ -96,6 +96,9 @@ pub struct ValidateArgs {
 
     #[command(flatten)]
     direction: DirectionArgs,
+
+    #[command(flatten)]
+    filter: FilterArgs,
 
     #[command(flatten)]
     format: FormatArgs,
@@ -263,8 +266,10 @@ pub fn run(args: ValidateArgs, ws: &Path, config: &Config) -> Result<(), String>
         return Ok(());
     }
 
+    let include_closed = args.filter.include_closed();
+
     // Validate all files
-    let summary = validate_all(&files, ws, config);
+    let summary = validate_all(&files, ws, config, include_closed);
 
     // Dispatch to subcommand
     match args.action {
@@ -275,7 +280,7 @@ pub fn run(args: ValidateArgs, ws: &Path, config: &Config) -> Result<(), String>
             e002,
             w007,
             dry_run,
-        }) => run_fix(&files, ws, e002, w007, dry_run, format),
+        }) => run_fix(&files, ws, e002, w007, dry_run, format, include_closed),
     }
 }
 
@@ -622,7 +627,12 @@ fn output_stats_yaml(summary: &ValidationSummary, stats: &[IssueStat]) -> Result
 // Validation Logic
 // ============================================================================
 
-fn validate_all(files: &[PathBuf], ws: &Path, config: &Config) -> ValidationSummary {
+fn validate_all(
+    files: &[PathBuf],
+    ws: &Path,
+    config: &Config,
+    include_closed: bool,
+) -> ValidationSummary {
     let mut results: Vec<FileResult> = Vec::new();
     let mut ids_seen: HashMap<String, PathBuf> = HashMap::new();
 
@@ -650,6 +660,15 @@ fn validate_all(files: &[PathBuf], ws: &Path, config: &Config) -> ValidationSumm
         // Validate frontmatter
         let fm_result = validate_frontmatter(&content, path, config);
         issues.extend(fm_result.issues);
+
+        // Skip closed threads unless include_closed is set
+        if !include_closed {
+            if let Some(ref status) = fm_result.status {
+                if thread::is_closed(status) {
+                    continue;
+                }
+            }
+        }
 
         // Check for duplicate IDs (E007)
         if let Some(ref id) = fm_result.id {
@@ -698,6 +717,7 @@ fn validate_all(files: &[PathBuf], ws: &Path, config: &Config) -> ValidationSumm
 
 struct FrontmatterResult {
     id: Option<String>,
+    status: Option<String>,
     issues: Vec<Issue>,
 }
 
@@ -707,7 +727,11 @@ fn validate_frontmatter(content: &str, path: &Path, config: &Config) -> Frontmat
     // E001: Check for frontmatter delimiters
     if !content.starts_with("---\n") {
         issues.push(Issue::error_at("E001", 1, "missing frontmatter delimiter"));
-        return FrontmatterResult { id: None, issues };
+        return FrontmatterResult {
+            id: None,
+            status: None,
+            issues,
+        };
     }
 
     // Find closing delimiter
@@ -719,7 +743,11 @@ fn validate_frontmatter(content: &str, path: &Path, config: &Config) -> Frontmat
                 "E001",
                 "unclosed frontmatter (missing closing ---)",
             ));
-            return FrontmatterResult { id: None, issues };
+            return FrontmatterResult {
+                id: None,
+                status: None,
+                issues,
+            };
         }
     };
 
@@ -739,7 +767,11 @@ fn validate_frontmatter(content: &str, path: &Path, config: &Config) -> Frontmat
             } else {
                 issues.push(Issue::error("E002", format!("invalid YAML: {}", e)));
             }
-            return FrontmatterResult { id: None, issues };
+            return FrontmatterResult {
+                id: None,
+                status: None,
+                issues,
+            };
         }
     };
 
@@ -795,8 +827,15 @@ fn validate_frontmatter(content: &str, path: &Path, config: &Config) -> Frontmat
         Some(fm.id)
     };
 
+    let extracted_status = if fm.status.is_empty() {
+        None
+    } else {
+        Some(fm.status)
+    };
+
     FrontmatterResult {
         id: extracted_id,
+        status: extracted_status,
         issues,
     }
 }
@@ -1025,6 +1064,7 @@ fn run_fix(
     fix_w007: bool,
     dry_run: bool,
     format: OutputFormat,
+    include_closed: bool,
 ) -> Result<(), String> {
     if !fix_e002 && !fix_w007 {
         return Err("specify at least one fix: --e002, --w007".to_string());
@@ -1045,6 +1085,15 @@ fn run_fix(
             Ok(c) => c,
             Err(_) => continue,
         };
+
+        // Filter by status unless include_closed
+        if !include_closed {
+            if let Some(status) = extract_status_from_content(&content) {
+                if thread::is_closed(&status) {
+                    continue;
+                }
+            }
+        }
 
         let mut current_content = content.clone();
         let mut file_changed = false;
@@ -1304,6 +1353,35 @@ fn quote_yaml_value(value: &str) -> String {
     } else {
         format!("'{}'", value)
     }
+}
+
+/// Extract status from content using line-by-line parsing (works even with broken YAML)
+fn extract_status_from_content(content: &str) -> Option<String> {
+    // Find frontmatter
+    if !content.starts_with("---\n") {
+        return None;
+    }
+
+    let rest = &content[4..];
+    let end = rest.find("\n---")?;
+    let yaml_content = &rest[..end];
+
+    // Look for status line
+    for line in yaml_content.lines() {
+        if let Some((key, value)) = parse_yaml_line(line) {
+            if key == "status" {
+                // Remove quotes if present
+                let status = value
+                    .trim_start_matches('"')
+                    .trim_end_matches('"')
+                    .trim_start_matches('\'')
+                    .trim_end_matches('\'');
+                return Some(status.to_string());
+            }
+        }
+    }
+
+    None
 }
 
 /// Fix log section: migrate legacy formats to bracket format, remove date headers
