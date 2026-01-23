@@ -115,6 +115,10 @@ enum ValidateAction {
 
     /// Auto-fix issues where possible
     Fix {
+        /// Fix E002: Quote frontmatter values that break YAML parsing
+        #[arg(long)]
+        e002: bool,
+
         /// Fix W007: Add timestamps to log entries (from git blame)
         #[arg(long)]
         w007: bool,
@@ -267,7 +271,11 @@ pub fn run(args: ValidateArgs, ws: &Path, config: &Config) -> Result<(), String>
         None | Some(ValidateAction::Check { verbose: false }) => run_check(&summary, format, false),
         Some(ValidateAction::Check { verbose: true }) => run_check(&summary, format, true),
         Some(ValidateAction::Stats) => run_stats(&summary, format),
-        Some(ValidateAction::Fix { w007, dry_run }) => run_fix(&files, ws, w007, dry_run, format),
+        Some(ValidateAction::Fix {
+            e002,
+            w007,
+            dry_run,
+        }) => run_fix(&files, ws, e002, w007, dry_run, format),
     }
 }
 
@@ -1013,15 +1021,17 @@ fn is_valid_timestamp(ts: &str) -> bool {
 fn run_fix(
     files: &[PathBuf],
     ws: &Path,
+    fix_e002: bool,
     fix_w007: bool,
     dry_run: bool,
     format: OutputFormat,
 ) -> Result<(), String> {
-    if !fix_w007 {
-        return Err("specify at least one fix: --w007".to_string());
+    if !fix_e002 && !fix_w007 {
+        return Err("specify at least one fix: --e002, --w007".to_string());
     }
 
-    let mut total_fixed = 0;
+    let mut frontmatter_fixed = 0;
+    let mut log_entries_fixed = 0;
     let mut headers_removed = 0;
     let mut files_modified = 0;
 
@@ -1036,27 +1046,56 @@ fn run_fix(
             Err(_) => continue,
         };
 
-        let (new_lines, fixes, removed) =
-            fix_log_section(&content, path, ws, dry_run, &rel_path, format);
+        let mut current_content = content.clone();
+        let mut file_changed = false;
+        let mut file_fm_fixed = 0;
+        let mut file_log_fixed = 0;
+        let mut file_headers_removed = 0;
 
-        if fixes > 0 || removed > 0 {
-            total_fixed += fixes;
-            headers_removed += removed;
+        // E002: Fix frontmatter quoting
+        if fix_e002 {
+            let (new_content, fixed) =
+                fix_frontmatter_quoting(&current_content, &rel_path, dry_run, format);
+            if fixed > 0 {
+                file_fm_fixed = fixed;
+                current_content = new_content;
+                file_changed = true;
+            }
+        }
+
+        // W007: Fix log timestamps
+        if fix_w007 {
+            let (new_lines, fixes, removed) =
+                fix_log_section(&current_content, path, ws, dry_run, &rel_path, format);
+            if fixes > 0 || removed > 0 {
+                file_log_fixed = fixes;
+                file_headers_removed = removed;
+                current_content = new_lines.join("\n") + "\n";
+                file_changed = true;
+            }
+        }
+
+        if file_changed {
+            frontmatter_fixed += file_fm_fixed;
+            log_entries_fixed += file_log_fixed;
+            headers_removed += file_headers_removed;
             files_modified += 1;
 
             if !dry_run {
-                let new_content = new_lines.join("\n") + "\n";
-                fs::write(path, new_content)
+                fs::write(path, &current_content)
                     .map_err(|e| format!("failed to write {}: {}", rel_path, e))?;
 
                 match format {
                     OutputFormat::Pretty | OutputFormat::Plain => {
                         let mut parts = Vec::new();
-                        if fixes > 0 {
-                            parts.push(format!("{} entries", fixes));
+                        if file_fm_fixed > 0 {
+                            parts.push(format!("{} frontmatter fields", file_fm_fixed));
                         }
-                        if removed > 0 {
-                            parts.push(format!("{} headers removed", removed));
+                        if file_log_fixed > 0 {
+                            parts.push(format!("{} log entries", file_log_fixed));
+                        }
+                        if file_headers_removed > 0 {
+                            parts.push(format!("{} headers removed", file_headers_removed));
                         }
                         println!("Fixed {} in {}", parts.join(", "), rel_path);
                     }
@@ -1070,22 +1109,38 @@ fn run_fix(
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
             println!();
+            let mut parts = Vec::new();
+            if frontmatter_fixed > 0 {
+                parts.push(format!("{} frontmatter fields", frontmatter_fixed));
+            }
+            if log_entries_fixed > 0 {
+                parts.push(format!("{} log entries", log_entries_fixed));
+            }
+            if headers_removed > 0 {
+                parts.push(format!("{} headers removed", headers_removed));
+            }
+
             if dry_run {
-                println!(
-                    "Dry run: would fix {} entries, remove {} headers in {} files",
-                    total_fixed, headers_removed, files_modified
-                );
+                if parts.is_empty() {
+                    println!("Dry run: nothing to fix");
+                } else {
+                    println!(
+                        "Dry run: would fix {} in {} files",
+                        parts.join(", "),
+                        files_modified
+                    );
+                }
+            } else if parts.is_empty() {
+                println!("Nothing to fix");
             } else {
-                println!(
-                    "Fixed {} entries, removed {} headers in {} files",
-                    total_fixed, headers_removed, files_modified
-                );
+                println!("Fixed {} in {} files", parts.join(", "), files_modified);
             }
         }
         OutputFormat::Json => {
             let output = serde_json::json!({
                 "dry_run": dry_run,
-                "fixed": total_fixed,
+                "frontmatter_fixed": frontmatter_fixed,
+                "log_entries_fixed": log_entries_fixed,
                 "headers_removed": headers_removed,
                 "files_modified": files_modified,
             });
@@ -1094,7 +1149,8 @@ fn run_fix(
         OutputFormat::Yaml => {
             let output = serde_json::json!({
                 "dry_run": dry_run,
-                "fixed": total_fixed,
+                "frontmatter_fixed": frontmatter_fixed,
+                "log_entries_fixed": log_entries_fixed,
                 "headers_removed": headers_removed,
                 "files_modified": files_modified,
             });
@@ -1103,6 +1159,151 @@ fn run_fix(
     }
 
     Ok(())
+}
+
+/// Fix frontmatter quoting: quote values that contain YAML-special characters
+fn fix_frontmatter_quoting(
+    content: &str,
+    rel_path: &str,
+    dry_run: bool,
+    format: OutputFormat,
+) -> (String, usize) {
+    // Check for frontmatter delimiters
+    if !content.starts_with("---\n") {
+        return (content.to_string(), 0);
+    }
+
+    let rest = &content[4..];
+    let end = match rest.find("\n---") {
+        Some(e) => e,
+        None => return (content.to_string(), 0),
+    };
+
+    let yaml_content = &rest[..end];
+    let after_frontmatter = &rest[end + 4..]; // Skip \n---
+
+    // Check if YAML parses successfully - if so, no fix needed
+    if serde_yaml::from_str::<Frontmatter>(yaml_content).is_ok() {
+        return (content.to_string(), 0);
+    }
+
+    // Parse frontmatter line by line and fix quoting
+    let mut fixed_lines: Vec<String> = Vec::new();
+    let mut fixes = 0;
+
+    for (i, line) in yaml_content.lines().enumerate() {
+        let line_num = i + 2; // +1 for 0-index, +1 for opening ---
+
+        if let Some((key, value)) = parse_yaml_line(line) {
+            let needs_quoting = yaml_value_needs_quoting(value);
+            let is_already_quoted = (value.starts_with('"') && value.ends_with('"'))
+                || (value.starts_with('\'') && value.ends_with('\''));
+
+            if needs_quoting && !is_already_quoted {
+                // Quote the value
+                let quoted = quote_yaml_value(value);
+                let fixed_line = format!("{}: {}", key, quoted);
+
+                if dry_run {
+                    print_fix(format, rel_path, line_num, line, &fixed_line);
+                }
+
+                fixed_lines.push(fixed_line);
+                fixes += 1;
+            } else {
+                fixed_lines.push(line.to_string());
+            }
+        } else {
+            fixed_lines.push(line.to_string());
+        }
+    }
+
+    if fixes == 0 {
+        return (content.to_string(), 0);
+    }
+
+    // Reconstruct the file
+    let new_content = format!("---\n{}\n---{}", fixed_lines.join("\n"), after_frontmatter);
+    (new_content, fixes)
+}
+
+/// Parse a simple YAML line into key and value
+fn parse_yaml_line(line: &str) -> Option<(&str, &str)> {
+    let colon_pos = line.find(':')?;
+    let key = line[..colon_pos].trim();
+    let value = line[colon_pos + 1..].trim();
+
+    // Skip empty values or nested structures
+    if value.is_empty() || key.is_empty() {
+        return None;
+    }
+
+    Some((key, value))
+}
+
+/// Check if a YAML value needs quoting
+fn yaml_value_needs_quoting(value: &str) -> bool {
+    // Already quoted
+    if (value.starts_with('"') && value.ends_with('"'))
+        || (value.starts_with('\'') && value.ends_with('\''))
+    {
+        return false;
+    }
+
+    // Contains YAML-special characters that break parsing
+    let special_chars = [
+        ':', '#', '[', ']', '{', '}', ',', '&', '*', '!', '|', '>', '%', '@', '`',
+    ];
+    if value.chars().any(|c| special_chars.contains(&c)) {
+        return true;
+    }
+
+    // Starts with special characters
+    let special_starts = [
+        '-', '?', ':', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`',
+    ];
+    if let Some(first) = value.chars().next() {
+        if special_starts.contains(&first) {
+            return true;
+        }
+    }
+
+    // Contains leading/trailing whitespace that would be trimmed
+    if value != value.trim() {
+        return true;
+    }
+
+    // Looks like a number, boolean, or null but should be a string
+    let lower = value.to_lowercase();
+    if lower == "true"
+        || lower == "false"
+        || lower == "null"
+        || lower == "yes"
+        || lower == "no"
+        || lower == "on"
+        || lower == "off"
+    {
+        return true;
+    }
+
+    // Looks like a number
+    if value.parse::<f64>().is_ok() {
+        return true;
+    }
+
+    false
+}
+
+/// Quote a YAML value using single quotes (escaping single quotes inside)
+fn quote_yaml_value(value: &str) -> String {
+    // Prefer single quotes unless value contains single quotes
+    if value.contains('\'') {
+        // Use double quotes, escape internal double quotes
+        let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{}\"", escaped)
+    } else {
+        format!("'{}'", value)
+    }
 }
 
 /// Fix log section: migrate legacy formats to bracket format, remove date headers

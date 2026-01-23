@@ -138,14 +138,13 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
     }
 
     // Generate content
-    let today = Local::now().format("%Y-%m-%d").to_string();
-    let timestamp = Local::now().format("%H:%M").to_string();
+    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
 
     let mut content = String::new();
     content.push_str("---\n");
     content.push_str(&format!("id: {}\n", id));
-    content.push_str(&format!("name: {}\n", title));
-    content.push_str(&format!("desc: {}\n", args.desc));
+    content.push_str(&format!("name: {}\n", quote_yaml_value(&title)));
+    content.push_str(&format!("desc: {}\n", quote_yaml_value(&args.desc)));
     content.push_str(&format!("status: {}\n", status));
     content.push_str("---\n\n");
 
@@ -167,8 +166,7 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
 
     // Add Log section
     content.push_str("## Log\n\n");
-    content.push_str(&format!("### {}\n\n", today));
-    content.push_str(&format!("- **{}** Created thread.\n", timestamp));
+    content.push_str(&format!("- [{}] Created thread.\n", timestamp));
 
     // Write file
     fs::write(&thread_path, &content).map_err(|e| format!("writing thread file: {}", e))?;
@@ -227,4 +225,47 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
     }
 
     Ok(())
+}
+
+/// Quote a YAML value if it contains special characters
+fn quote_yaml_value(value: &str) -> String {
+    // Check if already quoted
+    if (value.starts_with('"') && value.ends_with('"'))
+        || (value.starts_with('\'') && value.ends_with('\''))
+    {
+        return value.to_string();
+    }
+
+    // Check if quoting is needed
+    let special_chars = [
+        ':', '#', '[', ']', '{', '}', ',', '&', '*', '!', '|', '>', '%', '@', '`',
+    ];
+    let special_starts = [
+        '-', '?', ':', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`',
+    ];
+
+    let needs_quoting = value.chars().any(|c| special_chars.contains(&c))
+        || value
+            .chars()
+            .next()
+            .map(|c| special_starts.contains(&c))
+            .unwrap_or(false)
+        || value != value.trim()
+        || matches!(
+            value.to_lowercase().as_str(),
+            "true" | "false" | "null" | "yes" | "no" | "on" | "off"
+        )
+        || value.parse::<f64>().is_ok();
+
+    if needs_quoting {
+        // Prefer single quotes unless value contains them
+        if value.contains('\'') {
+            let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+            format!("\"{}\"", escaped)
+        } else {
+            format!("'{}'", value)
+        }
+    } else {
+        value.to_string()
+    }
 }
