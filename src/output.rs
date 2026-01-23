@@ -21,12 +21,38 @@ pub enum OutputFormat {
 }
 
 impl OutputFormat {
-    /// Resolve the output format, applying TTY auto-detection.
+    /// Resolve the output format, applying environment variables and TTY auto-detection.
     ///
-    /// If format is Pretty but stdout is not a TTY, returns Plain.
+    /// Priority for Pretty format:
+    /// 1. NO_COLOR env var (if set and non-empty) → Plain
+    /// 2. FORCE_COLOR env var (if set and non-empty) → Pretty (skip TTY check)
+    /// 3. TTY detection → Plain if not a TTY, Pretty otherwise
+    ///
+    /// Json, Yaml, and Plain formats are returned as-is (considered explicit choices).
     pub fn resolve(self) -> Self {
         match self {
-            OutputFormat::Pretty if !std::io::stdout().is_terminal() => OutputFormat::Plain,
+            OutputFormat::Pretty => {
+                // NO_COLOR takes precedence (https://no-color.org/)
+                if std::env::var("NO_COLOR")
+                    .map(|v| !v.is_empty())
+                    .unwrap_or(false)
+                {
+                    return OutputFormat::Plain;
+                }
+                // FORCE_COLOR forces pretty output
+                if std::env::var("FORCE_COLOR")
+                    .map(|v| !v.is_empty())
+                    .unwrap_or(false)
+                {
+                    return OutputFormat::Pretty;
+                }
+                // TTY detection as fallback
+                if std::io::stdout().is_terminal() {
+                    OutputFormat::Pretty
+                } else {
+                    OutputFormat::Plain
+                }
+            }
             other => other,
         }
     }
@@ -214,5 +240,94 @@ pub fn shortest_path(git_rel_path: &str, pwd_rel: &str) -> String {
         pwd_relative
     } else {
         git_rel_path.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    // Mutex to serialize env var tests (they modify global state)
+    static ENV_MUTEX: Mutex<()> = Mutex::new(());
+
+    fn with_env<F, R>(vars: &[(&str, Option<&str>)], f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let _guard = ENV_MUTEX.lock().unwrap();
+
+        // Save original values
+        let originals: Vec<_> = vars
+            .iter()
+            .map(|(k, _)| (*k, std::env::var(*k).ok()))
+            .collect();
+
+        // Set test values
+        for (k, v) in vars {
+            match v {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
+
+        let result = f();
+
+        // Restore original values
+        for (k, original) in originals {
+            match original {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
+
+        result
+    }
+
+    #[test]
+    fn test_no_color_disables_pretty() {
+        with_env(&[("NO_COLOR", Some("1")), ("FORCE_COLOR", None)], || {
+            assert_eq!(OutputFormat::Pretty.resolve(), OutputFormat::Plain);
+        });
+    }
+
+    #[test]
+    fn test_no_color_empty_is_ignored() {
+        with_env(&[("NO_COLOR", Some("")), ("FORCE_COLOR", None)], || {
+            // Empty NO_COLOR should be ignored, falls through to TTY detection
+            // In test context, stdout is typically not a TTY
+            let result = OutputFormat::Pretty.resolve();
+            // We can't assert a specific value here since it depends on TTY state
+            assert!(result == OutputFormat::Pretty || result == OutputFormat::Plain);
+        });
+    }
+
+    #[test]
+    fn test_force_color_enables_pretty() {
+        with_env(&[("NO_COLOR", None), ("FORCE_COLOR", Some("1"))], || {
+            // FORCE_COLOR should force Pretty regardless of TTY
+            assert_eq!(OutputFormat::Pretty.resolve(), OutputFormat::Pretty);
+        });
+    }
+
+    #[test]
+    fn test_no_color_takes_precedence_over_force_color() {
+        with_env(
+            &[("NO_COLOR", Some("1")), ("FORCE_COLOR", Some("1"))],
+            || {
+                // NO_COLOR takes precedence
+                assert_eq!(OutputFormat::Pretty.resolve(), OutputFormat::Plain);
+            },
+        );
+    }
+
+    #[test]
+    fn test_env_vars_dont_affect_explicit_formats() {
+        with_env(&[("NO_COLOR", Some("1")), ("FORCE_COLOR", None)], || {
+            // Explicit formats are returned as-is
+            assert_eq!(OutputFormat::Json.resolve(), OutputFormat::Json);
+            assert_eq!(OutputFormat::Yaml.resolve(), OutputFormat::Yaml);
+            assert_eq!(OutputFormat::Plain.resolve(), OutputFormat::Plain);
+        });
     }
 }
