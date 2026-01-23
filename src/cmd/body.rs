@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::env_bool;
+use crate::config::{env_bool, resolve_section_name, Config};
 use crate::git;
 use crate::input;
 use crate::thread::{self, Thread};
@@ -32,7 +32,7 @@ pub struct BodyArgs {
     m: Option<String>,
 }
 
-pub fn run(args: BodyArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: BodyArgs, ws: &Path, config: &Config) -> Result<(), String> {
     // Default to set mode
     let set_mode = args.set || !args.append;
 
@@ -43,14 +43,18 @@ pub fn run(args: BodyArgs, ws: &Path) -> Result<(), String> {
         return Err("no content provided (use stdin)".to_string());
     }
 
+    // Get configured section name (or error if disabled)
+    let section_name = resolve_section_name(&config.sections, "Body")
+        .ok_or("Body section is disabled in config")?;
+
     let file = workspace::find_by_ref(ws, &args.id)?;
 
     let mut t = Thread::parse(&file)?;
 
     if set_mode {
-        t.content = thread::replace_section(&t.content, "Body", &content);
+        t.content = thread::replace_section(&t.content, section_name, &content);
     } else {
-        t.content = thread::append_to_section(&t.content, "Body", &content);
+        t.content = thread::append_to_section(&t.content, section_name, &content);
     }
 
     t.write()?;

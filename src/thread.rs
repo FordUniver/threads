@@ -432,22 +432,28 @@ pub fn edit_by_hash(
 }
 
 /// Set todo item checked state by hash
-pub fn set_todo_checked(content: &str, hash: &str, checked: bool) -> Result<String, String> {
+pub fn set_todo_checked(
+    content: &str,
+    section: &str,
+    hash: &str,
+    checked: bool,
+) -> Result<String, String> {
     let lines: Vec<&str> = content.lines().collect();
     let mut result = Vec::new();
-    let mut in_todo = false;
+    let mut in_section = false;
     let hash_pattern = format!("<!-- {}", hash);
+    let section_header = format!("## {}", section);
     let mut found = false;
 
     for line in lines {
         let mut line = line.to_string();
-        if line.starts_with("## Todo") {
-            in_todo = true;
+        if line.starts_with(&section_header) {
+            in_section = true;
         } else if line.starts_with("## ") {
-            in_todo = false;
+            in_section = false;
         }
 
-        if in_todo && line.contains(&hash_pattern) && !found {
+        if in_section && line.contains(&hash_pattern) && !found {
             found = true;
             if checked {
                 line = line.replace("- [ ]", "- [x]");

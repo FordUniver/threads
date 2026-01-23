@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::env_bool;
+use crate::config::{env_bool, resolve_section_name, Config};
 use crate::git;
 use crate::input;
 use crate::thread::{self, Thread};
@@ -28,7 +28,11 @@ pub struct LogArgs {
     m: Option<String>,
 }
 
-pub fn run(args: LogArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: LogArgs, ws: &Path, config: &Config) -> Result<(), String> {
+    // Check if Log section is enabled
+    let _section_name = resolve_section_name(&config.sections, "Log")
+        .ok_or("Log section is disabled in config")?;
+
     let mut entry = args.entry.clone();
 
     // Read entry from stdin if not provided
@@ -44,6 +48,8 @@ pub fn run(args: LogArgs, ws: &Path) -> Result<(), String> {
 
     let mut t = Thread::parse(&file)?;
 
+    // Note: insert_log_entry currently uses hardcoded "Log" section name
+    // TODO: Support renamed Log section in thread::insert_log_entry
     t.content = thread::insert_log_entry(&t.content, &entry);
 
     t.write()?;

@@ -564,6 +564,40 @@ pub fn json_schema() -> String {
     serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string())
 }
 
+/// Get the list of valid section names from config.
+///
+/// Returns section names that are enabled (Some value, not None).
+pub fn valid_section_names(sections: &SectionsConfig) -> Vec<&str> {
+    let mut names = Vec::new();
+    if let Some(ref name) = sections.body {
+        names.push(name.as_str());
+    }
+    if let Some(ref name) = sections.notes {
+        names.push(name.as_str());
+    }
+    if let Some(ref name) = sections.todo {
+        names.push(name.as_str());
+    }
+    if let Some(ref name) = sections.log {
+        names.push(name.as_str());
+    }
+    names
+}
+
+/// Resolve a canonical section name to the configured name.
+///
+/// For example, if sections.todo is "Tasks", resolving "Todo" returns "Tasks".
+/// Returns None if the section is disabled (set to null in config).
+pub fn resolve_section_name<'a>(sections: &'a SectionsConfig, canonical: &str) -> Option<&'a str> {
+    match canonical {
+        "Body" => sections.body.as_deref(),
+        "Notes" => sections.notes.as_deref(),
+        "Todo" => sections.todo.as_deref(),
+        "Log" => sections.log.as_deref(),
+        _ => None,
+    }
+}
+
 /// Generate a template manifest with comments.
 pub fn template_manifest() -> String {
     r#"# threads configuration manifest

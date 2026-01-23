@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::env_bool;
+use crate::config::{env_bool, resolve_section_name, Config};
 use crate::git;
 use crate::thread::{self, Thread};
 use crate::workspace;
@@ -30,7 +30,11 @@ pub struct TodoArgs {
     m: Option<String>,
 }
 
-pub fn run(args: TodoArgs, ws: &Path) -> Result<(), String> {
+pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
+    // Get configured section name (or error if disabled)
+    let section_name = resolve_section_name(&config.sections, "Todo")
+        .ok_or("Todo section is disabled in config")?;
+
     let file = workspace::find_by_ref(ws, &args.id)?;
 
     let mut t = Thread::parse(&file)?;
@@ -54,7 +58,7 @@ pub fn run(args: TodoArgs, ws: &Path) -> Result<(), String> {
             let hash = &args.item;
 
             // Check for ambiguous hash
-            let count = thread::count_matching_items(&t.content, "Todo", hash);
+            let count = thread::count_matching_items(&t.content, section_name, hash);
             if count == 0 {
                 return Err(format!("no unchecked item with hash '{}' found", hash));
             }
@@ -62,7 +66,7 @@ pub fn run(args: TodoArgs, ws: &Path) -> Result<(), String> {
                 return Err(format!("ambiguous hash '{}' matches {} items", hash, count));
             }
 
-            t.content = thread::set_todo_checked(&t.content, hash, true)?;
+            t.content = thread::set_todo_checked(&t.content, section_name, hash, true)?;
 
             println!("Checked item {}", hash);
         }
@@ -73,7 +77,7 @@ pub fn run(args: TodoArgs, ws: &Path) -> Result<(), String> {
             let hash = &args.item;
 
             // Check for ambiguous hash
-            let count = thread::count_matching_items(&t.content, "Todo", hash);
+            let count = thread::count_matching_items(&t.content, section_name, hash);
             if count == 0 {
                 return Err(format!("no checked item with hash '{}' found", hash));
             }
@@ -81,7 +85,7 @@ pub fn run(args: TodoArgs, ws: &Path) -> Result<(), String> {
                 return Err(format!("ambiguous hash '{}' matches {} items", hash, count));
             }
 
-            t.content = thread::set_todo_checked(&t.content, hash, false)?;
+            t.content = thread::set_todo_checked(&t.content, section_name, hash, false)?;
 
             println!("Unchecked item {}", hash);
         }
@@ -92,7 +96,7 @@ pub fn run(args: TodoArgs, ws: &Path) -> Result<(), String> {
             let hash = &args.item;
 
             // Check for ambiguous hash
-            let count = thread::count_matching_items(&t.content, "Todo", hash);
+            let count = thread::count_matching_items(&t.content, section_name, hash);
             if count == 0 {
                 return Err(format!("no item with hash '{}' found", hash));
             }
@@ -100,7 +104,7 @@ pub fn run(args: TodoArgs, ws: &Path) -> Result<(), String> {
                 return Err(format!("ambiguous hash '{}' matches {} items", hash, count));
             }
 
-            t.content = thread::remove_by_hash(&t.content, "Todo", hash)?;
+            t.content = thread::remove_by_hash(&t.content, section_name, hash)?;
 
             println!("Removed item {}", hash);
         }

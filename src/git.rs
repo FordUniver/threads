@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::process::Command;
 
 use git2::{Repository, Status, StatusOptions};
 
@@ -377,4 +378,72 @@ impl std::fmt::Display for FileStatus {
         };
         write!(f, "{}", s)
     }
+}
+
+/// Find the previous status of a thread file from git history.
+///
+/// Looks at the git log to find the most recent change to the status field
+/// and returns the status before it became the current (closed) status.
+///
+/// Returns None if:
+/// - File has no git history
+/// - No status changes found in history
+/// - Previous status was also a closed status
+pub fn previous_status(
+    ws: &Path,
+    file: &Path,
+    closed_statuses: &[String],
+) -> Option<String> {
+    let rel_path = file.strip_prefix(ws).unwrap_or(file);
+
+    // Use git log -p to get patches showing status field changes
+    // We look for lines like "-status: active" followed by "+status: resolved"
+    let output = Command::new("git")
+        .args([
+            "-C",
+            &ws.to_string_lossy(),
+            "log",
+            "-p",
+            "--follow",
+            "-S",
+            "status:",
+            "--",
+            &rel_path.to_string_lossy(),
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse the diff output to find status changes
+    // We want the first (most recent) change where:
+    // - The old status (line starting with "-status:") is NOT in closed_statuses
+    let mut found_old_status: Option<String> = None;
+
+    for line in stdout.lines() {
+        let line = line.trim();
+
+        // Look for removed status lines (previous status)
+        if let Some(rest) = line.strip_prefix("-status:") {
+            let status = rest.trim().to_string();
+            // Extract base status (without parenthetical reason)
+            let base_status = if let Some(idx) = status.find(" (") {
+                status[..idx].to_string()
+            } else {
+                status.clone()
+            };
+
+            // Check if this was an open status
+            if !closed_statuses.iter().any(|s| s == &base_status) {
+                found_old_status = Some(base_status);
+                break; // Found the most recent open status
+            }
+        }
+    }
+
+    found_old_status
 }

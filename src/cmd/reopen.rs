@@ -45,11 +45,17 @@ struct ReopenOutput {
 pub fn run(args: ReopenArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let format = args.format.resolve();
 
-    // Resolve status: CLI flag > config default
+    let file = workspace::find_by_ref(ws, &args.id)?;
+
+    // Resolve status: CLI flag > git history > config default
     let new_status = if args.status != "active" {
         // User explicitly set --status
         args.status.clone()
+    } else if let Some(prev) = git::previous_status(ws, &file, &config.status.closed) {
+        // Found previous open status in git history
+        prev
     } else {
+        // Fall back to config default
         config.defaults.open.clone()
     };
 
@@ -69,8 +75,6 @@ pub fn run(args: ReopenArgs, ws: &Path, config: &Config) -> Result<(), String> {
             all_statuses.join(", ")
         ));
     }
-
-    let file = workspace::find_by_ref(ws, &args.id)?;
 
     let mut t = Thread::parse(&file)?;
 

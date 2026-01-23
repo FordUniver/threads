@@ -10,7 +10,7 @@ use regex::Regex;
 use serde::Serialize;
 
 use crate::args::{DirectionArgs, FormatArgs};
-use crate::config::Config;
+use crate::config::{valid_section_names, Config};
 use crate::output::OutputFormat;
 use crate::thread::{self, extract_id_from_path, Frontmatter};
 use crate::workspace;
@@ -660,7 +660,7 @@ fn validate_all(files: &[PathBuf], ws: &Path, config: &Config) -> ValidationSumm
         }
 
         // Validate sections
-        issues.extend(validate_sections(&content));
+        issues.extend(validate_sections(&content, config));
 
         // Validate log entries
         issues.extend(validate_log(&content));
@@ -793,10 +793,24 @@ fn extract_yaml_error_line(e: &serde_yaml::Error) -> Option<usize> {
     e.location().map(|loc| loc.line())
 }
 
-fn validate_sections(content: &str) -> Vec<Issue> {
+fn validate_sections(content: &str, config: &Config) -> Vec<Issue> {
     let mut issues = Vec::new();
     let mut seen_sections: HashMap<String, usize> = HashMap::new();
     let mut section_positions: Vec<(String, usize)> = Vec::new();
+
+    // Get valid section names from config
+    let valid_sections = valid_section_names(&config.sections);
+
+    // Build section order from config (only enabled sections)
+    let section_order: Vec<&str> = [
+        config.sections.body.as_deref(),
+        config.sections.notes.as_deref(),
+        config.sections.todo.as_deref(),
+        config.sections.log.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
 
     for (line_num, line) in content.lines().enumerate() {
         if let Some(caps) = SECTION_HEADER_RE.captures(line) {
@@ -804,7 +818,7 @@ fn validate_sections(content: &str) -> Vec<Issue> {
             let line_display = line_num + 1;
 
             // W001: Unknown section
-            if !VALID_SECTIONS.contains(&section.as_str()) {
+            if !valid_sections.contains(&section.as_str()) {
                 issues.push(Issue::warning_at(
                     "W001",
                     line_display,
@@ -833,7 +847,7 @@ fn validate_sections(content: &str) -> Vec<Issue> {
     let known_positions: Vec<(usize, usize)> = section_positions
         .iter()
         .filter_map(|(name, line)| {
-            SECTION_ORDER
+            section_order
                 .iter()
                 .position(|&s| s == name)
                 .map(|order| (order, *line))
@@ -842,8 +856,8 @@ fn validate_sections(content: &str) -> Vec<Issue> {
 
     for i in 1..known_positions.len() {
         if known_positions[i].0 < known_positions[i - 1].0 {
-            let current_name = SECTION_ORDER[known_positions[i].0];
-            let prev_name = SECTION_ORDER[known_positions[i - 1].0];
+            let current_name = section_order[known_positions[i].0];
+            let prev_name = section_order[known_positions[i - 1].0];
             issues.push(Issue::warning_at(
                 "W003",
                 known_positions[i].1,
