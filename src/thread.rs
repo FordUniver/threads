@@ -366,6 +366,58 @@ pub fn add_todo_item(content: &str, text: &str) -> (String, String) {
     (new_content, hash)
 }
 
+/// Get all todo items as (checked, text, hash) tuples
+pub fn get_todo_items(content: &str) -> Vec<(bool, String, String)> {
+    let section = extract_section(content, "Todo");
+    let mut items = Vec::new();
+
+    for line in section.lines() {
+        let line = line.trim();
+        // Match: - [ ] text  <!-- hash --> or - [x] text  <!-- hash -->
+        if let Some(rest) = line.strip_prefix("- [") {
+            let checked = rest.starts_with('x');
+            if let Some(after_bracket) = rest.strip_prefix("x] ").or_else(|| rest.strip_prefix(" ] "))
+            {
+                if let Some((text, hash_part)) = after_bracket.rsplit_once("<!--") {
+                    let text = text.trim().to_string();
+                    let hash = hash_part.trim().trim_end_matches("-->").trim().to_string();
+                    if !hash.is_empty() {
+                        items.push((checked, text, hash));
+                    }
+                }
+            }
+        }
+    }
+
+    items
+}
+
+/// Get all notes as (text, hash) tuples
+pub fn get_notes(content: &str) -> Vec<(String, String)> {
+    let section = extract_section(content, "Notes");
+    let mut items = Vec::new();
+
+    for line in section.lines() {
+        let line = line.trim();
+        // Match: - text  <!-- hash -->
+        if let Some(rest) = line.strip_prefix("- ") {
+            // Skip todo-style items (shouldn't be in Notes, but just in case)
+            if rest.starts_with('[') {
+                continue;
+            }
+            if let Some((text, hash_part)) = rest.rsplit_once("<!--") {
+                let text = text.trim().to_string();
+                let hash = hash_part.trim().trim_end_matches("-->").trim().to_string();
+                if !hash.is_empty() {
+                    items.push((text, hash));
+                }
+            }
+        }
+    }
+
+    items
+}
+
 /// Remove item by hash from a section
 pub fn remove_by_hash(content: &str, section: &str, hash: &str) -> Result<String, String> {
     let lines: Vec<&str> = content.lines().collect();

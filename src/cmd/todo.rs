@@ -5,6 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 
 use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
+use crate::output;
 use crate::thread::{self, Thread};
 use crate::workspace;
 
@@ -14,7 +15,8 @@ pub struct TodoArgs {
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// Action: add, check, uncheck, remove
+    /// Action: list, add, check, uncheck, remove (default: list)
+    #[arg(default_value = "list")]
     action: String,
 
     /// Item text or hash (depending on action)
@@ -36,6 +38,18 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let mut t = Thread::parse(&file)?;
 
     match args.action.as_str() {
+        "list" | "ls" => {
+            let items = thread::get_todo_items(&t.content);
+            if items.is_empty() {
+                println!("No todo items.");
+            } else {
+                for (checked, text, hash) in items {
+                    let mark = if checked { "[x]" } else { "[ ]" };
+                    println!("{} {} ({})", mark, text, hash);
+                }
+            }
+            return Ok(());
+        }
         "add" => {
             if args.item.is_empty() {
                 return Err("usage: threads todo <id> add \"item text\"".to_string());
@@ -106,7 +120,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
         }
         _ => {
             return Err(format!(
-                "unknown action '{}'. Use: add, check, uncheck, remove",
+                "unknown action '{}'. Use: list, add, check, uncheck, remove",
                 args.action
             ));
         }
@@ -123,10 +137,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &file, &msg)?;
     } else if !is_quiet(config) {
-        println!(
-            "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
-            args.id, args.id
-        );
+        output::print_uncommitted_hint(&args.id);
     }
 
     Ok(())

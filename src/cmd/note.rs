@@ -5,6 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 
 use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
+use crate::output;
 use crate::thread::{self, Thread};
 use crate::workspace;
 
@@ -14,7 +15,8 @@ pub struct NoteArgs {
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// Action: add, edit, remove
+    /// Action: list, add, edit, remove (default: list)
+    #[arg(default_value = "list")]
     action: String,
 
     /// Note text (for add) or hash reference (for edit/remove)
@@ -40,6 +42,17 @@ pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let mut t = Thread::parse(&file)?;
 
     match args.action.as_str() {
+        "list" | "ls" => {
+            let items = thread::get_notes(&t.content);
+            if items.is_empty() {
+                println!("No notes.");
+            } else {
+                for (text, hash) in items {
+                    println!("- {} ({})", text, hash);
+                }
+            }
+            return Ok(());
+        }
         "add" => {
             if args.text.is_empty() {
                 return Err("usage: threads note <id> add \"text\"".to_string());
@@ -102,7 +115,7 @@ pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
         }
         _ => {
             return Err(format!(
-                "unknown action '{}'. Use: add, edit, remove",
+                "unknown action '{}'. Use: list, add, edit, remove",
                 args.action
             ));
         }
@@ -119,10 +132,7 @@ pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &file, &msg)?;
     } else if !is_quiet(config) {
-        println!(
-            "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
-            args.id, args.id
-        );
+        output::print_uncommitted_hint(&args.id);
     }
 
     Ok(())

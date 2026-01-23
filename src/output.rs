@@ -137,6 +137,18 @@ pub fn terminal_width() -> usize {
 }
 
 // ============================================================================
+// User messages
+// ============================================================================
+
+/// Print the standard "uncommitted changes" hint.
+pub fn print_uncommitted_hint(thread_id: &str) {
+    eprintln!(
+        "Note: Thread {} has uncommitted changes. Use 'threads git commit {}' when ready.",
+        thread_id, thread_id
+    );
+}
+
+// ============================================================================
 // Date formatting
 // ============================================================================
 

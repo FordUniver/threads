@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::args::FormatArgs;
 use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
-use crate::output::OutputFormat;
+use crate::output::{self, OutputFormat};
 use crate::thread::Thread;
 use crate::workspace;
 
@@ -95,10 +95,7 @@ pub fn run(args: UpdateArgs, ws: &Path, config: &Config) -> Result<(), String> {
             }
             println!("  → {}", rel_path);
             if !committed && !is_quiet(config) {
-                println!(
-                    "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
-                    id, id
-                );
+                output::print_uncommitted_hint(&id);
             }
         }
         OutputFormat::Json => {

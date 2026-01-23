@@ -9,7 +9,7 @@ use crate::args::FormatArgs;
 use crate::config::{env_bool, env_string, is_quiet, Config};
 use crate::git;
 use crate::input;
-use crate::output::OutputFormat;
+use crate::output::{self, OutputFormat};
 use crate::thread;
 use crate::workspace;
 
@@ -218,10 +218,7 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &thread_path, &msg)?;
     } else if matches!(format, OutputFormat::Pretty | OutputFormat::Plain) && !is_quiet(config) {
-        println!(
-            "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
-            id, id
-        );
+        output::print_uncommitted_hint(&id);
     }
 
     Ok(())
