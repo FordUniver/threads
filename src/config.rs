@@ -347,9 +347,7 @@ pub fn env_usize(name: &str) -> Option<usize> {
 
 /// Check if a string environment variable is set and non-empty.
 pub fn env_is_set(name: &str) -> bool {
-    std::env::var(name)
-        .map(|v| !v.is_empty())
-        .unwrap_or(false)
+    std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false)
 }
 
 // ============================================================================
@@ -426,7 +424,9 @@ fn collect_manifest_paths(git_root: &Path, cwd: &Path) -> Vec<PathBuf> {
     let mut paths = Vec::new();
 
     // Normalize paths
-    let git_root = git_root.canonicalize().unwrap_or_else(|_| git_root.to_path_buf());
+    let git_root = git_root
+        .canonicalize()
+        .unwrap_or_else(|_| git_root.to_path_buf());
     let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
 
     // Check if cwd is under git_root
@@ -492,7 +492,10 @@ pub fn merge(base: &mut Config, overlay: &Config) {
         base.display.root_name = overlay.display.root_name.clone();
     }
     if let Some(ref overlay_colors) = overlay.display.status_colors {
-        let base_colors = base.display.status_colors.get_or_insert_with(StatusColors::default);
+        let base_colors = base
+            .display
+            .status_colors
+            .get_or_insert_with(StatusColors::default);
         merge_status_colors(base_colors, overlay_colors);
     }
 
@@ -609,11 +612,7 @@ pub fn is_quiet(config: &Config) -> bool {
 ///
 /// Returns config.display.root_name if set, otherwise "repo root".
 pub fn root_name(config: &Config) -> &str {
-    config
-        .display
-        .root_name
-        .as_deref()
-        .unwrap_or("repo root")
+    config.display.root_name.as_deref().unwrap_or("repo root")
 }
 
 /// Generate a template manifest with comments.

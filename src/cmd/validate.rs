@@ -771,7 +771,11 @@ fn validate_frontmatter(content: &str, path: &Path, config: &Config) -> Frontmat
 
     // E006: Validate status using config status lists
     if !fm.status.is_empty()
-        && !thread::is_valid_status_with_config(&fm.status, &config.status.open, &config.status.closed)
+        && !thread::is_valid_status_with_config(
+            &fm.status,
+            &config.status.open,
+            &config.status.closed,
+        )
     {
         let base = thread::base_status(&fm.status);
         issues.push(Issue::error("E006", format!("invalid status '{}'", base)));
@@ -1284,9 +1288,8 @@ fn is_non_log_list_item(content: &str) -> bool {
 
     // Bold text that is NOT a timestamp (continuation headers like "**Results:**")
     // Timestamps look like **YYYY-MM-DD or **HH:MM** - other bold is content
-    if trimmed.starts_with("**") {
+    if let Some(after_bold) = trimmed.strip_prefix("**") {
         // Check if it's NOT a timestamp pattern
-        let after_bold = &trimmed[2..];
         // Timestamp patterns: YYYY-MM-DD or HH:MM
         let is_date = after_bold.len() >= 10
             && after_bold.chars().take(4).all(|c| c.is_ascii_digit())

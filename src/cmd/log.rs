@@ -30,8 +30,8 @@ pub struct LogArgs {
 
 pub fn run(args: LogArgs, ws: &Path, config: &Config) -> Result<(), String> {
     // Check if Log section is enabled
-    let _section_name = resolve_section_name(&config.sections, "Log")
-        .ok_or("Log section is disabled in config")?;
+    let _section_name =
+        resolve_section_name(&config.sections, "Log").ok_or("Log section is disabled in config")?;
 
     let mut entry = args.entry.clone();
 

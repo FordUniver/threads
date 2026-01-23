@@ -389,11 +389,7 @@ impl std::fmt::Display for FileStatus {
 /// - File has no git history
 /// - No status changes found in history
 /// - Previous status was also a closed status
-pub fn previous_status(
-    ws: &Path,
-    file: &Path,
-    closed_statuses: &[String],
-) -> Option<String> {
+pub fn previous_status(ws: &Path, file: &Path, closed_statuses: &[String]) -> Option<String> {
     let rel_path = file.strip_prefix(ws).unwrap_or(file);
 
     // Use git log -p to get patches showing status field changes
