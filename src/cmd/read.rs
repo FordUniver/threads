@@ -199,7 +199,10 @@ fn print_boxed_sections(sections: &[String], max_width: usize, debug: bool) {
     let inner_width = max_width.saturating_sub(4); // Account for "│ " and " │"
 
     if debug {
-        eprintln!("DEBUG: max_width={}, inner_width={}", max_width, inner_width);
+        eprintln!(
+            "DEBUG: max_width={}, inner_width={}",
+            max_width, inner_width
+        );
     }
 
     // Top border
@@ -496,7 +499,10 @@ fn shorten_relative_time(s: &str) -> String {
     let s = s.trim();
     if s.contains("second") {
         "now".to_string()
-    } else if let Some(n) = s.strip_suffix(" minutes ago").or(s.strip_suffix(" minute ago")) {
+    } else if let Some(n) = s
+        .strip_suffix(" minutes ago")
+        .or(s.strip_suffix(" minute ago"))
+    {
         format!("{}m", n)
     } else if let Some(n) = s.strip_suffix(" hours ago").or(s.strip_suffix(" hour ago")) {
         format!("{}h", n)
@@ -504,7 +510,10 @@ fn shorten_relative_time(s: &str) -> String {
         format!("{}d", n)
     } else if let Some(n) = s.strip_suffix(" weeks ago").or(s.strip_suffix(" week ago")) {
         format!("{}w", n)
-    } else if let Some(n) = s.strip_suffix(" months ago").or(s.strip_suffix(" month ago")) {
+    } else if let Some(n) = s
+        .strip_suffix(" months ago")
+        .or(s.strip_suffix(" month ago"))
+    {
         format!("{}mo", n)
     } else if let Some(n) = s.strip_suffix(" years ago").or(s.strip_suffix(" year ago")) {
         format!("{}y", n)
@@ -521,7 +530,11 @@ fn format_history(history: &[GitLogEntry], max_width: usize) -> String {
 
     let total = history.len();
     if total <= 5 {
-        history.iter().map(|e| format_git_entry(e, max_width)).collect::<Vec<_>>().join("\n")
+        history
+            .iter()
+            .map(|e| format_git_entry(e, max_width))
+            .collect::<Vec<_>>()
+            .join("\n")
     } else {
         // Show first 4 + ellipsis + initial commit
         let mut lines: Vec<String> = history
@@ -529,7 +542,11 @@ fn format_history(history: &[GitLogEntry], max_width: usize) -> String {
             .take(4)
             .map(|e| format_git_entry(e, max_width))
             .collect();
-        lines.push(format!("... {} more commits ...", total - 5).dimmed().to_string());
+        lines.push(
+            format!("... {} more commits ...", total - 5)
+                .dimmed()
+                .to_string(),
+        );
         if let Some(initial) = history.last() {
             lines.push(format_git_entry(initial, max_width));
         }
@@ -549,4 +566,3 @@ fn format_git_entry(entry: &GitLogEntry, max_width: usize) -> String {
 
     format!("{} {} {}", time_str.dimmed(), hash_str, message)
 }
-

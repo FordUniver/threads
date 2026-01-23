@@ -19,7 +19,7 @@ termimad = "0.30"
 tabled = { version = "0.17", features = ["ansi"] }
 terminal_size = "0.4"
 unicode-width = "0.2"
-git2 = "0.19"
+git2 = { version = "0.19", default-features = false }
 
 [package.metadata]
 tools-release = true

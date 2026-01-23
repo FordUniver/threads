@@ -201,13 +201,18 @@ fn output_pretty(info: &ThreadInfoData) -> Result<(), String> {
                 .collect()
         } else {
             // Show first 4 + ellipsis + initial commit
-            let mut lines: Vec<String> = info.git_history
+            let mut lines: Vec<String> = info
+                .git_history
                 .iter()
                 .take(4)
                 .map(|entry| format_git_entry(entry, term_width))
                 .collect();
 
-            lines.push(format!("... {} more commits ...", total - 5).dimmed().to_string());
+            lines.push(
+                format!("... {} more commits ...", total - 5)
+                    .dimmed()
+                    .to_string(),
+            );
 
             // Always show initial commit (last entry)
             if let Some(initial) = info.git_history.last() {
@@ -224,15 +229,15 @@ fn output_pretty(info: &ThreadInfoData) -> Result<(), String> {
     // Construct table: header, history+path (combined to avoid separator before path)
     let history_and_path = format!("{}\n\n{}", history_content, path_line);
 
-    let rows: Vec<Vec<String>> = vec![
-        vec![header_content],
-        vec![history_and_path],
-    ];
+    let rows: Vec<Vec<String>> = vec![vec![header_content], vec![history_and_path]];
 
     let mut table = Table::from_iter(rows);
 
     // Single horizontal line after header
-    let hline = HorizontalLine::new('─').left('├').right('┤').intersection('─');
+    let hline = HorizontalLine::new('─')
+        .left('├')
+        .right('┤')
+        .intersection('─');
     let style = Style::rounded().horizontals([(1, hline)]);
 
     table
@@ -274,20 +279,40 @@ fn format_git_entry(entry: &GitLogEntry, max_width: usize) -> String {
     // Calculate visible lengths for proper spacing
     let time_visible = entry.relative_time.len().max(3);
     let hash_visible = 7;
-    let diff_visible = if entry.insertions > 0 { 1 + entry.insertions.to_string().len() } else { 0 }
-        + if entry.deletions > 0 { 1 + entry.deletions.to_string().len() } else { 0 }
-        + if entry.insertions > 0 && entry.deletions > 0 { 1 } else { 0 };
+    let diff_visible = if entry.insertions > 0 {
+        1 + entry.insertions.to_string().len()
+    } else {
+        0
+    } + if entry.deletions > 0 {
+        1 + entry.deletions.to_string().len()
+    } else {
+        0
+    } + if entry.insertions > 0 && entry.deletions > 0 {
+        1
+    } else {
+        0
+    };
 
     // Space needed: time(3) + space(2) + hash(7) + space(1) + diff + space(2) + message
     let prefix_len = time_visible + 2 + hash_visible + 1;
-    let diff_space = if diff_visible > 0 { diff_visible + 2 } else { 1 };
+    let diff_space = if diff_visible > 0 {
+        diff_visible + 2
+    } else {
+        1
+    };
     let msg_max = max_width.saturating_sub(prefix_len + diff_space);
     let message = output::truncate_back(&entry.message, msg_max);
 
     if diff_str.is_empty() {
         format!("{} {} {}", time_str.dimmed(), hash_str, message)
     } else {
-        format!("{} {} {} {}", time_str.dimmed(), hash_str, diff_str, message)
+        format!(
+            "{} {} {} {}",
+            time_str.dimmed(),
+            hash_str,
+            diff_str,
+            message
+        )
     }
 }
 
@@ -304,7 +329,11 @@ fn output_plain(info: &ThreadInfoData) -> Result<(), String> {
     if dates_same {
         print!("Created {}", info.created_plain());
     } else {
-        print!("Created {} | updated {}", info.created_plain(), info.updated_plain());
+        print!(
+            "Created {} | updated {}",
+            info.created_plain(),
+            info.updated_plain()
+        );
     }
     // Git status only if not clean
     if info.git_status != "clean" {
@@ -315,7 +344,11 @@ fn output_plain(info: &ThreadInfoData) -> Result<(), String> {
     println!();
 
     // Stats with proper pluralization
-    let log_word = if info.log_count == 1 { "entry" } else { "entries" };
+    let log_word = if info.log_count == 1 {
+        "entry"
+    } else {
+        "entries"
+    };
     let todo_display = if info.todo_count == 0 {
         "no todos".to_string()
     } else {
@@ -445,13 +478,14 @@ fn get_timestamps_from_history(
             Err(_) => return (None, None),
         };
         let updated: Option<DateTime<Local>> = metadata.modified().ok().map(|t| t.into());
-        let created: Option<DateTime<Local>> = metadata.created().ok().map(|t| t.into()).or(updated);
+        let created: Option<DateTime<Local>> =
+            metadata.created().ok().map(|t| t.into()).or(updated);
         return (created, updated);
     }
 
     // Most recent commit = first entry (updated)
-    let updated_dt = DateTime::from_timestamp(history[0].timestamp, 0)
-        .map(|dt| dt.with_timezone(&Local));
+    let updated_dt =
+        DateTime::from_timestamp(history[0].timestamp, 0).map(|dt| dt.with_timezone(&Local));
 
     // Initial commit = last entry (created)
     let created_dt = DateTime::from_timestamp(history.last().unwrap().timestamp, 0)
@@ -581,7 +615,10 @@ fn shorten_relative_time(s: &str) -> String {
     let s = s.trim();
     if s.contains("second") {
         "now".to_string()
-    } else if let Some(n) = s.strip_suffix(" minutes ago").or(s.strip_suffix(" minute ago")) {
+    } else if let Some(n) = s
+        .strip_suffix(" minutes ago")
+        .or(s.strip_suffix(" minute ago"))
+    {
         format!("{}m", n)
     } else if let Some(n) = s.strip_suffix(" hours ago").or(s.strip_suffix(" hour ago")) {
         format!("{}h", n)
@@ -589,7 +626,10 @@ fn shorten_relative_time(s: &str) -> String {
         format!("{}d", n)
     } else if let Some(n) = s.strip_suffix(" weeks ago").or(s.strip_suffix(" week ago")) {
         format!("{}w", n)
-    } else if let Some(n) = s.strip_suffix(" months ago").or(s.strip_suffix(" month ago")) {
+    } else if let Some(n) = s
+        .strip_suffix(" months ago")
+        .or(s.strip_suffix(" month ago"))
+    {
         format!("{}mo", n)
     } else if let Some(n) = s.strip_suffix(" years ago").or(s.strip_suffix(" year ago")) {
         format!("{}y", n)

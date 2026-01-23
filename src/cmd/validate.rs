@@ -42,8 +42,7 @@ static OLD_LOG_FORMAT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^- \*\*(\d{2}:\d{2})\*\*").unwrap());
 
 /// Matches todo checkbox line
-static TODO_CHECKBOX_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^- \[([ xX])\]").unwrap());
+static TODO_CHECKBOX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^- \[([ xX])\]").unwrap());
 
 /// Matches malformed checkbox (common mistakes)
 static MALFORMED_CHECKBOX_RE: LazyLock<Regex> =
@@ -272,12 +271,8 @@ pub fn run(args: ValidateArgs, ws: &Path) -> Result<(), String> {
 
     // Dispatch to subcommand
     match args.action {
-        None | Some(ValidateAction::Check { verbose: false }) => {
-            run_check(&summary, format, false)
-        }
-        Some(ValidateAction::Check { verbose: true }) => {
-            run_check(&summary, format, true)
-        }
+        None | Some(ValidateAction::Check { verbose: false }) => run_check(&summary, format, false),
+        Some(ValidateAction::Check { verbose: true }) => run_check(&summary, format, true),
         Some(ValidateAction::Stats) => run_stats(&summary, format),
         Some(ValidateAction::Fix { w007, dry_run }) => run_fix(&files, ws, w007, dry_run, format),
     }
@@ -314,7 +309,11 @@ fn collect_files(args: &ValidateArgs, ws: &Path) -> Result<Vec<PathBuf>, String>
 // Check Subcommand
 // ============================================================================
 
-fn run_check(summary: &ValidationSummary, format: OutputFormat, verbose: bool) -> Result<(), String> {
+fn run_check(
+    summary: &ValidationSummary,
+    format: OutputFormat,
+    verbose: bool,
+) -> Result<(), String> {
     match format {
         OutputFormat::Pretty => output_check_pretty(summary, verbose),
         OutputFormat::Plain => output_check_plain(summary, verbose),
@@ -342,7 +341,11 @@ fn output_check_pretty(summary: &ValidationSummary, verbose: bool) {
             parts.push(format!("{} errors", summary.errors).red().to_string());
         }
         if summary.warnings > 0 {
-            parts.push(format!("{} warnings", summary.warnings).yellow().to_string());
+            parts.push(
+                format!("{} warnings", summary.warnings)
+                    .yellow()
+                    .to_string(),
+            );
         }
         println!(
             "Validated {} threads: {}",
@@ -374,10 +377,7 @@ fn output_check_pretty(summary: &ValidationSummary, verbose: bool) {
                     Severity::Error => "E".red(),
                     Severity::Warning => "W".yellow(),
                 };
-                let location = issue
-                    .line
-                    .map(|l| format!(":{}", l))
-                    .unwrap_or_default();
+                let location = issue.line.map(|l| format!(":{}", l)).unwrap_or_default();
                 println!(
                     "    {} {} {}{}",
                     severity_marker,
@@ -426,10 +426,7 @@ fn output_check_plain(summary: &ValidationSummary, verbose: bool) {
             println!("OK: {}", file.path);
         } else {
             for issue in &file.issues {
-                let location = issue
-                    .line
-                    .map(|l| format!(":{}", l))
-                    .unwrap_or_default();
+                let location = issue.line.map(|l| format!(":{}", l)).unwrap_or_default();
                 println!(
                     "{}: {}{}: [{}] {}",
                     issue.severity.to_string().to_uppercase(),
@@ -443,7 +440,10 @@ fn output_check_plain(summary: &ValidationSummary, verbose: bool) {
     }
 }
 
-fn output_check_structured(summary: &ValidationSummary, format: OutputFormat) -> Result<(), String> {
+fn output_check_structured(
+    summary: &ValidationSummary,
+    format: OutputFormat,
+) -> Result<(), String> {
     match format {
         OutputFormat::Json => {
             let json = serde_json::to_string_pretty(&summary)
@@ -478,7 +478,9 @@ fn run_stats(summary: &ValidationSummary, format: OutputFormat) -> Result<(), St
 
     for file in &summary.files {
         for issue in &file.issues {
-            let entry = counts.entry(issue.code.clone()).or_insert((issue.severity, 0));
+            let entry = counts
+                .entry(issue.code.clone())
+                .or_insert((issue.severity, 0));
             entry.1 += 1;
         }
     }
@@ -495,12 +497,10 @@ fn run_stats(summary: &ValidationSummary, format: OutputFormat) -> Result<(), St
         .collect();
 
     // Sort: errors first, then by count descending
-    stats.sort_by(|a, b| {
-        match (&a.severity, &b.severity) {
-            (Severity::Error, Severity::Warning) => std::cmp::Ordering::Less,
-            (Severity::Warning, Severity::Error) => std::cmp::Ordering::Greater,
-            _ => b.count.cmp(&a.count),
-        }
+    stats.sort_by(|a, b| match (&a.severity, &b.severity) {
+        (Severity::Error, Severity::Warning) => std::cmp::Ordering::Less,
+        (Severity::Warning, Severity::Error) => std::cmp::Ordering::Greater,
+        _ => b.count.cmp(&a.count),
     });
 
     match format {
@@ -551,9 +551,7 @@ fn output_stats_pretty(summary: &ValidationSummary, stats: &[IssueStat]) {
         };
         println!(
             "  {} {:>5}  {}",
-            severity_color,
-            stat.count,
-            stat.description
+            severity_color, stat.count, stat.description
         );
     }
 }
@@ -622,8 +620,8 @@ fn output_stats_yaml(summary: &ValidationSummary, stats: &[IssueStat]) -> Result
         by_code: stats.to_vec(),
     };
 
-    let yaml = serde_yaml::to_string(&output)
-        .map_err(|e| format!("YAML serialization failed: {}", e))?;
+    let yaml =
+        serde_yaml::to_string(&output).map_err(|e| format!("YAML serialization failed: {}", e))?;
     print!("{}", yaml);
     Ok(())
 }
@@ -713,15 +711,11 @@ struct FrontmatterResult {
 
 fn validate_frontmatter(content: &str, path: &Path) -> FrontmatterResult {
     let mut issues = Vec::new();
-    let extracted_id: Option<String>;
 
     // E001: Check for frontmatter delimiters
     if !content.starts_with("---\n") {
         issues.push(Issue::error_at("E001", 1, "missing frontmatter delimiter"));
-        return FrontmatterResult {
-            id: None,
-            issues,
-        };
+        return FrontmatterResult { id: None, issues };
     }
 
     // Find closing delimiter
@@ -729,11 +723,11 @@ fn validate_frontmatter(content: &str, path: &Path) -> FrontmatterResult {
     let end = match rest.find("\n---") {
         Some(e) => e,
         None => {
-            issues.push(Issue::error("E001", "unclosed frontmatter (missing closing ---)"));
-            return FrontmatterResult {
-                id: None,
-                issues,
-            };
+            issues.push(Issue::error(
+                "E001",
+                "unclosed frontmatter (missing closing ---)",
+            ));
+            return FrontmatterResult { id: None, issues };
         }
     };
 
@@ -745,14 +739,15 @@ fn validate_frontmatter(content: &str, path: &Path) -> FrontmatterResult {
         Err(e) => {
             let line = extract_yaml_error_line(&e);
             if let Some(l) = line {
-                issues.push(Issue::error_at("E002", l + 1, format!("invalid YAML: {}", e)));
+                issues.push(Issue::error_at(
+                    "E002",
+                    l + 1,
+                    format!("invalid YAML: {}", e),
+                ));
             } else {
                 issues.push(Issue::error("E002", format!("invalid YAML: {}", e)));
             }
-            return FrontmatterResult {
-                id: None,
-                issues,
-            };
+            return FrontmatterResult { id: None, issues };
         }
     };
 
@@ -796,7 +791,7 @@ fn validate_frontmatter(content: &str, path: &Path) -> FrontmatterResult {
         issues.push(Issue::error("E006", format!("invalid status '{}'", base)));
     }
 
-    extracted_id = if fm.id.is_empty() {
+    let extracted_id = if fm.id.is_empty() {
         extract_id_from_path(path)
     } else {
         Some(fm.id)
@@ -836,7 +831,10 @@ fn validate_sections(content: &str) -> Vec<Issue> {
                 issues.push(Issue::warning_at(
                     "W002",
                     line_display,
-                    format!("duplicate section '{}' (first at line {})", section, first_line),
+                    format!(
+                        "duplicate section '{}' (first at line {})",
+                        section, first_line
+                    ),
                 ));
             } else {
                 seen_sections.insert(section.clone(), line_display);
@@ -863,7 +861,10 @@ fn validate_sections(content: &str) -> Vec<Issue> {
             issues.push(Issue::warning_at(
                 "W003",
                 known_positions[i].1,
-                format!("section '{}' should come before '{}'", current_name, prev_name),
+                format!(
+                    "section '{}' should come before '{}'",
+                    current_name, prev_name
+                ),
             ));
         }
     }
@@ -1170,11 +1171,11 @@ fn add_timestamp_to_log_entry(line: &str, timestamp: &str) -> String {
     let content = line.strip_prefix("- ").unwrap_or(line);
 
     // Remove any existing bold markers at the start (malformed timestamps)
-    let content = if content.starts_with("**") {
+    let content = if let Some(stripped) = content.strip_prefix("**") {
         // Find closing ** and strip
-        if let Some(end) = content[2..].find("**") {
-            let inner = &content[2..2 + end];
-            let rest = &content[2 + end + 2..];
+        if let Some(end) = stripped.find("**") {
+            let inner = &stripped[..end];
+            let rest = &stripped[end + 2..];
             // Keep the inner content but without bold, prepend to rest
             format!("{}{}", inner.trim(), rest)
         } else {

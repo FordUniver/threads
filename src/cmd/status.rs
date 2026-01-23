@@ -70,9 +70,9 @@ pub fn run(args: StatusArgs, ws: &Path) -> Result<(), String> {
     let committed = if args.commit {
         let repo = workspace::open()?;
         let rel_path = file.strip_prefix(ws).unwrap_or(&file);
-        let msg = args.m.unwrap_or_else(|| {
-            git::generate_commit_message(&repo, &[rel_path])
-        });
+        let msg = args
+            .m
+            .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &file, &msg)?;
         true
     } else {
@@ -83,7 +83,10 @@ pub fn run(args: StatusArgs, ws: &Path) -> Result<(), String> {
 
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
-            println!("Changed: {} → {} ({})", old_status, args.new_status, rel_path);
+            println!(
+                "Changed: {} → {} ({})",
+                old_status, args.new_status, rel_path
+            );
             if !committed {
                 println!(
                     "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",

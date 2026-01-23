@@ -47,7 +47,7 @@ test_commit_single_thread() {
 
     create_thread "abc123" "Thread to Commit" "active"
 
-    $THREADS_BIN commit abc123 >/dev/null 2>&1
+    $THREADS_BIN git commit abc123 >/dev/null 2>&1
     local exit_code=$?
 
     assert_eq "0" "$exit_code" "commit should succeed"
@@ -69,7 +69,7 @@ test_commit_pending() {
     create_thread "aaa001" "First Thread" "active"
     create_thread "bbb002" "Second Thread" "blocked"
 
-    $THREADS_BIN commit --pending >/dev/null 2>&1
+    $THREADS_BIN git commit --pending >/dev/null 2>&1
     local exit_code=$?
 
     assert_eq "0" "$exit_code" "commit --pending should succeed"
@@ -90,7 +90,7 @@ test_commit_with_message() {
 
     create_thread "abc123" "Thread to Commit" "active"
 
-    $THREADS_BIN commit abc123 -m "Custom commit message" >/dev/null 2>&1
+    $THREADS_BIN git commit abc123 -m "Custom commit message" >/dev/null 2>&1
 
     local git_log
     git_log=$(git -C "$TEST_WS" log --oneline -1)

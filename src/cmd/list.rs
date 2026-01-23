@@ -113,9 +113,7 @@ impl ThreadInfo {
 
     /// Get timestamp for sorting (most recent first)
     fn updated_ts(&self) -> i64 {
-        self.updated_dt
-            .map(|dt| dt.timestamp())
-            .unwrap_or(0)
+        self.updated_dt.map(|dt| dt.timestamp()).unwrap_or(0)
     }
 }
 
@@ -511,7 +509,12 @@ fn output_plain(
     for t in results {
         println!(
             "{} | {} | {} | {} | {} | {}",
-            t.id, t.status, t.created_plain(), t.updated_plain(), t.path, t.title
+            t.id,
+            t.status,
+            t.created_plain(),
+            t.updated_plain(),
+            t.path,
+            t.title
         );
     }
 
@@ -620,8 +623,8 @@ fn get_timestamps(
 
     if let Some(cached) = cache.get(rel_path) {
         // File is in cache (has been committed at some point)
-        let created_dt = DateTime::from_timestamp(cached.created, 0)
-            .map(|dt| dt.with_timezone(&Local));
+        let created_dt =
+            DateTime::from_timestamp(cached.created, 0).map(|dt| dt.with_timezone(&Local));
 
         let modified_dt = if has_uncommitted_changes {
             // File has uncommitted changes - use filesystem mtime
@@ -631,8 +634,7 @@ fn get_timestamps(
                 .map(|t| t.into())
         } else {
             // File is clean - use git commit date
-            DateTime::from_timestamp(cached.modified, 0)
-                .map(|dt| dt.with_timezone(&Local))
+            DateTime::from_timestamp(cached.modified, 0).map(|dt| dt.with_timezone(&Local))
         };
 
         (created_dt, modified_dt)
@@ -645,9 +647,8 @@ fn get_timestamps(
             .and_then(|m| m.created().ok())
             .map(|t| t.into());
 
-        let modified_dt: Option<DateTime<Local>> = metadata
-            .and_then(|m| m.modified().ok())
-            .map(|t| t.into());
+        let modified_dt: Option<DateTime<Local>> =
+            metadata.and_then(|m| m.modified().ok()).map(|t| t.into());
 
         (created_dt.or(modified_dt), modified_dt)
     }

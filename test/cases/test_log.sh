@@ -19,9 +19,9 @@ test_log_adds_entry() {
     end_test
 }
 
-# Test: log creates date header if needed
-test_log_creates_date_header() {
-    begin_test "log creates date header"
+# Test: log creates full timestamp entry
+test_log_creates_timestamp_entry() {
+    begin_test "log creates timestamp entry"
     setup_test_workspace
 
     create_thread "abc123" "Test Thread" "active"
@@ -33,16 +33,16 @@ test_log_creates_date_header() {
     local content
     content=$(cat "$path")
 
-    # Should have date header in format ### YYYY-MM-DD
-    assert_matches "### [0-9]{4}-[0-9]{2}-[0-9]{2}" "$content" "should have date header"
+    # Should have full timestamp in format: - **YYYY-MM-DD HH:MM:SS** text
+    assert_matches "\*\*[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\*\*" "$content" "should have full timestamp"
 
     teardown_test_workspace
     end_test
 }
 
-# Test: log entry has time prefix format
+# Test: log entry format is list item with bold timestamp
 test_log_entry_format() {
-    begin_test "log entry has time prefix"
+    begin_test "log entry is list item with bold timestamp"
     setup_test_workspace
 
     create_thread "abc123" "Test Thread" "active"
@@ -54,8 +54,8 @@ test_log_entry_format() {
     local content
     content=$(cat "$path")
 
-    # Should have format: - **HH:MM** text
-    assert_matches "\*\*[0-9]{2}:[0-9]{2}\*\*" "$content" "should have time prefix in bold"
+    # Should have format: - **YYYY-MM-DD HH:MM:SS** text
+    assert_matches "- \*\*[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\*\* Formatted entry" "$content" "should have list item with bold timestamp"
 
     teardown_test_workspace
     end_test
@@ -63,5 +63,5 @@ test_log_entry_format() {
 
 # Run all tests
 test_log_adds_entry
-test_log_creates_date_header
+test_log_creates_timestamp_entry
 test_log_entry_format

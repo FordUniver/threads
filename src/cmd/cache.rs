@@ -43,7 +43,11 @@ fn cache_path(ws: &Path) -> std::path::PathBuf {
 }
 
 fn status(ws: &Path, format: OutputFormat, json: bool) -> Result<(), String> {
-    let format = if json { OutputFormat::Json } else { format.resolve() };
+    let format = if json {
+        OutputFormat::Json
+    } else {
+        format.resolve()
+    };
 
     let path = cache_path(ws);
     let exists = path.exists();
@@ -80,7 +84,14 @@ fn status(ws: &Path, format: OutputFormat, json: bool) -> Result<(), String> {
                 println!("Location: {}", path.display());
                 println!("Files: {}", file_count);
                 println!("Size: {}", format_size(size_bytes));
-                println!("HEAD: {}", if head.is_empty() { "-".to_string() } else { head[..8.min(head.len())].to_string() });
+                println!(
+                    "HEAD: {}",
+                    if head.is_empty() {
+                        "-".to_string()
+                    } else {
+                        head[..8.min(head.len())].to_string()
+                    }
+                );
             }
         }
         OutputFormat::Plain => {

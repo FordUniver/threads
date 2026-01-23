@@ -22,7 +22,7 @@ test_commit_isolates_thread_files() {
     git -C "$TEST_WS" add unrelated.txt
 
     # Commit only the thread
-    $THREADS_BIN commit abc123 -m "threads: add abc123" >/dev/null 2>&1
+    $THREADS_BIN git commit abc123 -m "threads: add abc123" >/dev/null 2>&1
 
     # Check: unrelated file should still be staged
     local status
@@ -58,7 +58,7 @@ test_pending_detects_deleted_threads() {
     git -C "$TEST_WS" add -A  # Stage the deletion
 
     # Commit --pending should detect and commit the deletion
-    $THREADS_BIN commit --pending -m "threads: remove abc123" >/dev/null 2>&1
+    $THREADS_BIN git commit --pending -m "threads: remove abc123" >/dev/null 2>&1
     local exit_code=$?
 
     assert_eq "0" "$exit_code" "commit --pending should succeed"

@@ -111,9 +111,12 @@ pub fn commit(repo: &Repository, files: &[&Path], message: &str) -> Result<(), S
         .map_err(|e| format!("Failed to get index: {}", e.message()))?;
 
     // Clear the index and start from HEAD tree
-    index.clear().map_err(|e| format!("Failed to clear index: {}", e.message()))?;
+    index
+        .clear()
+        .map_err(|e| format!("Failed to clear index: {}", e.message()))?;
     if let Some(ref tree) = head_tree {
-        index.read_tree(tree)
+        index
+            .read_tree(tree)
             .map_err(|e| format!("Failed to read HEAD tree: {}", e.message()))?;
     }
 
@@ -161,7 +164,8 @@ pub fn commit(repo: &Repository, files: &[&Path], message: &str) -> Result<(), S
         .and_then(|h| h.peel_to_tree())
         .map_err(|e| format!("Failed to get new HEAD tree: {}", e.message()))?;
 
-    index.read_tree(&new_head_tree)
+    index
+        .read_tree(&new_head_tree)
         .map_err(|e| format!("Failed to read new HEAD tree: {}", e.message()))?;
 
     // Re-add the original staged entries that weren't in our commit
@@ -170,11 +174,15 @@ pub fn commit(repo: &Repository, files: &[&Path], message: &str) -> Result<(), S
         let entry_path = std::path::Path::new(std::str::from_utf8(&entry.path).unwrap_or(""));
         if !committed_paths.contains(&entry_path) {
             // This entry wasn't part of our commit - restore it
-            index.add(&entry).map_err(|e| format!("Failed to restore staged entry: {}", e.message()))?;
+            index
+                .add(&entry)
+                .map_err(|e| format!("Failed to restore staged entry: {}", e.message()))?;
         }
     }
 
-    index.write().map_err(|e| format!("Failed to write index: {}", e.message()))?;
+    index
+        .write()
+        .map_err(|e| format!("Failed to write index: {}", e.message()))?;
 
     Ok(())
 }
@@ -185,9 +193,7 @@ pub fn auto_commit(repo: &Repository, file: &Path, message: &str) -> Result<(), 
         .workdir()
         .ok_or("Repository has no working directory")?;
 
-    let rel_path = file
-        .strip_prefix(workdir)
-        .unwrap_or(file);
+    let rel_path = file.strip_prefix(workdir).unwrap_or(file);
 
     commit(repo, &[rel_path], message)
 }
@@ -372,4 +378,3 @@ impl std::fmt::Display for FileStatus {
         write!(f, "{}", s)
     }
 }
-

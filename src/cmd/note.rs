@@ -112,9 +112,9 @@ pub fn run(args: NoteArgs, ws: &Path) -> Result<(), String> {
     if args.commit {
         let repo = workspace::open()?;
         let rel_path = file.strip_prefix(ws).unwrap_or(&file);
-        let msg = args.m.unwrap_or_else(|| {
-            git::generate_commit_message(&repo, &[rel_path])
-        });
+        let msg = args
+            .m
+            .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &file, &msg)?;
     } else {
         println!(

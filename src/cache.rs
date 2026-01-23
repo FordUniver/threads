@@ -57,8 +57,7 @@ impl TimestampCache {
         let contents = serde_json::to_string_pretty(self)
             .map_err(|e| format!("Failed to serialize cache: {}", e))?;
 
-        fs::write(&cache_path, contents)
-            .map_err(|e| format!("Failed to write cache: {}", e))?;
+        fs::write(&cache_path, contents).map_err(|e| format!("Failed to write cache: {}", e))?;
 
         Ok(())
     }
@@ -107,7 +106,8 @@ impl TimestampCache {
             Err(_) => return false,
         };
 
-        repo.graph_descendant_of(current_oid, cached_oid).unwrap_or(false)
+        repo.graph_descendant_of(current_oid, cached_oid)
+            .unwrap_or(false)
     }
 
     /// Get current HEAD commit hash.

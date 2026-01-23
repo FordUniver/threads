@@ -154,18 +154,13 @@ fn output_status_pretty(pending: &[PendingThread]) {
             _ => "?".normal(),
         };
 
-        println!(
-            "  {} {} {}",
-            change_marker,
-            p.id.dimmed(),
-            p.name
-        );
+        println!("  {} {} {}", change_marker, p.id.dimmed(), p.name);
     }
 
     println!();
     println!(
         "{}",
-        format!("Run 'threads git commit --pending' to commit all").dimmed()
+        "Run 'threads git commit --pending' to commit all".dimmed()
     );
 }
 
@@ -214,8 +209,8 @@ fn output_status_yaml(pending: &[PendingThread]) -> Result<(), String> {
         pending: pending.to_vec(),
     };
 
-    let yaml = serde_yaml::to_string(&output)
-        .map_err(|e| format!("YAML serialization failed: {}", e))?;
+    let yaml =
+        serde_yaml::to_string(&output).map_err(|e| format!("YAML serialization failed: {}", e))?;
     print!("{}", yaml);
     Ok(())
 }
