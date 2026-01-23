@@ -26,9 +26,11 @@ static VALID_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{6}
 static SECTION_HEADER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^## (.+)$").unwrap());
 
 /// Matches valid section names
+#[allow(dead_code)]
 static VALID_SECTIONS: &[&str] = &["Body", "Notes", "Todo", "Log"];
 
 /// Canonical section order
+#[allow(dead_code)]
 static SECTION_ORDER: &[&str] = &["Body", "Notes", "Todo", "Log"];
 
 /// Matches log date headers (### YYYY-MM-DD) - legacy format to be removed

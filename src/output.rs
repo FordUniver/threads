@@ -80,6 +80,7 @@ pub fn style_status(status: &str) -> ColoredString {
 /// Style status using config colors.
 ///
 /// Color names supported: green, yellow, blue, red, cyan, magenta, white, dim/dimmed
+#[allow(dead_code)]
 pub fn style_status_with_config(
     status: &str,
     colors: Option<&crate::config::StatusColors>,

@@ -191,6 +191,7 @@ impl Default for SectionsConfig {
 
 /// Source of a configuration value.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ConfigSource {
     /// Built-in default
     Default,
@@ -346,6 +347,7 @@ pub fn env_usize(name: &str) -> Option<usize> {
 }
 
 /// Check if a string environment variable is set and non-empty.
+#[allow(dead_code)]
 pub fn env_is_set(name: &str) -> bool {
     std::env::var(name).map(|v| !v.is_empty()).unwrap_or(false)
 }

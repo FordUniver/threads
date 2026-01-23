@@ -25,6 +25,7 @@ static TODO_SECTION_RE: LazyLock<Regex> =
 pub const CLOSED_STATUSES: &[&str] = &["resolved", "superseded", "deferred", "rejected"];
 
 /// Open statuses (threads that need attention)
+#[allow(dead_code)]
 pub const OPEN_STATUSES: &[&str] = &["idea", "planning", "active", "blocked", "paused"];
 
 /// Frontmatter represents the YAML frontmatter of a thread
@@ -207,12 +208,14 @@ pub fn is_closed(status: &str) -> bool {
 }
 
 /// Check if a status is closed (using config status lists)
+#[allow(dead_code)]
 pub fn is_closed_with_config(status: &str, closed_statuses: &[String]) -> bool {
     let base = base_status(status);
     closed_statuses.iter().any(|s| s == &base)
 }
 
 /// Check if a status is valid (using default status lists)
+#[allow(dead_code)]
 pub fn is_valid_status(status: &str) -> bool {
     let base = base_status(status);
     OPEN_STATUSES.contains(&base.as_str()) || CLOSED_STATUSES.contains(&base.as_str())

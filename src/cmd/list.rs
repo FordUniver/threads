@@ -297,6 +297,7 @@ fn build_filter_desc(
     parts.join(", ")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn output_pretty(
     results: &[ThreadInfo],
     git_root: &Path,
@@ -378,6 +379,7 @@ fn output_pretty(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn output_plain(
     results: &[ThreadInfo],
     git_root: &Path,
