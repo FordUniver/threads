@@ -6,7 +6,7 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::{env_bool, env_string, is_quiet, resolve_section_name, Config};
+use crate::config::{env_bool, env_string, is_quiet, Config};
 use crate::git;
 use crate::input;
 use crate::output::OutputFormat;
@@ -149,34 +149,26 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
     content.push_str(&format!("status: {}\n", status));
     content.push_str("---\n\n");
 
-    // Add Body section if enabled
-    if let Some(body_name) = resolve_section_name(&config.sections, "Body") {
-        content.push_str(&format!("## {}\n\n", body_name));
-        if !body.is_empty() {
-            content.push_str(&body);
-            if !body.ends_with('\n') {
-                content.push('\n');
-            }
+    // Add Body section
+    content.push_str("## Body\n\n");
+    if !body.is_empty() {
+        content.push_str(&body);
+        if !body.ends_with('\n') {
             content.push('\n');
         }
+        content.push('\n');
     }
 
-    // Add Notes section if enabled (empty by default)
-    if let Some(notes_name) = resolve_section_name(&config.sections, "Notes") {
-        content.push_str(&format!("## {}\n\n", notes_name));
-    }
+    // Add Notes section (empty by default)
+    content.push_str("## Notes\n\n");
 
-    // Add Todo section if enabled
-    if let Some(todo_name) = resolve_section_name(&config.sections, "Todo") {
-        content.push_str(&format!("## {}\n\n", todo_name));
-    }
+    // Add Todo section
+    content.push_str("## Todo\n\n");
 
-    // Add Log section if enabled
-    if let Some(log_name) = resolve_section_name(&config.sections, "Log") {
-        content.push_str(&format!("## {}\n\n", log_name));
-        content.push_str(&format!("### {}\n\n", today));
-        content.push_str(&format!("- **{}** Created thread.\n", timestamp));
-    }
+    // Add Log section
+    content.push_str("## Log\n\n");
+    content.push_str(&format!("### {}\n\n", today));
+    content.push_str(&format!("- **{}** Created thread.\n", timestamp));
 
     // Write file
     fs::write(&thread_path, &content).map_err(|e| format!("writing thread file: {}", e))?;

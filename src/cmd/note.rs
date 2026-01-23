@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::{env_bool, is_quiet, resolve_section_name, Config};
+use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
 use crate::thread::{self, Thread};
 use crate::workspace;
@@ -35,10 +35,6 @@ pub struct NoteArgs {
 }
 
 pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
-    // Get configured section name (or error if disabled)
-    let section_name = resolve_section_name(&config.sections, "Notes")
-        .ok_or("Notes section is disabled in config")?;
-
     let file = workspace::find_by_ref(ws, &args.id)?;
 
     let mut t = Thread::parse(&file)?;
@@ -67,7 +63,7 @@ pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
             let new_text = &args.new_text;
 
             // Check for ambiguous hash
-            let count = thread::count_matching_items(&t.content, section_name, hash);
+            let count = thread::count_matching_items(&t.content, "Notes", hash);
             if count == 0 {
                 return Err(format!("no note with hash '{}' found", hash));
             }
@@ -75,7 +71,7 @@ pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
                 return Err(format!("ambiguous hash '{}' matches {} notes", hash, count));
             }
 
-            t.content = thread::edit_by_hash(&t.content, section_name, hash, new_text)?;
+            t.content = thread::edit_by_hash(&t.content, "Notes", hash, new_text)?;
 
             let log_entry = format!("Edited note {}", hash);
             t.content = thread::insert_log_entry(&t.content, &log_entry);
@@ -89,7 +85,7 @@ pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
             let hash = &args.text;
 
             // Check for ambiguous hash
-            let count = thread::count_matching_items(&t.content, section_name, hash);
+            let count = thread::count_matching_items(&t.content, "Notes", hash);
             if count == 0 {
                 return Err(format!("no note with hash '{}' found", hash));
             }
@@ -97,7 +93,7 @@ pub fn run(args: NoteArgs, ws: &Path, config: &Config) -> Result<(), String> {
                 return Err(format!("ambiguous hash '{}' matches {} notes", hash, count));
             }
 
-            t.content = thread::remove_by_hash(&t.content, section_name, hash)?;
+            t.content = thread::remove_by_hash(&t.content, "Notes", hash)?;
 
             let log_entry = format!("Removed note {}", hash);
             t.content = thread::insert_log_entry(&t.content, &log_entry);

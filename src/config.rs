@@ -35,8 +35,6 @@ pub struct Config {
     pub display: DisplayConfig,
     /// Behavior settings
     pub behavior: BehaviorConfig,
-    /// Section configuration (rename/disable)
-    pub sections: SectionsConfig,
 }
 
 /// Status category definitions.
@@ -154,35 +152,6 @@ pub enum DepthSetting {
     Limit(usize),
     /// Unlimited depth
     Unlimited,
-}
-
-/// Section configuration (rename or disable).
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(default)]
-pub struct SectionsConfig {
-    /// Body section name (null to disable)
-    #[serde(rename = "Body")]
-    pub body: Option<String>,
-    /// Notes section name (null to disable)
-    #[serde(rename = "Notes")]
-    pub notes: Option<String>,
-    /// Todo section name (null to disable)
-    #[serde(rename = "Todo")]
-    pub todo: Option<String>,
-    /// Log section name (null to disable)
-    #[serde(rename = "Log")]
-    pub log: Option<String>,
-}
-
-impl Default for SectionsConfig {
-    fn default() -> Self {
-        Self {
-            body: Some("Body".to_string()),
-            notes: Some("Notes".to_string()),
-            todo: Some("Todo".to_string()),
-            log: Some("Log".to_string()),
-        }
-    }
 }
 
 // ============================================================================
@@ -515,21 +484,6 @@ pub fn merge(base: &mut Config, overlay: &Config) {
     if overlay.behavior.quiet != default_behavior.quiet {
         base.behavior.quiet = overlay.behavior.quiet;
     }
-
-    // Sections: merge Option fields (None means disabled, Some means renamed)
-    let default_sections = SectionsConfig::default();
-    if overlay.sections.body != default_sections.body {
-        base.sections.body = overlay.sections.body.clone();
-    }
-    if overlay.sections.notes != default_sections.notes {
-        base.sections.notes = overlay.sections.notes.clone();
-    }
-    if overlay.sections.todo != default_sections.todo {
-        base.sections.todo = overlay.sections.todo.clone();
-    }
-    if overlay.sections.log != default_sections.log {
-        base.sections.log = overlay.sections.log.clone();
-    }
 }
 
 /// Merge status colors (overlay wins for non-None values).
@@ -567,40 +521,6 @@ fn merge_status_colors(base: &mut StatusColors, overlay: &StatusColors) {
 pub fn json_schema() -> String {
     let schema = schemars::schema_for!(Config);
     serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string())
-}
-
-/// Get the list of valid section names from config.
-///
-/// Returns section names that are enabled (Some value, not None).
-pub fn valid_section_names(sections: &SectionsConfig) -> Vec<&str> {
-    let mut names = Vec::new();
-    if let Some(ref name) = sections.body {
-        names.push(name.as_str());
-    }
-    if let Some(ref name) = sections.notes {
-        names.push(name.as_str());
-    }
-    if let Some(ref name) = sections.todo {
-        names.push(name.as_str());
-    }
-    if let Some(ref name) = sections.log {
-        names.push(name.as_str());
-    }
-    names
-}
-
-/// Resolve a canonical section name to the configured name.
-///
-/// For example, if sections.todo is "Tasks", resolving "Todo" returns "Tasks".
-/// Returns None if the section is disabled (set to null in config).
-pub fn resolve_section_name<'a>(sections: &'a SectionsConfig, canonical: &str) -> Option<&'a str> {
-    match canonical {
-        "Body" => sections.body.as_deref(),
-        "Notes" => sections.notes.as_deref(),
-        "Todo" => sections.todo.as_deref(),
-        "Log" => sections.log.as_deref(),
-        _ => None,
-    }
 }
 
 /// Check if quiet mode is enabled (suppress hints).
@@ -653,13 +573,6 @@ pub fn template_manifest() -> String {
 #   default_down: null  # null = disabled, number = depth, "unlimited" = no limit
 #   default_up: null
 #   quiet: false
-
-# Section names (null to disable, string to rename)
-# sections:
-#   Body: Body
-#   Notes: Notes
-#   Todo: Todo
-#   Log: Log
 "#
     .to_string()
 }

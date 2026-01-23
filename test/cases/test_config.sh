@@ -260,64 +260,6 @@ test_config_init() {
 }
 
 # ============================================================================
-# Section Configuration Tests
-# ============================================================================
-
-# Test: Section disabled prevents operations
-test_section_disabled() {
-    begin_test "disabled section prevents operations"
-    setup_test_workspace
-
-    # Create manifest that disables Notes
-    mkdir -p "$TEST_WS/.threads-config"
-    cat > "$TEST_WS/.threads-config/manifest.yaml" << 'EOF'
-sections:
-  Notes: null
-EOF
-
-    create_thread "aaa001" "Test Thread" "active"
-
-    # Try to add a note - should fail
-    local output
-    output=$(echo "test note" | capture_all $THREADS_BIN note aaa001 add 2>&1)
-    local exit_code=$?
-
-    # exit_code should be 1 (failure)
-    assert_eq "1" "$exit_code" "should fail when Notes disabled"
-    assert_contains "$output" "disabled" "should mention section is disabled"
-
-    teardown_test_workspace
-    end_test
-}
-
-# Test: Validation respects configured section names
-test_section_validation() {
-    begin_test "validation warns about unknown sections with custom config"
-    setup_test_workspace
-
-    # Create manifest with renamed sections
-    mkdir -p "$TEST_WS/.threads-config"
-    cat > "$TEST_WS/.threads-config/manifest.yaml" << 'EOF'
-sections:
-  Todo: Tasks
-  Log: History
-EOF
-
-    # Create thread with standard section names (which are now "wrong")
-    create_thread "aaa001" "Test Thread" "active"
-
-    local output
-    output=$(capture_all $THREADS_BIN validate 2>&1)
-
-    # Should warn about unknown sections Todo and Log
-    assert_contains "$output" "unknown section 'Todo'" "should warn about Todo"
-    assert_contains "$output" "unknown section 'Log'" "should warn about Log"
-
-    teardown_test_workspace
-    end_test
-}
-
-# ============================================================================
 # Terminology Tests (close/resolve aliases)
 # ============================================================================
 
@@ -499,10 +441,6 @@ test_config_env
 test_config_schema
 test_config_init
 test_display_root_name
-
-# Section tests
-test_section_disabled
-test_section_validation
 
 # Terminology tests
 test_close_command

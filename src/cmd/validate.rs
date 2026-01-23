@@ -10,7 +10,7 @@ use regex::Regex;
 use serde::Serialize;
 
 use crate::args::{DirectionArgs, FormatArgs};
-use crate::config::{valid_section_names, Config};
+use crate::config::Config;
 use crate::output::OutputFormat;
 use crate::thread::{self, extract_id_from_path, Frontmatter};
 use crate::workspace;
@@ -26,11 +26,9 @@ static VALID_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{6}
 static SECTION_HEADER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^## (.+)$").unwrap());
 
 /// Matches valid section names
-#[allow(dead_code)]
 static VALID_SECTIONS: &[&str] = &["Body", "Notes", "Todo", "Log"];
 
 /// Canonical section order
-#[allow(dead_code)]
 static SECTION_ORDER: &[&str] = &["Body", "Notes", "Todo", "Log"];
 
 /// Matches log date headers (### YYYY-MM-DD) - legacy format to be removed
@@ -799,24 +797,14 @@ fn extract_yaml_error_line(e: &serde_yaml::Error) -> Option<usize> {
     e.location().map(|loc| loc.line())
 }
 
-fn validate_sections(content: &str, config: &Config) -> Vec<Issue> {
+fn validate_sections(content: &str, _config: &Config) -> Vec<Issue> {
     let mut issues = Vec::new();
     let mut seen_sections: HashMap<String, usize> = HashMap::new();
     let mut section_positions: Vec<(String, usize)> = Vec::new();
 
-    // Get valid section names from config
-    let valid_sections = valid_section_names(&config.sections);
-
-    // Build section order from config (only enabled sections)
-    let section_order: Vec<&str> = [
-        config.sections.body.as_deref(),
-        config.sections.notes.as_deref(),
-        config.sections.todo.as_deref(),
-        config.sections.log.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
+    // Use canonical section names
+    let valid_sections = VALID_SECTIONS;
+    let section_order = SECTION_ORDER;
 
     for (line_num, line) in content.lines().enumerate() {
         if let Some(caps) = SECTION_HEADER_RE.captures(line) {

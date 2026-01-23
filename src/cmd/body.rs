@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::{env_bool, is_quiet, resolve_section_name, Config};
+use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
 use crate::input;
 use crate::thread::{self, Thread};
@@ -43,25 +43,14 @@ pub fn run(args: BodyArgs, ws: &Path, config: &Config) -> Result<(), String> {
         return Err("no content provided (use stdin)".to_string());
     }
 
-    // Get configured section name (or error if disabled)
-    let section_name = resolve_section_name(&config.sections, "Body")
-        .ok_or("Body section is disabled in config")?;
-
     let file = workspace::find_by_ref(ws, &args.id)?;
 
     let mut t = Thread::parse(&file)?;
 
-    // Ensure section exists (may be missing in old threads or with renamed sections)
-    // Insert Body before Notes or Todo, whichever comes first
-    let insert_before = resolve_section_name(&config.sections, "Notes")
-        .or_else(|| resolve_section_name(&config.sections, "Todo"))
-        .unwrap_or("Todo");
-    t.content = thread::ensure_section(&t.content, section_name, insert_before);
-
     if set_mode {
-        t.content = thread::replace_section(&t.content, section_name, &content);
+        t.content = thread::replace_section(&t.content, "Body", &content);
     } else {
-        t.content = thread::append_to_section(&t.content, section_name, &content);
+        t.content = thread::append_to_section(&t.content, "Body", &content);
     }
 
     t.write()?;

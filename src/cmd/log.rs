@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::{env_bool, is_quiet, resolve_section_name, Config};
+use crate::config::{env_bool, is_quiet, Config};
 use crate::git;
 use crate::input;
 use crate::thread::{self, Thread};
@@ -29,10 +29,6 @@ pub struct LogArgs {
 }
 
 pub fn run(args: LogArgs, ws: &Path, config: &Config) -> Result<(), String> {
-    // Check if Log section is enabled
-    let _section_name =
-        resolve_section_name(&config.sections, "Log").ok_or("Log section is disabled in config")?;
-
     let mut entry = args.entry.clone();
 
     // Read entry from stdin if not provided
