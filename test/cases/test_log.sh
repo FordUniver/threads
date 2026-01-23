@@ -33,16 +33,16 @@ test_log_creates_timestamp_entry() {
     local content
     content=$(cat "$path")
 
-    # Should have full timestamp in format: - **YYYY-MM-DD HH:MM:SS** text
-    assert_matches "\*\*[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\*\*" "$content" "should have full timestamp"
+    # Should have full timestamp in bracket format: - [YYYY-MM-DD HH:MM:SS] text
+    assert_matches "\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\]" "$content" "should have bracket timestamp"
 
     teardown_test_workspace
     end_test
 }
 
-# Test: log entry format is list item with bold timestamp
+# Test: log entry format is list item with bracket timestamp
 test_log_entry_format() {
-    begin_test "log entry is list item with bold timestamp"
+    begin_test "log entry is list item with bracket timestamp"
     setup_test_workspace
 
     create_thread "abc123" "Test Thread" "active"
@@ -54,8 +54,8 @@ test_log_entry_format() {
     local content
     content=$(cat "$path")
 
-    # Should have format: - **YYYY-MM-DD HH:MM:SS** text
-    assert_matches "- \*\*[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\*\* Formatted entry" "$content" "should have list item with bold timestamp"
+    # Should have format: - [YYYY-MM-DD HH:MM:SS] text
+    assert_matches "- \[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\] Formatted entry" "$content" "should have list item with bracket timestamp"
 
     teardown_test_workspace
     end_test

@@ -372,10 +372,13 @@ fn render_inline_markdown(text: &str) -> String {
 
 /// Format log section with relative timestamps and markdown
 fn format_log(log: &str) -> String {
-    // New format: - **2026-01-22 12:25:00** message
-    let full_ts_re = Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*(.*)$").unwrap();
-    // Old format: - **12:25** message (under ### date header)
+    // Current format: - [2026-01-22 12:25:00] message
+    let bracket_ts_re = Regex::new(r"^- \[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\](.*)$").unwrap();
+    // Legacy bold format: - **2026-01-22 12:25:00** message
+    let bold_ts_re = Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*(.*)$").unwrap();
+    // Legacy time-only format: - **12:25** message (under ### date header)
     let time_re = Regex::new(r"^- \*\*(\d{2}:\d{2})\*\*(.*)$").unwrap();
+    // Legacy date header
     let date_re = Regex::new(r"^### (\d{4}-\d{2}-\d{2})$").unwrap();
 
     let now = Local::now().naive_local();
@@ -383,14 +386,14 @@ fn format_log(log: &str) -> String {
 
     log.lines()
         .filter_map(|line| {
-            // Skip old date headers
+            // Skip legacy date headers
             if let Some(caps) = date_re.captures(line) {
                 current_date = caps[1].to_string();
                 return None;
             }
 
-            // New format: full timestamp
-            if let Some(caps) = full_ts_re.captures(line) {
+            // Current format: bracket timestamp
+            if let Some(caps) = bracket_ts_re.captures(line) {
                 let ts_str = &caps[1];
                 let rest = &caps[2];
                 let relative = timestamp_to_relative(ts_str, &now);
@@ -398,7 +401,16 @@ fn format_log(log: &str) -> String {
                 return Some(format!("{:>4} {}", relative.cyan(), rendered));
             }
 
-            // Old format: time only (use current_date context)
+            // Legacy bold format: full timestamp
+            if let Some(caps) = bold_ts_re.captures(line) {
+                let ts_str = &caps[1];
+                let rest = &caps[2];
+                let relative = timestamp_to_relative(ts_str, &now);
+                let rendered = render_inline_markdown(rest.trim());
+                return Some(format!("{:>4} {}", relative.cyan(), rendered));
+            }
+
+            // Legacy time-only format (use current_date context)
             if let Some(caps) = time_re.captures(line) {
                 let time = &caps[1];
                 let rest = &caps[2];

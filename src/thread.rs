@@ -234,7 +234,7 @@ pub fn generate_hash(text: &str) -> String {
 /// Insert a log entry with full timestamp
 pub fn insert_log_entry(content: &str, entry: &str) -> String {
     let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let bullet_entry = format!("- **{}** {}", timestamp, entry);
+    let bullet_entry = format!("- [{}] {}", timestamp, entry);
 
     // Check if Log section exists
     if LOG_SECTION_RE.is_match(content) {

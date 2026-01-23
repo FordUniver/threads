@@ -29,16 +29,20 @@ static VALID_SECTIONS: &[&str] = &["Body", "Notes", "Todo", "Log"];
 /// Canonical section order
 static SECTION_ORDER: &[&str] = &["Body", "Notes", "Todo", "Log"];
 
-/// Matches log date headers (### YYYY-MM-DD)
+/// Matches log date headers (### YYYY-MM-DD) - legacy format to be removed
 static LOG_DATE_HEADER_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^### (\d{4}-\d{2}-\d{2})$").unwrap());
 
-/// Matches new log format: - **YYYY-MM-DD HH:MM:SS** text
-static NEW_LOG_FORMAT_RE: LazyLock<Regex> =
+/// Matches current log format: - [YYYY-MM-DD HH:MM:SS] text
+static BRACKET_LOG_FORMAT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^- \[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]").unwrap());
+
+/// Matches legacy bold log format: - **YYYY-MM-DD HH:MM:SS** text
+static BOLD_LOG_FORMAT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*").unwrap());
 
-/// Matches old log format: - **HH:MM** text (without date header context)
-static OLD_LOG_FORMAT_RE: LazyLock<Regex> =
+/// Matches legacy time-only format: - **HH:MM** text (under date header)
+static TIME_ONLY_FORMAT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^- \*\*(\d{2}:\d{2})\*\*").unwrap());
 
 /// Matches todo checkbox line
@@ -65,7 +69,8 @@ fn issue_description(code: &str) -> &'static str {
         "W004" => "Old log format",
         "W005" => "Invalid timestamp",
         "W006" => "Malformed checkbox",
-        "W007" => "Log entry missing timestamp",
+        "W007" => "Log entry missing or legacy timestamp",
+        "W008" => "Legacy date header",
         _ => "Unknown issue",
     }
 }
@@ -890,17 +895,31 @@ fn validate_log(content: &str) -> Vec<Issue> {
             continue;
         }
 
+        // W008: Legacy date headers should be removed (dates go in entries)
         if LOG_DATE_HEADER_RE.is_match(line) {
             has_date_header = true;
+            issues.push(Issue::warning_at(
+                "W008",
+                line_display,
+                "legacy date header - run 'validate fix --w007' to migrate",
+            ));
             continue;
         }
 
         // Check log entries (lines starting with "- ")
         if line.starts_with("- ") {
-            if line.starts_with("- **") {
-                if NEW_LOG_FORMAT_RE.is_match(line) {
-                    // Valid new format, check timestamp validity
-                    if let Some(caps) = NEW_LOG_FORMAT_RE.captures(line) {
+            let entry_content = line.strip_prefix("- ").unwrap_or(line);
+
+            // Skip continuation lines (bold labels, table rows, etc.)
+            if is_non_log_list_item(entry_content) {
+                continue;
+            }
+
+            // Current format: - [YYYY-MM-DD HH:MM:SS] text
+            if line.starts_with("- [") {
+                if BRACKET_LOG_FORMAT_RE.is_match(line) {
+                    // Valid current format, check timestamp validity
+                    if let Some(caps) = BRACKET_LOG_FORMAT_RE.captures(line) {
                         let ts = &caps[1];
                         if !is_valid_timestamp(ts) {
                             issues.push(Issue::warning_at(
@@ -910,23 +929,38 @@ fn validate_log(content: &str) -> Vec<Issue> {
                             ));
                         }
                     }
-                } else if OLD_LOG_FORMAT_RE.is_match(line) {
-                    // Old format: - **HH:MM** (only valid under date header)
-                    if !has_date_header {
-                        issues.push(Issue::warning_at(
-                            "W004",
-                            line_display,
-                            "old log format (HH:MM without date header) - use YYYY-MM-DD HH:MM:SS",
-                        ));
-                    }
                 } else {
-                    // Has bold but not a recognized timestamp format
+                    // Has brackets but not a valid timestamp - might be malformed
                     issues.push(Issue::warning_at(
                         "W007",
                         line_display,
                         "log entry missing timestamp",
                     ));
                 }
+            } else if line.starts_with("- **") {
+                // Legacy bold formats
+                if BOLD_LOG_FORMAT_RE.is_match(line) {
+                    issues.push(Issue::warning_at(
+                        "W007",
+                        line_display,
+                        "legacy bold timestamp - run 'validate fix --w007' to migrate",
+                    ));
+                } else if TIME_ONLY_FORMAT_RE.is_match(line) {
+                    if has_date_header {
+                        issues.push(Issue::warning_at(
+                            "W007",
+                            line_display,
+                            "legacy time-only format - run 'validate fix --w007' to migrate",
+                        ));
+                    } else {
+                        issues.push(Issue::warning_at(
+                            "W004",
+                            line_display,
+                            "time-only format without date header",
+                        ));
+                    }
+                }
+                // Note: Bold text that isn't a timestamp is handled by is_non_log_list_item above
             } else {
                 // Plain list item without any timestamp
                 issues.push(Issue::warning_at(
@@ -999,6 +1033,7 @@ fn run_fix(
     }
 
     let mut total_fixed = 0;
+    let mut headers_removed = 0;
     let mut files_modified = 0;
 
     for path in files {
@@ -1012,50 +1047,29 @@ fn run_fix(
             Err(_) => continue,
         };
 
-        let mut lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
-        let mut modified = false;
-        let mut file_fixes = 0;
+        let (new_lines, fixes, removed) =
+            fix_log_section(&content, path, ws, dry_run, &rel_path, format);
 
-        if fix_w007 {
-            let log_lines = find_log_lines_needing_timestamp(&lines);
-
-            for line_num in log_lines {
-                // Get timestamp from git blame (1-indexed for git)
-                if let Some(timestamp) = get_blame_timestamp(path, ws, line_num + 1) {
-                    let old_line = &lines[line_num];
-                    let new_line = add_timestamp_to_log_entry(old_line, &timestamp);
-
-                    if dry_run {
-                        match format {
-                            OutputFormat::Pretty | OutputFormat::Plain => {
-                                println!("{}:{}", rel_path, line_num + 1);
-                                println!("  - {}", old_line);
-                                println!("  + {}", new_line);
-                            }
-                            _ => {}
-                        }
-                    }
-
-                    lines[line_num] = new_line;
-                    modified = true;
-                    file_fixes += 1;
-                }
-            }
-        }
-
-        if modified {
-            total_fixed += file_fixes;
+        if fixes > 0 || removed > 0 {
+            total_fixed += fixes;
+            headers_removed += removed;
             files_modified += 1;
 
             if !dry_run {
-                // Write back with trailing newline
-                let new_content = lines.join("\n") + "\n";
+                let new_content = new_lines.join("\n") + "\n";
                 fs::write(path, new_content)
                     .map_err(|e| format!("failed to write {}: {}", rel_path, e))?;
 
                 match format {
                     OutputFormat::Pretty | OutputFormat::Plain => {
-                        println!("Fixed {} entries in {}", file_fixes, rel_path);
+                        let mut parts = Vec::new();
+                        if fixes > 0 {
+                            parts.push(format!("{} entries", fixes));
+                        }
+                        if removed > 0 {
+                            parts.push(format!("{} headers removed", removed));
+                        }
+                        println!("Fixed {} in {}", parts.join(", "), rel_path);
                     }
                     _ => {}
                 }
@@ -1069,17 +1083,21 @@ fn run_fix(
             println!();
             if dry_run {
                 println!(
-                    "Dry run: would fix {} entries in {} files",
-                    total_fixed, files_modified
+                    "Dry run: would fix {} entries, remove {} headers in {} files",
+                    total_fixed, headers_removed, files_modified
                 );
             } else {
-                println!("Fixed {} entries in {} files", total_fixed, files_modified);
+                println!(
+                    "Fixed {} entries, removed {} headers in {} files",
+                    total_fixed, headers_removed, files_modified
+                );
             }
         }
         OutputFormat::Json => {
             let output = serde_json::json!({
                 "dry_run": dry_run,
                 "fixed": total_fixed,
+                "headers_removed": headers_removed,
                 "files_modified": files_modified,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
@@ -1088,6 +1106,7 @@ fn run_fix(
             let output = serde_json::json!({
                 "dry_run": dry_run,
                 "fixed": total_fixed,
+                "headers_removed": headers_removed,
                 "files_modified": files_modified,
             });
             println!("{}", serde_yaml::to_string(&output).unwrap());
@@ -1097,36 +1116,200 @@ fn run_fix(
     Ok(())
 }
 
-/// Find line indices in the Log section that need timestamps (W007)
-fn find_log_lines_needing_timestamp(lines: &[String]) -> Vec<usize> {
-    let mut result = Vec::new();
+/// Fix log section: migrate legacy formats to bracket format, remove date headers
+fn fix_log_section(
+    content: &str,
+    path: &Path,
+    ws: &Path,
+    dry_run: bool,
+    rel_path: &str,
+    format: OutputFormat,
+) -> (Vec<String>, usize, usize) {
+    let lines: Vec<&str> = content.lines().collect();
+    let mut result: Vec<String> = Vec::new();
+    let mut fixes = 0;
+    let mut headers_removed = 0;
     let mut in_log_section = false;
+    let mut current_date: Option<String> = None;
 
     for (i, line) in lines.iter().enumerate() {
+        // Track section changes
         if line.starts_with("## ") {
             in_log_section = line.starts_with("## Log");
+            current_date = None;
+            result.push(line.to_string());
             continue;
         }
 
         if !in_log_section {
+            result.push(line.to_string());
             continue;
         }
 
-        // Check for log entries without proper timestamps
-        if line.starts_with("- ") {
-            if line.starts_with("- **") {
-                // Has bold - check if it's a valid timestamp format
-                if !NEW_LOG_FORMAT_RE.is_match(line) && !OLD_LOG_FORMAT_RE.is_match(line) {
-                    result.push(i);
-                }
-            } else {
-                // Plain list item without any timestamp
-                result.push(i);
+        // Handle date headers - extract date but don't include in output
+        if let Some(caps) = LOG_DATE_HEADER_RE.captures(line) {
+            current_date = Some(caps[1].to_string());
+            headers_removed += 1;
+            if dry_run {
+                print_fix(format, rel_path, i + 1, line, "(removed)");
             }
+            continue; // Skip adding to result
+        }
+
+        // Handle log entries
+        if line.starts_with("- ") {
+            // Already in current format - keep as is
+            if BRACKET_LOG_FORMAT_RE.is_match(line) {
+                result.push(line.to_string());
+                continue;
+            }
+
+            // Legacy bold full timestamp: - **YYYY-MM-DD HH:MM:SS** text
+            if let Some(caps) = BOLD_LOG_FORMAT_RE.captures(line) {
+                let ts = &caps[1];
+                let rest = line.strip_prefix("- **").unwrap();
+                let rest = &rest[ts.len() + 2..]; // Skip timestamp and closing **
+                let new_line = format!("- [{}]{}", ts, rest);
+                if dry_run {
+                    print_fix(format, rel_path, i + 1, line, &new_line);
+                }
+                result.push(new_line);
+                fixes += 1;
+                continue;
+            }
+
+            // Legacy time-only format: - **HH:MM** text (under date header)
+            if let Some(caps) = TIME_ONLY_FORMAT_RE.captures(line) {
+                let time = &caps[1];
+                let rest = line.strip_prefix("- **").unwrap();
+                let rest = &rest[time.len() + 2..]; // Skip time and closing **
+
+                if let Some(ref date) = current_date {
+                    let new_line = format!("- [{} {}:00]{}", date, time, rest);
+                    if dry_run {
+                        print_fix(format, rel_path, i + 1, line, &new_line);
+                    }
+                    result.push(new_line);
+                    fixes += 1;
+                } else {
+                    // No date context - fall back to git blame
+                    if let Some(ts) = get_blame_timestamp(path, ws, i + 1) {
+                        let new_line = format!("- [{}]{}", ts, rest);
+                        if dry_run {
+                            print_fix(format, rel_path, i + 1, line, &new_line);
+                        }
+                        result.push(new_line);
+                        fixes += 1;
+                    } else {
+                        result.push(line.to_string()); // Can't fix, keep original
+                    }
+                }
+                continue;
+            }
+
+            // Entry without timestamp - add one
+            let entry_content = line.strip_prefix("- ").unwrap_or(line);
+
+            // Skip entries that look like code/formatting, not log entries
+            if is_non_log_list_item(entry_content) {
+                result.push(line.to_string());
+                continue;
+            }
+
+            if let Some(ref date) = current_date {
+                // Use date from header + default time 12:00:00
+                let new_line = format!("- [{} 12:00:00] {}", date, entry_content);
+                if dry_run {
+                    print_fix(format, rel_path, i + 1, line, &new_line);
+                }
+                result.push(new_line);
+                fixes += 1;
+            } else {
+                // No date context - fall back to git blame
+                if let Some(ts) = get_blame_timestamp(path, ws, i + 1) {
+                    let new_line = format!("- [{}] {}", ts, entry_content);
+                    if dry_run {
+                        print_fix(format, rel_path, i + 1, line, &new_line);
+                    }
+                    result.push(new_line);
+                    fixes += 1;
+                } else {
+                    result.push(line.to_string()); // Can't fix, keep original
+                }
+            }
+            continue;
+        }
+
+        // Non-entry lines (empty, continuations, etc.) - keep as is
+        result.push(line.to_string());
+    }
+
+    (result, fixes, headers_removed)
+}
+
+fn print_fix(format: OutputFormat, rel_path: &str, line_num: usize, old: &str, new: &str) {
+    match format {
+        OutputFormat::Pretty | OutputFormat::Plain => {
+            println!("{}:{}", rel_path, line_num);
+            println!("  - {}", old);
+            println!("  + {}", new);
+        }
+        _ => {}
+    }
+}
+
+/// Check if a list item content looks like code/formatting rather than a log entry
+fn is_non_log_list_item(content: &str) -> bool {
+    let trimmed = content.trim();
+
+    // Code fence
+    if trimmed.starts_with("```") {
+        return true;
+    }
+
+    // Shell command (likely inside code block)
+    if trimmed.starts_with("$ ") || (trimmed.starts_with("# ") && !trimmed.starts_with("## ")) {
+        return true;
+    }
+
+    // Markdown header inside list item
+    if trimmed.starts_with("### ") || trimmed.starts_with("#### ") {
+        return true;
+    }
+
+    // Lines that are clearly continuations (start with common code patterns)
+    if trimmed.starts_with("git ") || trimmed.starts_with("cd ") || trimmed.starts_with("./") {
+        return true;
+    }
+
+    // Table rows (markdown tables)
+    if trimmed.starts_with('|') {
+        return true;
+    }
+
+    // Bold text that is NOT a timestamp (continuation headers like "**Results:**")
+    // Timestamps look like **YYYY-MM-DD or **HH:MM** - other bold is content
+    if trimmed.starts_with("**") {
+        // Check if it's NOT a timestamp pattern
+        let after_bold = &trimmed[2..];
+        // Timestamp patterns: YYYY-MM-DD or HH:MM
+        let is_date = after_bold.len() >= 10
+            && after_bold.chars().take(4).all(|c| c.is_ascii_digit())
+            && after_bold.chars().nth(4) == Some('-');
+        let is_time = after_bold.len() >= 5
+            && after_bold.chars().take(2).all(|c| c.is_ascii_digit())
+            && after_bold.chars().nth(2) == Some(':');
+        if !is_date && !is_time {
+            return true;
         }
     }
 
-    result
+    // "See X", "Note:", etc. - common continuation patterns
+    if trimmed.starts_with("See ") || trimmed.starts_with("Note:") {
+        return true;
+    }
+
+    false
 }
 
 /// Get timestamp from git blame for a specific line
@@ -1163,27 +1346,4 @@ fn get_blame_timestamp(path: &Path, ws: &Path, line_num: usize) -> Option<String
     }
 
     None
-}
-
-/// Add timestamp to a log entry line
-fn add_timestamp_to_log_entry(line: &str, timestamp: &str) -> String {
-    // Remove "- " prefix
-    let content = line.strip_prefix("- ").unwrap_or(line);
-
-    // Remove any existing bold markers at the start (malformed timestamps)
-    let content = if let Some(stripped) = content.strip_prefix("**") {
-        // Find closing ** and strip
-        if let Some(end) = stripped.find("**") {
-            let inner = &stripped[..end];
-            let rest = &stripped[end + 2..];
-            // Keep the inner content but without bold, prepend to rest
-            format!("{}{}", inner.trim(), rest)
-        } else {
-            content.to_string()
-        }
-    } else {
-        content.to_string()
-    };
-
-    format!("- **{}** {}", timestamp, content.trim())
 }
