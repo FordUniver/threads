@@ -8,7 +8,7 @@ use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
 use crate::output::{self, OutputFormat};
-use crate::thread::Thread;
+use crate::thread::{self, Thread};
 use crate::workspace::{self, FindOptions};
 
 #[derive(Args)]
@@ -28,6 +28,10 @@ pub struct StatsArgs {
     /// Search parent directories (up to git root, or specify N levels)
     #[arg(short = 'u', long = "up", value_name = "N")]
     up: Option<Option<usize>>,
+
+    /// Include concluded threads (resolved/superseded/deferred/rejected)
+    #[arg(short = 'c', long = "include-concluded")]
+    include_concluded: bool,
 
     /// Output format (auto-detects TTY for pretty vs plain)
     #[arg(short = 'f', long, value_enum, default_value = "pretty")]
@@ -152,6 +156,12 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
         };
 
         let status = t.base_status();
+
+        // Filter out terminal threads unless --include-concluded
+        if !args.include_concluded && thread::is_terminal(&status) {
+            continue;
+        }
+
         let status = if status.is_empty() {
             "(none)".to_string()
         } else {
@@ -167,8 +177,21 @@ pub fn run(args: StatsArgs, git_root: &Path) -> Result<(), String> {
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
 
     match format {
-        OutputFormat::Pretty => output_pretty(&sorted, total, &filter_path, &search_dir),
-        OutputFormat::Plain => output_plain(&sorted, total, git_root, &filter_path, &search_dir),
+        OutputFormat::Pretty => output_pretty(
+            &sorted,
+            total,
+            &filter_path,
+            &search_dir,
+            args.include_concluded,
+        ),
+        OutputFormat::Plain => output_plain(
+            &sorted,
+            total,
+            git_root,
+            &filter_path,
+            &search_dir,
+            args.include_concluded,
+        ),
         OutputFormat::Json => output_json(&sorted, total, git_root, &filter_path),
         OutputFormat::Yaml => output_yaml(&sorted, total, git_root, &filter_path),
     }
@@ -183,11 +206,30 @@ struct StatsRow {
     count: String,
 }
 
+/// Build filter description for summary line
+fn build_filter_desc(include_concluded: bool, search_dir: &SearchDirection) -> String {
+    let mut parts = Vec::new();
+
+    if !include_concluded {
+        parts.push("open".to_string());
+    } else {
+        parts.push("all statuses".to_string());
+    }
+
+    let dir_desc = search_dir.description();
+    if !dir_desc.is_empty() {
+        parts.push(dir_desc.trim().to_string());
+    }
+
+    parts.join(", ")
+}
+
 fn output_pretty(
     sorted: &[(String, usize)],
     total: usize,
     filter_path: &str,
     search_dir: &SearchDirection,
+    include_concluded: bool,
 ) -> Result<(), String> {
     let path_desc = if filter_path == "." {
         "repo root".to_string()
@@ -195,13 +237,13 @@ fn output_pretty(
         filter_path.to_string()
     };
 
-    let search_suffix = search_dir.description();
+    let filter_desc = build_filter_desc(include_concluded, search_dir);
 
     println!(
-        "{} {}{}",
+        "{} {} ({})",
         "Stats for threads in".bold(),
         path_desc,
-        search_suffix.dimmed()
+        filter_desc.dimmed()
     );
     println!();
 
@@ -245,6 +287,7 @@ fn output_plain(
     git_root: &Path,
     filter_path: &str,
     search_dir: &SearchDirection,
+    include_concluded: bool,
 ) -> Result<(), String> {
     let pwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().to_string())
@@ -260,9 +303,9 @@ fn output_plain(
         filter_path.to_string()
     };
 
-    let search_suffix = search_dir.description();
+    let filter_desc = build_filter_desc(include_concluded, search_dir);
 
-    println!("Stats for threads in {}{}", path_desc, search_suffix);
+    println!("Stats for threads in {} ({})", path_desc, filter_desc);
     println!();
 
     if total == 0 {

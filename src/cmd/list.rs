@@ -32,8 +32,12 @@ pub struct ListArgs {
     #[arg(short = 'u', long = "up", value_name = "N")]
     up: Option<Option<usize>>,
 
-    /// Include resolved/terminal threads
-    #[arg(long)]
+    /// Include concluded threads (resolved/superseded/deferred/rejected)
+    #[arg(short = 'c', long = "include-concluded")]
+    include_concluded: bool,
+
+    /// Hidden alias for --include-concluded (backward compatibility)
+    #[arg(long = "include-closed", hide = true)]
     include_closed: bool,
 
     /// Search name/title/desc (substring)
@@ -242,12 +246,14 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
         // Note: find_threads_with_options already handles direction/depth filtering
 
         // Status filter
+        // --include-concluded or --include-closed (hidden alias) include terminal threads
+        let include_concluded = args.include_concluded || args.include_closed;
         if let Some(ref status_filter) = args.status {
             let filter_statuses: Vec<&str> = status_filter.split(',').collect();
             if !filter_statuses.contains(&base_status.as_str()) {
                 continue;
             }
-        } else if !args.include_closed && thread::is_terminal(&status) {
+        } else if !include_concluded && thread::is_terminal(&status) {
             continue;
         }
 
@@ -301,6 +307,9 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
     // Sort by updated timestamp, most recent first
     results.sort_by_key(|t| std::cmp::Reverse(t.updated_ts()));
 
+    // Combine both flags for output display
+    let include_concluded = args.include_concluded || args.include_closed;
+
     match format {
         OutputFormat::Pretty => output_pretty(
             &results,
@@ -308,7 +317,7 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             &filter_path,
             &pwd_rel,
             &search_dir,
-            args.include_closed,
+            include_concluded,
             args.status.as_deref(),
         ),
         OutputFormat::Plain => output_plain(
@@ -317,7 +326,7 @@ pub fn run(args: ListArgs, git_root: &Path) -> Result<(), String> {
             &filter_path,
             &pwd_rel,
             &search_dir,
-            args.include_closed,
+            include_concluded,
             args.status.as_deref(),
         ),
         OutputFormat::Json => output_json(&results, git_root, &pwd_rel),

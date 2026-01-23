@@ -96,6 +96,10 @@ pub struct ValidateArgs {
     #[arg(short = 'd', long = "down", value_name = "N", global = true)]
     down: Option<Option<usize>>,
 
+    /// Alias for --down (consistency with list/stats)
+    #[arg(short = 'r', long, conflicts_with = "down", global = true)]
+    recursive: bool,
+
     /// Search parent directories (up to git root, or specify N levels)
     #[arg(short = 'u', long = "up", value_name = "N", global = true)]
     up: Option<Option<usize>>,
@@ -296,9 +300,18 @@ fn collect_files(args: &ValidateArgs, ws: &Path) -> Result<Vec<PathBuf>, String>
         let scope = workspace::infer_scope(ws, path_filter)?;
         let start_path = scope.threads_dir.parent().unwrap_or(ws);
 
+        // Determine search direction: --down/-d takes priority, then -r as alias
+        let down_opt = if args.down.is_some() {
+            args.down
+        } else if args.recursive {
+            Some(None) // unlimited depth
+        } else {
+            None
+        };
+
         let mut options = FindOptions::new();
 
-        if let Some(depth) = args.down {
+        if let Some(depth) = down_opt {
             options = options.with_down(depth);
         }
 
