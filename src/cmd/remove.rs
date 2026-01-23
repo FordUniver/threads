@@ -6,6 +6,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
+use crate::config::env_bool;
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::Thread;
@@ -60,7 +61,8 @@ pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
     // Remove file
     fs::remove_file(&file).map_err(|e| format!("removing file: {}", e))?;
 
-    let committed = if was_tracked && args.commit {
+    let should_commit = args.commit || env_bool("THREADS_AUTO_COMMIT").unwrap_or(false);
+    let committed = if was_tracked && should_commit {
         let msg = args
             .m
             .unwrap_or_else(|| format!("threads: remove '{}'", name));
@@ -76,13 +78,15 @@ pub fn run(args: RemoveArgs, ws: &Path) -> Result<(), String> {
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
             println!("Removed: {}", rel_path_str);
-            if !was_tracked {
-                println!("Note: Thread was never committed to git, no commit needed.");
-            } else if !committed {
-                println!(
-                    "Note: Run 'threads rm {} --commit' or use git to commit the deletion.",
-                    id
-                );
+            if !env_bool("THREADS_QUIET").unwrap_or(false) {
+                if !was_tracked {
+                    println!("Note: Thread was never committed to git, no commit needed.");
+                } else if !committed {
+                    println!(
+                        "Note: Run 'threads rm {} --commit' or use git to commit the deletion.",
+                        id
+                    );
+                }
             }
         }
         OutputFormat::Json => {

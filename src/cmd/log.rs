@@ -3,6 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
+use crate::config::env_bool;
 use crate::git;
 use crate::input;
 use crate::thread::{self, Thread};
@@ -49,14 +50,15 @@ pub fn run(args: LogArgs, ws: &Path) -> Result<(), String> {
 
     println!("Logged to: {}", file.display());
 
-    if args.commit {
+    let should_commit = args.commit || env_bool("THREADS_AUTO_COMMIT").unwrap_or(false);
+    if should_commit {
         let repo = workspace::open()?;
         let rel_path = file.strip_prefix(ws).unwrap_or(&file);
         let msg = args
             .m
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &file, &msg)?;
-    } else {
+    } else if !env_bool("THREADS_QUIET").unwrap_or(false) {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
             args.id, args.id

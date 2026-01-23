@@ -5,6 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
+use crate::config::env_bool;
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::Thread;
@@ -69,7 +70,8 @@ pub fn run(args: UpdateArgs, ws: &Path) -> Result<(), String> {
 
     t.write()?;
 
-    let committed = if args.commit {
+    let should_commit = args.commit || env_bool("THREADS_AUTO_COMMIT").unwrap_or(false);
+    let committed = if should_commit {
         let repo = workspace::open()?;
         let rel_path = file.strip_prefix(ws).unwrap_or(&file);
         let msg = args
@@ -92,7 +94,7 @@ pub fn run(args: UpdateArgs, ws: &Path) -> Result<(), String> {
                 println!("Updated desc: {}", desc);
             }
             println!("  → {}", rel_path);
-            if !committed {
+            if !committed && !env_bool("THREADS_QUIET").unwrap_or(false) {
                 println!(
                     "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
                     id, id

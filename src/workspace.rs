@@ -9,6 +9,7 @@ use clap_complete::engine::CompletionCandidate;
 use git2::Repository;
 use regex::Regex;
 
+use crate::config::env_string;
 use crate::thread;
 
 // Cached regexes for workspace operations
@@ -62,9 +63,20 @@ pub fn git_root(repo: &Repository) -> PathBuf {
         .to_path_buf()
 }
 
-/// Find the git repository root from current directory.
-/// Returns an error if not in a git repository.
+/// Find the workspace root.
+///
+/// Priority: THREADS_ROOT env var > git repository root detection
 pub fn find() -> Result<PathBuf, String> {
+    // Check THREADS_ROOT env var first
+    if let Some(root) = env_string("THREADS_ROOT") {
+        let path = PathBuf::from(&root);
+        if path.is_dir() {
+            return Ok(path);
+        }
+        return Err(format!("THREADS_ROOT '{}' is not a valid directory", root));
+    }
+
+    // Fall back to git root detection
     find_git_root()
 }
 

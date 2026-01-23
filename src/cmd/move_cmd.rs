@@ -6,6 +6,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
+use crate::config::env_bool;
 use crate::git;
 use crate::output::OutputFormat;
 use crate::thread::Thread;
@@ -78,8 +79,9 @@ pub fn run(args: MoveArgs, git_root: &Path) -> Result<(), String> {
 
     let rel_dest = workspace::path_relative_to_git_root(git_root, &dest_file);
 
-    // Commit if requested
-    let committed = if args.commit {
+    // Commit if requested or auto-commit enabled
+    let should_commit = args.commit || env_bool("THREADS_AUTO_COMMIT").unwrap_or(false);
+    let committed = if should_commit {
         let repo = workspace::open()?;
         let rel_src_path = src_file.strip_prefix(git_root).unwrap_or(&src_file);
         let rel_dest_path = dest_file.strip_prefix(git_root).unwrap_or(&dest_file);
@@ -103,7 +105,7 @@ pub fn run(args: MoveArgs, git_root: &Path) -> Result<(), String> {
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
             println!("Moved: {} → {}", rel_src, rel_dest);
-            if !committed {
+            if !committed && !env_bool("THREADS_QUIET").unwrap_or(false) {
                 println!(
                     "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
                     id, id

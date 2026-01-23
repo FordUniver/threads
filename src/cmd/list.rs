@@ -10,6 +10,7 @@ use tabled::{Table, Tabled};
 
 use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
 use crate::cache::TimestampCache;
+use crate::config::env_bool;
 use crate::git;
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
@@ -334,7 +335,7 @@ fn output_pretty(
     println!();
 
     if results.is_empty() {
-        if !direction.is_searching() {
+        if !direction.is_searching() && !env_bool("THREADS_QUIET").unwrap_or(false) {
             println!(
                 "{}",
                 "Hint: use -r to include nested directories, -u to search parents".dimmed()
@@ -417,7 +418,7 @@ fn output_plain(
     println!();
 
     if results.is_empty() {
-        if !direction.is_searching() {
+        if !direction.is_searching() && !env_bool("THREADS_QUIET").unwrap_or(false) {
             println!("Hint: use -r to include nested directories, -u to search parents");
         }
         return Ok(());

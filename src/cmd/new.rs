@@ -6,6 +6,7 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
+use crate::config::{env_bool, env_string};
 use crate::git;
 use crate::input;
 use crate::output::OutputFormat;
@@ -58,11 +59,21 @@ struct NewOutput {
 pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
     let format = args.format.resolve();
 
+    // Resolve status: CLI flag > THREADS_DEFAULT_STATUS env > default ("idea")
+    let status = if args.status != "idea" {
+        // User explicitly set --status
+        args.status.clone()
+    } else if let Some(env_status) = env_string("THREADS_DEFAULT_STATUS") {
+        env_status
+    } else {
+        args.status.clone()
+    };
+
     // Validate status early
-    if !thread::is_valid_status(&args.status) {
+    if !thread::is_valid_status(&status) {
         return Err(format!(
             "Invalid status '{}'. Must be one of: idea, planning, active, blocked, paused, resolved, superseded, deferred, rejected",
-            args.status
+            status
         ));
     }
 
@@ -80,8 +91,8 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
         return Err("title is required".to_string());
     }
 
-    // Warn if no description provided
-    if args.desc.is_empty() {
+    // Warn if no description provided (unless quiet mode)
+    if args.desc.is_empty() && !env_bool("THREADS_QUIET").unwrap_or(false) {
         eprintln!("Warning: No --desc provided. Add one with: threads update <id> --desc \"...\"");
     }
 
@@ -126,7 +137,7 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
     content.push_str(&format!("id: {}\n", id));
     content.push_str(&format!("name: {}\n", title));
     content.push_str(&format!("desc: {}\n", args.desc));
-    content.push_str(&format!("status: {}\n", args.status));
+    content.push_str(&format!("status: {}\n", status));
     content.push_str("---\n\n");
 
     if !body.is_empty() {
@@ -153,7 +164,7 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
             println!("Created thread in {}: {}", scope.level_desc, id);
             println!("  → {}", rel_path);
 
-            if body.is_empty() {
+            if body.is_empty() && !env_bool("THREADS_QUIET").unwrap_or(false) {
                 eprintln!(
                     "Hint: Add body with: echo \"content\" | threads body {} --set",
                     id
@@ -182,15 +193,18 @@ pub fn run(args: NewArgs, git_root: &Path) -> Result<(), String> {
         }
     }
 
-    // Commit if requested
-    if args.commit {
+    // Commit if requested or THREADS_AUTO_COMMIT is set
+    let should_commit = args.commit || env_bool("THREADS_AUTO_COMMIT").unwrap_or(false);
+    if should_commit {
         let repo = workspace::open()?;
         let rel_path = thread_path.strip_prefix(git_root).unwrap_or(&thread_path);
         let msg = args
             .m
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &thread_path, &msg)?;
-    } else if matches!(format, OutputFormat::Pretty | OutputFormat::Plain) {
+    } else if matches!(format, OutputFormat::Pretty | OutputFormat::Plain)
+        && !env_bool("THREADS_QUIET").unwrap_or(false)
+    {
         println!(
             "Note: Thread {} has uncommitted changes. Use 'threads commit {}' when ready.",
             id, id

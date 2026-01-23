@@ -2,9 +2,16 @@
 //!
 //! These structs centralize common flags like format, direction, and filter options.
 //! Use `#[command(flatten)]` to include them in command-specific Args structs.
+//!
+//! Environment variable overrides:
+//! - `THREADS_FORMAT` → default format (pretty, plain, json, yaml)
+//! - `THREADS_INCLUDE_CLOSED` → include closed threads by default
+//! - `THREADS_DOWN` → default --down depth
+//! - `THREADS_UP` → default --up depth
 
 use clap::Args;
 
+use crate::config::{env_bool, env_string, env_usize};
 use crate::output::OutputFormat;
 use crate::workspace::FindOptions;
 
@@ -30,13 +37,32 @@ pub struct FormatArgs {
 impl FormatArgs {
     /// Resolve the effective output format.
     ///
-    /// Handles --json shorthand and applies TTY auto-detection for pretty mode.
+    /// Priority: --json flag > --format flag > THREADS_FORMAT env > default (pretty)
+    /// Then applies NO_COLOR/FORCE_COLOR/TTY detection via OutputFormat::resolve().
     pub fn resolve(&self) -> OutputFormat {
         if self.json {
-            OutputFormat::Json
-        } else {
-            self.format.resolve()
+            return OutputFormat::Json;
         }
+
+        // Check if format was explicitly set (not default)
+        // If format is not pretty (the default), user explicitly chose it
+        if self.format != OutputFormat::Pretty {
+            return self.format.resolve();
+        }
+
+        // Check THREADS_FORMAT env var
+        if let Some(env_format) = env_string("THREADS_FORMAT") {
+            match env_format.to_lowercase().as_str() {
+                "pretty" => return OutputFormat::Pretty.resolve(),
+                "plain" => return OutputFormat::Plain,
+                "json" => return OutputFormat::Json,
+                "yaml" => return OutputFormat::Yaml,
+                _ => {} // Invalid value, fall through to default
+            }
+        }
+
+        // Default with TTY/color detection
+        self.format.resolve()
     }
 }
 
@@ -65,32 +91,64 @@ pub struct DirectionArgs {
 
 impl DirectionArgs {
     /// Convert to FindOptions for workspace search.
+    ///
+    /// Priority: CLI flags > THREADS_DOWN/THREADS_UP env > default (local only)
     pub fn to_find_options(&self) -> FindOptions {
         let mut options = FindOptions::new();
 
-        // --down/-d takes priority, then -r as alias for unlimited down
+        // --down/-d takes priority, then -r as alias for unlimited down, then env var
         let down_opt = if self.down.is_some() {
             self.down
         } else if self.recursive {
             Some(None) // unlimited depth
         } else {
-            None
+            // Check THREADS_DOWN env var
+            Self::parse_depth_env("THREADS_DOWN")
         };
 
         if let Some(depth) = down_opt {
             options = options.with_down(depth);
         }
 
-        if let Some(depth) = self.up {
+        // --up takes priority, then env var
+        let up_opt = if self.up.is_some() {
+            self.up
+        } else {
+            Self::parse_depth_env("THREADS_UP")
+        };
+
+        if let Some(depth) = up_opt {
             options = options.with_up(depth);
         }
 
         options
     }
 
-    /// Check if any direction search is active.
+    /// Parse a depth env var (number for limit, "unlimited"/empty for unlimited)
+    fn parse_depth_env(name: &str) -> Option<Option<usize>> {
+        let value = env_string(name)?;
+        let lower = value.to_lowercase();
+
+        if lower == "unlimited" || lower == "all" {
+            Some(None) // unlimited
+        } else if let Some(n) = env_usize(name) {
+            if n == 0 {
+                Some(None) // 0 means unlimited
+            } else {
+                Some(Some(n))
+            }
+        } else {
+            None // invalid value, ignore
+        }
+    }
+
+    /// Check if any direction search is active (from flags or env vars).
     pub fn is_searching(&self) -> bool {
-        self.down.is_some() || self.recursive || self.up.is_some()
+        self.down.is_some()
+            || self.recursive
+            || self.up.is_some()
+            || Self::parse_depth_env("THREADS_DOWN").is_some()
+            || Self::parse_depth_env("THREADS_UP").is_some()
     }
 
     /// Get a description of the active search direction for display.
@@ -100,13 +158,13 @@ impl DirectionArgs {
     pub fn description(&self) -> String {
         let mut parts = Vec::new();
 
-        // Resolve down option (--down/-d takes priority over -r)
+        // Resolve down option (--down/-d takes priority over -r, then env)
         let down_opt = if self.down.is_some() {
             self.down
         } else if self.recursive {
             Some(None)
         } else {
-            None
+            Self::parse_depth_env("THREADS_DOWN")
         };
 
         if let Some(depth) = down_opt {
@@ -116,7 +174,14 @@ impl DirectionArgs {
             }
         }
 
-        if let Some(depth) = self.up {
+        // Resolve up option (--up takes priority, then env)
+        let up_opt = if self.up.is_some() {
+            self.up
+        } else {
+            Self::parse_depth_env("THREADS_UP")
+        };
+
+        if let Some(depth) = up_opt {
             match depth {
                 Some(n) => parts.push(format!("up {}", n)),
                 None => parts.push("up".to_string()),
@@ -152,9 +217,15 @@ pub struct FilterArgs {
 impl FilterArgs {
     /// Check if closed threads should be included.
     ///
-    /// Returns true if either --include-closed or --include-concluded is set.
+    /// Priority: CLI flags > THREADS_INCLUDE_CLOSED env > default (false)
     pub fn include_closed(&self) -> bool {
-        self.include_closed || self.include_concluded
+        // CLI flags take priority
+        if self.include_closed || self.include_concluded {
+            return true;
+        }
+
+        // Check THREADS_INCLUDE_CLOSED env var
+        env_bool("THREADS_INCLUDE_CLOSED").unwrap_or(false)
     }
 }
 

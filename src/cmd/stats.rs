@@ -8,6 +8,7 @@ use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
 use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
+use crate::config::env_bool;
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
 use crate::workspace;
@@ -168,7 +169,7 @@ fn output_pretty(
 
     if total == 0 {
         println!("{}", "No threads found.".dimmed());
-        if !direction.is_searching() {
+        if !direction.is_searching() && !env_bool("THREADS_QUIET").unwrap_or(false) {
             println!(
                 "{}",
                 "Hint: use -r to include nested directories, -u to search parents".dimmed()
@@ -229,7 +230,7 @@ fn output_plain(
 
     if total == 0 {
         println!("No threads found.");
-        if !direction.is_searching() {
+        if !direction.is_searching() && !env_bool("THREADS_QUIET").unwrap_or(false) {
             println!("Hint: use -r to include nested directories, -u to search parents");
         }
         return Ok(());
