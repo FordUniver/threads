@@ -93,6 +93,9 @@ enum Commands {
 
     /// Generate shell completion script
     Completion(CompletionArgs),
+
+    /// Configuration introspection
+    Config(cmd::config_cmd::ConfigArgs),
 }
 
 #[derive(clap::Args)]
@@ -173,6 +176,7 @@ fn main() {
         Commands::Close(args) => cmd::resolve::run(args, &ws),
         Commands::Reopen(args) => cmd::reopen::run(args, &ws),
         Commands::Remove(args) => cmd::remove::run(args, &ws),
+        Commands::Config(args) => cmd::config_cmd::run(args, &ws),
         Commands::Completion(_) => unreachable!(), // Handled above
     };
 

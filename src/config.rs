@@ -13,7 +13,8 @@
 //! - Helper functions for env var parsing
 //! - Config loading and merging
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -355,20 +356,259 @@ pub fn env_is_set(name: &str) -> bool {
 // Config Loading
 // ============================================================================
 
+/// Manifest file name within .threads-config/
+pub const MANIFEST_FILE: &str = "manifest.yaml";
+
+/// Config directory name
+pub const CONFIG_DIR: &str = ".threads-config";
+
 /// Load configuration from all sources.
+///
+/// Resolution order (later overrides earlier):
+/// 1. Built-in defaults
+/// 2. User global (~/.config/threads/config.yaml)
+/// 3. Project manifests (walk from git_root to cwd)
 ///
 /// Does not apply CLI flags (those are handled by args resolution).
 /// Does not apply ENV vars (those are checked at point of use).
-pub fn load_config(_git_root: &Path) -> Config {
-    // TODO: Implement manifest loading in Phase 5
-    // For now, return defaults
-    Config::default()
+pub fn load_config(git_root: &Path, cwd: &Path) -> LoadedConfig {
+    let mut config = Config::default();
+    let mut sources = vec![ConfigSource::Default];
+
+    // 1. User global config
+    if let Some(user_config_path) = user_config_path() {
+        if let Some(user_config) = load_manifest(&user_config_path) {
+            merge(&mut config, &user_config);
+            sources.push(ConfigSource::UserGlobal);
+        }
+    }
+
+    // 2. Walk from git root to cwd, loading manifests at each level
+    let manifest_paths = collect_manifest_paths(git_root, cwd);
+    for path in manifest_paths {
+        if let Some(manifest_config) = load_manifest(&path) {
+            let rel_path = path
+                .strip_prefix(git_root)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| path.to_string_lossy().to_string());
+            merge(&mut config, &manifest_config);
+            sources.push(ConfigSource::ProjectManifest(rel_path));
+        }
+    }
+
+    LoadedConfig { config, sources }
+}
+
+/// Result of loading configuration with source tracking.
+#[derive(Debug)]
+pub struct LoadedConfig {
+    /// The merged configuration
+    pub config: Config,
+    /// Sources that contributed to this config (in order of application)
+    pub sources: Vec<ConfigSource>,
+}
+
+/// Get the user config file path (~/.config/threads/config.yaml).
+pub fn user_config_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|p| p.join("threads").join("config.yaml"))
+}
+
+/// Load a manifest file, returning None if it doesn't exist or can't be parsed.
+pub fn load_manifest(path: &Path) -> Option<Config> {
+    let content = fs::read_to_string(path).ok()?;
+    serde_yaml::from_str(&content).ok()
+}
+
+/// Collect manifest paths from git_root to cwd (inclusive).
+///
+/// Returns paths in order from root to cwd (so later ones override earlier).
+fn collect_manifest_paths(git_root: &Path, cwd: &Path) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    // Normalize paths
+    let git_root = git_root.canonicalize().unwrap_or_else(|_| git_root.to_path_buf());
+    let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
+
+    // Check if cwd is under git_root
+    if !cwd.starts_with(&git_root) {
+        // Just check git_root
+        let manifest = git_root.join(CONFIG_DIR).join(MANIFEST_FILE);
+        if manifest.exists() {
+            paths.push(manifest);
+        }
+        return paths;
+    }
+
+    // Walk from git_root to cwd
+    let mut current = git_root.clone();
+    let rel_path = cwd.strip_prefix(&git_root).unwrap_or(Path::new(""));
+
+    // Check git_root itself
+    let manifest = current.join(CONFIG_DIR).join(MANIFEST_FILE);
+    if manifest.exists() {
+        paths.push(manifest);
+    }
+
+    // Walk through each component of the relative path
+    for component in rel_path.components() {
+        current = current.join(component);
+        let manifest = current.join(CONFIG_DIR).join(MANIFEST_FILE);
+        if manifest.exists() {
+            paths.push(manifest);
+        }
+    }
+
+    paths
+}
+
+/// Merge overlay config into base config.
+///
+/// Non-default values in overlay override values in base.
+/// For Vec fields, overlay replaces entirely (not appended).
+pub fn merge(base: &mut Config, overlay: &Config) {
+    // Status: replace if overlay has non-default values
+    let default_status = StatusConfig::default();
+    if overlay.status.open != default_status.open {
+        base.status.open = overlay.status.open.clone();
+    }
+    if overlay.status.closed != default_status.closed {
+        base.status.closed = overlay.status.closed.clone();
+    }
+
+    // Defaults: replace if overlay has non-default values
+    let default_defaults = DefaultsConfig::default();
+    if overlay.defaults.new != default_defaults.new {
+        base.defaults.new = overlay.defaults.new.clone();
+    }
+    if overlay.defaults.closed != default_defaults.closed {
+        base.defaults.closed = overlay.defaults.closed.clone();
+    }
+    if overlay.defaults.open != default_defaults.open {
+        base.defaults.open = overlay.defaults.open.clone();
+    }
+
+    // Display: merge Option fields
+    if overlay.display.root_name.is_some() {
+        base.display.root_name = overlay.display.root_name.clone();
+    }
+    if let Some(ref overlay_colors) = overlay.display.status_colors {
+        let base_colors = base.display.status_colors.get_or_insert_with(StatusColors::default);
+        merge_status_colors(base_colors, overlay_colors);
+    }
+
+    // Behavior: merge non-default values
+    let default_behavior = BehaviorConfig::default();
+    if overlay.behavior.auto_commit != default_behavior.auto_commit {
+        base.behavior.auto_commit = overlay.behavior.auto_commit;
+    }
+    if overlay.behavior.default_down.is_some() {
+        base.behavior.default_down = overlay.behavior.default_down.clone();
+    }
+    if overlay.behavior.default_up.is_some() {
+        base.behavior.default_up = overlay.behavior.default_up.clone();
+    }
+    if overlay.behavior.quiet != default_behavior.quiet {
+        base.behavior.quiet = overlay.behavior.quiet;
+    }
+
+    // Sections: merge Option fields (None means disabled, Some means renamed)
+    let default_sections = SectionsConfig::default();
+    if overlay.sections.body != default_sections.body {
+        base.sections.body = overlay.sections.body.clone();
+    }
+    if overlay.sections.notes != default_sections.notes {
+        base.sections.notes = overlay.sections.notes.clone();
+    }
+    if overlay.sections.todo != default_sections.todo {
+        base.sections.todo = overlay.sections.todo.clone();
+    }
+    if overlay.sections.log != default_sections.log {
+        base.sections.log = overlay.sections.log.clone();
+    }
+}
+
+/// Merge status colors (overlay wins for non-None values).
+fn merge_status_colors(base: &mut StatusColors, overlay: &StatusColors) {
+    if overlay.active.is_some() {
+        base.active = overlay.active.clone();
+    }
+    if overlay.blocked.is_some() {
+        base.blocked = overlay.blocked.clone();
+    }
+    if overlay.paused.is_some() {
+        base.paused = overlay.paused.clone();
+    }
+    if overlay.idea.is_some() {
+        base.idea = overlay.idea.clone();
+    }
+    if overlay.planning.is_some() {
+        base.planning = overlay.planning.clone();
+    }
+    if overlay.resolved.is_some() {
+        base.resolved = overlay.resolved.clone();
+    }
+    if overlay.superseded.is_some() {
+        base.superseded = overlay.superseded.clone();
+    }
+    if overlay.deferred.is_some() {
+        base.deferred = overlay.deferred.clone();
+    }
+    if overlay.rejected.is_some() {
+        base.rejected = overlay.rejected.clone();
+    }
 }
 
 /// Generate JSON schema for the config.
 pub fn json_schema() -> String {
     let schema = schemars::schema_for!(Config);
     serde_json::to_string_pretty(&schema).unwrap_or_else(|_| "{}".to_string())
+}
+
+/// Generate a template manifest with comments.
+pub fn template_manifest() -> String {
+    r#"# threads configuration manifest
+# Place in .threads-config/manifest.yaml
+
+# Status definitions (uncomment to customize)
+# status:
+#   open: [idea, planning, active, blocked, paused]
+#   closed: [resolved, superseded, deferred, rejected]
+
+# Default values
+# defaults:
+#   new: idea           # threads new
+#   closed: resolved    # threads close
+#   open: active        # threads reopen
+
+# Display settings
+# display:
+#   root_name: null     # Custom name for repo root (null = "repo root")
+#   status_colors:
+#     active: green
+#     blocked: yellow
+#     paused: yellow
+#     idea: blue
+#     planning: blue
+#     resolved: dim
+#     superseded: dim
+#     deferred: dim
+#     rejected: dim
+
+# Behavior settings
+# behavior:
+#   auto_commit: false
+#   default_down: null  # null = disabled, number = depth, "unlimited" = no limit
+#   default_up: null
+#   quiet: false
+
+# Section names (null to disable, string to rename)
+# sections:
+#   Body: Body
+#   Notes: Notes
+#   Todo: Todo
+#   Log: Log
+"#
+    .to_string()
 }
 
 // ============================================================================
@@ -509,5 +749,50 @@ mod tests {
             "$THREADS_FORMAT"
         );
         assert_eq!(ConfigSource::CliFlag.to_string(), "CLI flag");
+    }
+
+    #[test]
+    fn test_merge_defaults_preserved() {
+        let mut base = Config::default();
+        let overlay = Config::default();
+        merge(&mut base, &overlay);
+
+        // Should still have defaults
+        assert_eq!(base.defaults.new, "idea");
+        assert_eq!(base.defaults.closed, "resolved");
+    }
+
+    #[test]
+    fn test_merge_overlay_wins() {
+        let mut base = Config::default();
+        let mut overlay = Config::default();
+        overlay.defaults.new = "planning".to_string();
+
+        merge(&mut base, &overlay);
+
+        assert_eq!(base.defaults.new, "planning");
+        // Other defaults unchanged
+        assert_eq!(base.defaults.closed, "resolved");
+    }
+
+    #[test]
+    fn test_merge_status_lists() {
+        let mut base = Config::default();
+        let mut overlay = Config::default();
+        overlay.status.open = vec!["custom".to_string(), "statuses".to_string()];
+
+        merge(&mut base, &overlay);
+
+        assert_eq!(overlay.status.open, vec!["custom", "statuses"]);
+        // Closed unchanged
+        assert!(base.status.closed.contains(&"resolved".to_string()));
+    }
+
+    #[test]
+    fn test_template_manifest() {
+        let template = template_manifest();
+        assert!(template.contains("# threads configuration manifest"));
+        assert!(template.contains("status:"));
+        assert!(template.contains("defaults:"));
     }
 }
