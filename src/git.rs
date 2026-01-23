@@ -398,6 +398,9 @@ pub fn previous_status(
 
     // Use git log -p to get patches showing status field changes
     // We look for lines like "-status: active" followed by "+status: resolved"
+    // Note: Using -G (regex grep) instead of -S (pickaxe) because -S finds commits
+    // that change the COUNT of occurrences, not the VALUE. Since "status:" always
+    // appears exactly once, -S won't find status value changes.
     let output = Command::new("git")
         .args([
             "-C",
@@ -405,7 +408,7 @@ pub fn previous_status(
             "log",
             "-p",
             "--follow",
-            "-S",
+            "-G",
             "status:",
             "--",
             &rel_path.to_string_lossy(),
