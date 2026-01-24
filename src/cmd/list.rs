@@ -56,6 +56,9 @@ struct ThreadInfo {
     path_absolute: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     is_pwd: bool,
+    /// Git file status (M/S/A/?/D or empty for clean)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    git_status: Option<String>,
 }
 
 impl ThreadInfo {
@@ -199,6 +202,10 @@ pub fn run(args: ListArgs, git_root: &Path, config: &Config) -> Result<(), Strin
         let thread_rel_str = thread_rel_path.to_string_lossy();
         let (created_dt, updated_dt) = get_timestamps(&repo, &cache, &thread_path, &thread_rel_str);
 
+        // Get git file status
+        let file_status = git::file_status(&repo, thread_rel_path);
+        let git_status_str = format_git_status(&file_status);
+
         results.push(ThreadInfo {
             id: t.id().to_string(),
             status: base_status,
@@ -214,6 +221,11 @@ pub fn run(args: ListArgs, git_root: &Path, config: &Config) -> Result<(), Strin
                 None
             },
             is_pwd,
+            git_status: if git_status_str.is_empty() {
+                None
+            } else {
+                Some(git_status_str.to_string())
+            },
         });
     }
 
@@ -261,8 +273,25 @@ struct TableRow {
     modified: String,
     #[tabled(rename = "PATH")]
     path: String,
+    #[tabled(rename = "GIT")]
+    git_status: String,
     #[tabled(rename = "TITLE")]
     title: String,
+}
+
+/// Format git file status as short code for list display
+fn format_git_status(status: &git::FileStatus) -> &'static str {
+    match status {
+        git::FileStatus::Clean => "",
+        git::FileStatus::Modified => "M",
+        git::FileStatus::Staged => "S",
+        git::FileStatus::StagedAndModified => "SM",
+        git::FileStatus::StagedNew => "A",
+        git::FileStatus::Untracked => "?",
+        git::FileStatus::Deleted => "D",
+        git::FileStatus::Changed => "M",
+        git::FileStatus::Unknown => "",
+    }
 }
 
 /// Build filter description for summary line
@@ -366,6 +395,7 @@ fn output_pretty(
                 created: t.created_short(),
                 modified: t.updated_short(),
                 path: path_styled,
+                git_status: t.git_status.clone().unwrap_or_default(),
                 title: output::truncate_back(&t.title, title_max),
             }
         })
@@ -431,16 +461,17 @@ fn output_plain(
     }
 
     // Pipe-delimited format, no truncation, full paths
-    println!("ID | STATUS | CREATED | UPDATED | PATH | TITLE");
+    println!("ID | STATUS | CREATED | UPDATED | PATH | GIT | TITLE");
 
     for t in results {
         println!(
-            "{} | {} | {} | {} | {} | {}",
+            "{} | {} | {} | {} | {} | {} | {}",
             t.id,
             t.status,
             t.created_plain(),
             t.updated_plain(),
             t.path,
+            t.git_status.as_deref().unwrap_or(""),
             t.title
         );
     }
@@ -463,6 +494,8 @@ struct ThreadInfoJson {
     path_absolute: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     is_pwd: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    git_status: Option<String>,
 }
 
 impl From<&ThreadInfo> for ThreadInfoJson {
@@ -478,6 +511,7 @@ impl From<&ThreadInfo> for ThreadInfoJson {
             updated: t.updated_iso(),
             path_absolute: t.path_absolute.clone(),
             is_pwd: t.is_pwd,
+            git_status: t.git_status.clone(),
         }
     }
 }

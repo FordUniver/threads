@@ -376,7 +376,9 @@ pub fn get_todo_items(content: &str) -> Vec<(bool, String, String)> {
         // Match: - [ ] text  <!-- hash --> or - [x] text  <!-- hash -->
         if let Some(rest) = line.strip_prefix("- [") {
             let checked = rest.starts_with('x');
-            if let Some(after_bracket) = rest.strip_prefix("x] ").or_else(|| rest.strip_prefix(" ] "))
+            if let Some(after_bracket) = rest
+                .strip_prefix("x] ")
+                .or_else(|| rest.strip_prefix(" ] "))
             {
                 if let Some((text, hash_part)) = after_bracket.rsplit_once("<!--") {
                     let text = text.trim().to_string();

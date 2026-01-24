@@ -313,6 +313,7 @@ pub fn file_status(repo: &Repository, rel_path: &Path) -> FileStatus {
     let mut opts = StatusOptions::new();
     opts.pathspec(rel_path);
     opts.include_untracked(true);
+    opts.recurse_untracked_dirs(true);
 
     let statuses = match repo.statuses(Some(&mut opts)) {
         Ok(s) => s,
@@ -377,6 +378,43 @@ impl std::fmt::Display for FileStatus {
             FileStatus::Unknown => "unknown",
         };
         write!(f, "{}", s)
+    }
+}
+
+/// Get diff stats (insertions, deletions) for uncommitted changes to a file.
+/// Returns None if the file is clean or on error.
+pub fn diff_stats(repo: &Repository, rel_path: &Path) -> Option<(usize, usize)> {
+    let workdir = repo.workdir()?;
+
+    let output = Command::new("git")
+        .args([
+            "-C",
+            &workdir.to_string_lossy(),
+            "diff",
+            "--numstat",
+            "--",
+            &rel_path.to_string_lossy(),
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next()?;
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() >= 2 {
+        let insertions = parts[0].parse().unwrap_or(0);
+        let deletions = parts[1].parse().unwrap_or(0);
+        if insertions > 0 || deletions > 0 {
+            Some((insertions, deletions))
+        } else {
+            None
+        }
+    } else {
+        None
     }
 }
 

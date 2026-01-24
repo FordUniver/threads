@@ -162,7 +162,18 @@ fn output_pretty(info: &ThreadInfoData) -> Result<(), String> {
     };
 
     let status_styled = output::style_status(&info.status).to_string();
-    let right_side = format!("{} · {} · {}", info.log_count, todo_text, status_styled);
+
+    // Add git status if not clean
+    let git_part = if info.git_status != "clean" {
+        format!(" · {}", info.git_status.dimmed())
+    } else {
+        String::new()
+    };
+
+    let right_side = format!(
+        "{} · {} · {}{}",
+        info.log_count, todo_text, status_styled, git_part
+    );
 
     // Title line: title followed by stats (no HFILL - table handles width)
     let title = info.title.cyan().bold().to_string();
@@ -488,7 +499,16 @@ fn get_timestamps_from_history(
 
 fn get_git_status(repo: &Repository, rel_path: &str) -> String {
     let path = Path::new(rel_path);
-    git::file_status(repo, path).to_string()
+    let status = git::file_status(repo, path);
+
+    // If file has changes, try to get diff stats
+    if status != git::FileStatus::Clean && status != git::FileStatus::Unknown {
+        if let Some((ins, del)) = git::diff_stats(repo, path) {
+            return format!("{} (+{}/-{})", status, ins, del);
+        }
+    }
+
+    status.to_string()
 }
 
 fn count_items(content: &str) -> (usize, usize, usize) {

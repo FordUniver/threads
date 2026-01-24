@@ -12,6 +12,7 @@ use termimad::MadSkin;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::args::FormatArgs;
+use crate::git;
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
 use crate::workspace;
@@ -145,7 +146,30 @@ fn output_pretty(
     };
 
     let status_styled = output::style_status(&thread.base_status()).to_string();
-    let title_line = format!("{}  {}", title.cyan().bold(), status_styled);
+
+    // Get git status with diff stats if dirty
+    let git_info = if let Ok(repo) = workspace::open() {
+        let rel_path_for_git = file.strip_prefix(ws).unwrap_or(file);
+        let file_status = git::file_status(&repo, rel_path_for_git);
+        if file_status != git::FileStatus::Clean && file_status != git::FileStatus::Unknown {
+            if let Some((ins, del)) = git::diff_stats(&repo, rel_path_for_git) {
+                format!(" · {} (+{}/-{})", file_status, ins, del)
+            } else {
+                format!(" · {}", file_status)
+            }
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let title_line = format!(
+        "{}  {}{}",
+        title.cyan().bold(),
+        status_styled,
+        git_info.dimmed()
+    );
 
     let header = if thread.frontmatter.desc.is_empty() {
         title_line
