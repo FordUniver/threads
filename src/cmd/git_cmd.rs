@@ -285,8 +285,8 @@ fn commit(
         println!("Generated message: {}", generated);
 
         if !auto && is_terminal() {
-            print!("Proceed? [Y/n] ");
-            io::stdout().flush().ok();
+            eprint!("Proceed? [Y/n] ");
+            io::stderr().flush().ok();
 
             let mut response = String::new();
             io::stdin().lock().read_line(&mut response).ok();
@@ -315,5 +315,5 @@ fn commit(
 
 fn is_terminal() -> bool {
     use std::io::IsTerminal;
-    io::stdin().is_terminal()
+    io::stdin().is_terminal() && io::stderr().is_terminal()
 }

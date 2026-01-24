@@ -16,7 +16,7 @@ set -uo pipefail
 unset WORKSPACE TEST_WS _ORIGINAL_PWD 2>/dev/null || true
 unset _TEST_PASSED _TEST_FAILED _TEST_CURRENT 2>/dev/null || true
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Check for --validate flag
@@ -52,7 +52,7 @@ convert_relative_paths() {
             dir="$(dirname -- "$word")"
             base="$(basename -- "$word")"
             if [[ -d "$dir" ]]; then
-                word="$(cd "$dir" && pwd)/$base"
+                word="$(cd "$dir" >/dev/null 2>&1 && pwd)/$base"
             fi
         fi
         result="${result:+$result }$word"
