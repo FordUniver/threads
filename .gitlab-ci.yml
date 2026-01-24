@@ -27,13 +27,16 @@ variables:
 
 build:
   stage: build
-  image: rust:${RUST_VERSION}
+  image: rust:${RUST_VERSION}-alpine
   script:
-    - cargo build --release
-    - ./target/release/threads --version
+    - apk add --no-cache musl-dev pkgconf openssl-dev openssl-libs-static cmake make
+    - rustup target add x86_64-unknown-linux-musl
+    - export OPENSSL_STATIC=1
+    - cargo build --release --target x86_64-unknown-linux-musl
+    - ./target/x86_64-unknown-linux-musl/release/threads --version
   artifacts:
     paths:
-      - target/release/threads
+      - target/x86_64-unknown-linux-musl/release/threads
     expire_in: 1 day
   cache:
     key: cargo-build-${CI_COMMIT_REF_SLUG}
@@ -106,8 +109,8 @@ test:integration:
     - apt-get update && apt-get install -y gawk jq git curl ca-certificates
     - curl -sL https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o /usr/local/bin/yq && chmod +x /usr/local/bin/yq
   script:
-    - ./target/release/threads --version
-    - DEBUG=1 ./test/run_tests.sh ./target/release/threads
+    - ./target/x86_64-unknown-linux-musl/release/threads --version
+    - DEBUG=1 ./test/run_tests.sh ./target/x86_64-unknown-linux-musl/release/threads
   artifacts:
     when: on_failure
     paths:
