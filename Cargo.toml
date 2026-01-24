@@ -1,9 +1,11 @@
 [package]
 name = "threads"
 version = "0.0.0"  # Actual version from git describe via build.rs
-edition = "2021"
+edition = "2024"
 description = "Thread management CLI for LLM workflows"
 license = "GPL-3.0-or-later"
+repository = "https://git.zib.de/tools/threads"
+authors = ["Christoph Spiegel"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
