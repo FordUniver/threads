@@ -65,10 +65,10 @@ impl Thread {
         thread.parse_frontmatter()?;
 
         // Extract ID from filename if not in frontmatter
-        if thread.frontmatter.id.is_empty() {
-            if let Some(id) = extract_id_from_path(path) {
-                thread.frontmatter.id = id;
-            }
+        if thread.frontmatter.id.is_empty()
+            && let Some(id) = extract_id_from_path(path)
+        {
+            thread.frontmatter.id = id;
         }
 
         Ok(thread)
@@ -379,13 +379,12 @@ pub fn get_todo_items(content: &str) -> Vec<(bool, String, String)> {
             if let Some(after_bracket) = rest
                 .strip_prefix("x] ")
                 .or_else(|| rest.strip_prefix(" ] "))
+                && let Some((text, hash_part)) = after_bracket.rsplit_once("<!--")
             {
-                if let Some((text, hash_part)) = after_bracket.rsplit_once("<!--") {
-                    let text = text.trim().to_string();
-                    let hash = hash_part.trim().trim_end_matches("-->").trim().to_string();
-                    if !hash.is_empty() {
-                        items.push((checked, text, hash));
-                    }
+                let text = text.trim().to_string();
+                let hash = hash_part.trim().trim_end_matches("-->").trim().to_string();
+                if !hash.is_empty() {
+                    items.push((checked, text, hash));
                 }
             }
         }

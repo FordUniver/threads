@@ -5,7 +5,7 @@ use clap_complete::engine::ArgValueCompleter;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::{env_bool, is_quiet, Config};
+use crate::config::{Config, env_bool, is_quiet};
 use crate::git;
 use crate::output::{self, OutputFormat};
 use crate::thread::Thread;

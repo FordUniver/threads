@@ -345,11 +345,11 @@ pub fn load_config(git_root: &Path, cwd: &Path) -> LoadedConfig {
     let mut sources = vec![ConfigSource::Default];
 
     // 1. User global config
-    if let Some(user_config_path) = user_config_path() {
-        if let Some(user_config) = load_manifest(&user_config_path) {
-            merge(&mut config, &user_config);
-            sources.push(ConfigSource::UserGlobal);
-        }
+    if let Some(user_config_path) = user_config_path()
+        && let Some(user_config) = load_manifest(&user_config_path)
+    {
+        merge(&mut config, &user_config);
+        sources.push(ConfigSource::UserGlobal);
     }
 
     // 2. Walk from git root to cwd, loading manifests at each level
@@ -601,18 +601,21 @@ mod tests {
             .collect();
 
         for (k, v) in vars {
+            // SAFETY: ENV_MUTEX serializes all env var access in tests.
+            // No concurrent readers exist while we hold the lock.
             match v {
-                Some(val) => std::env::set_var(k, val),
-                None => std::env::remove_var(k),
+                Some(val) => unsafe { std::env::set_var(k, val) },
+                None => unsafe { std::env::remove_var(k) },
             }
         }
 
         let result = f();
 
         for (k, original) in originals {
+            // SAFETY: Same as above - ENV_MUTEX held, no concurrent access.
             match original {
-                Some(val) => std::env::set_var(k, val),
-                None => std::env::remove_var(k),
+                Some(val) => unsafe { std::env::set_var(k, val) },
+                None => unsafe { std::env::remove_var(k) },
             }
         }
 

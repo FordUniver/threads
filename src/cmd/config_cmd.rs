@@ -12,8 +12,8 @@ use std::path::Path;
 use clap::{Args, Subcommand};
 
 use crate::config::{
-    self, load_config, template_manifest, user_config_path, Config, ConfigSource, CONFIG_DIR,
-    ENV_VARS, MANIFEST_FILE,
+    self, CONFIG_DIR, Config, ConfigSource, ENV_VARS, MANIFEST_FILE, load_config,
+    template_manifest, user_config_path,
 };
 
 #[derive(Args)]
@@ -145,13 +145,13 @@ fn run_init(cwd: &Path, args: InitArgs) -> Result<(), String> {
     println!("Created: {}", manifest_path.display());
 
     // Show user global config path as hint
-    if let Some(user_path) = user_config_path() {
-        if !user_path.exists() {
-            println!(
-                "Hint: User global config can be placed at: {}",
-                user_path.display()
-            );
-        }
+    if let Some(user_path) = user_config_path()
+        && !user_path.exists()
+    {
+        println!(
+            "Hint: User global config can be placed at: {}",
+            user_path.display()
+        );
     }
 
     Ok(())

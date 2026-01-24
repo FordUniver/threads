@@ -296,12 +296,12 @@ pub fn find_deleted_thread_files(repo: &Repository) -> Vec<std::path::PathBuf> {
 
     for entry in statuses.iter() {
         let status = entry.status();
-        if status.contains(Status::WT_DELETED) || status.contains(Status::INDEX_DELETED) {
-            if let Some(path) = entry.path() {
-                if path.contains(".threads/") && path.ends_with(".md") {
-                    deleted.push(workdir.join(path));
-                }
-            }
+        if (status.contains(Status::WT_DELETED) || status.contains(Status::INDEX_DELETED))
+            && let Some(path) = entry.path()
+            && path.contains(".threads/")
+            && path.ends_with(".md")
+        {
+            deleted.push(workdir.join(path));
         }
     }
 

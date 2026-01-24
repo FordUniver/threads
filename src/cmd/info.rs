@@ -8,10 +8,10 @@ use clap_complete::engine::ArgValueCompleter;
 use colored::Colorize;
 use git2::Repository;
 use serde::Serialize;
+use tabled::Table;
 use tabled::settings::object::Columns;
 use tabled::settings::style::HorizontalLine;
 use tabled::settings::{Alignment, Modify, Padding, Style};
-use tabled::Table;
 
 use crate::args::FormatArgs;
 use crate::git;
@@ -502,10 +502,11 @@ fn get_git_status(repo: &Repository, rel_path: &str) -> String {
     let status = git::file_status(repo, path);
 
     // If file has changes, try to get diff stats
-    if status != git::FileStatus::Clean && status != git::FileStatus::Unknown {
-        if let Some((ins, del)) = git::diff_stats(repo, path) {
-            return format!("{} (+{}/-{})", status, ins, del);
-        }
+    if status != git::FileStatus::Clean
+        && status != git::FileStatus::Unknown
+        && let Some((ins, del)) = git::diff_stats(repo, path)
+    {
+        return format!("{} (+{}/-{})", status, ins, del);
     }
 
     status.to_string()

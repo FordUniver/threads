@@ -112,17 +112,17 @@ fn find_threads_recursive(
 ) -> Result<(), String> {
     // Check for .threads directory here
     let threads_dir = dir.join(".threads");
-    if threads_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&threads_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "md") {
-                    // Skip archive subdirectory
-                    if !path.to_string_lossy().contains("/archive/") {
-                        // Canonicalize to resolve symlinks and avoid duplicates
-                        let canonical = path.canonicalize().unwrap_or(path);
-                        threads.push(canonical);
-                    }
+    if threads_dir.is_dir()
+        && let Ok(entries) = fs::read_dir(&threads_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md") {
+                // Skip archive subdirectory
+                if !path.to_string_lossy().contains("/archive/") {
+                    // Canonicalize to resolve symlinks and avoid duplicates
+                    let canonical = path.canonicalize().unwrap_or(path);
+                    threads.push(canonical);
                 }
             }
         }
@@ -191,17 +191,17 @@ pub fn find_threads_with_options(
 /// Paths are canonicalized to handle symlinks correctly.
 fn collect_threads_at_path(dir: &Path, threads: &mut Vec<PathBuf>) {
     let threads_dir = dir.join(".threads");
-    if threads_dir.is_dir() {
-        if let Ok(entries) = fs::read_dir(&threads_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "md") {
-                    // Skip archive subdirectory
-                    if !path.to_string_lossy().contains("/archive/") {
-                        // Canonicalize to resolve symlinks and avoid duplicates
-                        let canonical = path.canonicalize().unwrap_or(path);
-                        threads.push(canonical);
-                    }
+    if threads_dir.is_dir()
+        && let Ok(entries) = fs::read_dir(&threads_dir)
+    {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "md") {
+                // Skip archive subdirectory
+                if !path.to_string_lossy().contains("/archive/") {
+                    // Canonicalize to resolve symlinks and avoid duplicates
+                    let canonical = path.canonicalize().unwrap_or(path);
+                    threads.push(canonical);
                 }
             }
         }
@@ -218,10 +218,11 @@ fn find_threads_down(
     max_depth: Option<usize>,
 ) -> Result<(), String> {
     // Check depth limit (None or Some(0) means unlimited, matching Go's convention)
-    if let Some(max) = max_depth {
-        if max > 0 && current_depth >= max {
-            return Ok(());
-        }
+    if let Some(max) = max_depth
+        && max > 0
+        && current_depth >= max
+    {
+        return Ok(());
     }
 
     // Recurse into subdirectories
@@ -266,10 +267,11 @@ fn find_threads_up(
     max_depth: Option<usize>,
 ) -> Result<(), String> {
     // Check depth limit (None or Some(0) means unlimited, matching Go's convention)
-    if let Some(max) = max_depth {
-        if max > 0 && current_depth >= max {
-            return Ok(());
-        }
+    if let Some(max) = max_depth
+        && max > 0
+        && current_depth >= max
+    {
+        return Ok(());
     }
 
     let Some(parent) = dir.parent() else {
@@ -461,11 +463,7 @@ pub fn path_relative_to_git_root(git_root: &Path, path: &Path) -> String {
             .strip_prefix(&git_root_canonical)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
-        if rel.is_empty() {
-            ".".to_string()
-        } else {
-            rel
-        }
+        if rel.is_empty() { ".".to_string() } else { rel }
     } else {
         path.to_string_lossy().to_string()
     }

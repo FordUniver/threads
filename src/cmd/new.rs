@@ -6,7 +6,7 @@ use clap::Args;
 use serde::Serialize;
 
 use crate::args::FormatArgs;
-use crate::config::{env_bool, env_string, is_quiet, Config};
+use crate::config::{Config, env_bool, env_string, is_quiet};
 use crate::git;
 use crate::input;
 use crate::output::{self, OutputFormat};

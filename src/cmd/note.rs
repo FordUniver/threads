@@ -3,7 +3,7 @@ use std::path::Path;
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 
-use crate::config::{env_bool, is_quiet, Config};
+use crate::config::{Config, env_bool, is_quiet};
 use crate::git;
 use crate::output;
 use crate::thread::{self, Thread};

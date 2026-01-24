@@ -310,20 +310,23 @@ mod tests {
             .collect();
 
         // Set test values
+        // SAFETY: ENV_MUTEX serializes all env var access in tests.
+        // No concurrent readers exist while we hold the lock.
         for (k, v) in vars {
             match v {
-                Some(val) => std::env::set_var(k, val),
-                None => std::env::remove_var(k),
+                Some(val) => unsafe { std::env::set_var(k, val) },
+                None => unsafe { std::env::remove_var(k) },
             }
         }
 
         let result = f();
 
         // Restore original values
+        // SAFETY: Same as above - ENV_MUTEX held, no concurrent access.
         for (k, original) in originals {
             match original {
-                Some(val) => std::env::set_var(k, val),
-                None => std::env::remove_var(k),
+                Some(val) => unsafe { std::env::set_var(k, val) },
+                None => unsafe { std::env::remove_var(k) },
             }
         }
 

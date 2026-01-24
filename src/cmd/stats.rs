@@ -8,7 +8,7 @@ use tabled::settings::Style;
 use tabled::{Table, Tabled};
 
 use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
-use crate::config::{is_quiet, root_name, Config};
+use crate::config::{Config, is_quiet, root_name};
 use crate::output::{self, OutputFormat};
 use crate::thread::{self, Thread};
 use crate::workspace;

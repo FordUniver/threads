@@ -3,7 +3,7 @@ use std::process;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::env::CompleteEnv;
-use clap_complete::{generate, Shell};
+use clap_complete::{Shell, generate};
 
 mod args;
 mod cache;

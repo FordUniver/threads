@@ -12,7 +12,7 @@ use serde::Serialize;
 use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
 use crate::config::Config;
 use crate::output::OutputFormat;
-use crate::thread::{self, extract_id_from_path, Frontmatter};
+use crate::thread::{self, Frontmatter, extract_id_from_path};
 use crate::workspace;
 
 // ============================================================================
@@ -662,12 +662,11 @@ fn validate_all(
         issues.extend(fm_result.issues);
 
         // Skip closed threads unless include_closed is set
-        if !include_closed {
-            if let Some(ref status) = fm_result.status {
-                if thread::is_closed(status) {
-                    continue;
-                }
-            }
+        if !include_closed
+            && let Some(ref status) = fm_result.status
+            && thread::is_closed(status)
+        {
+            continue;
         }
 
         // Check for duplicate IDs (E007)
@@ -795,18 +794,17 @@ fn validate_frontmatter(content: &str, path: &Path, config: &Config) -> Frontmat
     }
 
     // E005: Check ID matches filename
-    if !fm.id.is_empty() {
-        if let Some(filename_id) = extract_id_from_path(path) {
-            if fm.id != filename_id {
-                issues.push(Issue::error(
-                    "E005",
-                    format!(
-                        "ID mismatch: frontmatter has '{}', filename has '{}'",
-                        fm.id, filename_id
-                    ),
-                ));
-            }
-        }
+    if !fm.id.is_empty()
+        && let Some(filename_id) = extract_id_from_path(path)
+        && fm.id != filename_id
+    {
+        issues.push(Issue::error(
+            "E005",
+            format!(
+                "ID mismatch: frontmatter has '{}', filename has '{}'",
+                fm.id, filename_id
+            ),
+        ));
     }
 
     // E006: Validate status using config status lists
@@ -1087,12 +1085,11 @@ fn run_fix(
         };
 
         // Filter by status unless include_closed
-        if !include_closed {
-            if let Some(status) = extract_status_from_content(&content) {
-                if thread::is_closed(&status) {
-                    continue;
-                }
-            }
+        if !include_closed
+            && let Some(status) = extract_status_from_content(&content)
+            && thread::is_closed(&status)
+        {
+            continue;
         }
 
         let mut current_content = content.clone();
@@ -1311,10 +1308,10 @@ fn yaml_value_needs_quoting(value: &str) -> bool {
     let special_starts = [
         '-', '?', ':', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`',
     ];
-    if let Some(first) = value.chars().next() {
-        if special_starts.contains(&first) {
-            return true;
-        }
+    if let Some(first) = value.chars().next()
+        && special_starts.contains(&first)
+    {
+        return true;
     }
 
     // Contains leading/trailing whitespace that would be trimmed
@@ -1368,16 +1365,16 @@ fn extract_status_from_content(content: &str) -> Option<String> {
 
     // Look for status line
     for line in yaml_content.lines() {
-        if let Some((key, value)) = parse_yaml_line(line) {
-            if key == "status" {
-                // Remove quotes if present
-                let status = value
-                    .trim_start_matches('"')
-                    .trim_end_matches('"')
-                    .trim_start_matches('\'')
-                    .trim_end_matches('\'');
-                return Some(status.to_string());
-            }
+        if let Some((key, value)) = parse_yaml_line(line)
+            && key == "status"
+        {
+            // Remove quotes if present
+            let status = value
+                .trim_start_matches('"')
+                .trim_end_matches('"')
+                .trim_start_matches('\'')
+                .trim_end_matches('\'');
+            return Some(status.to_string());
         }
     }
 
@@ -1604,11 +1601,11 @@ fn get_blame_timestamp(path: &Path, ws: &Path, line_num: usize) -> Option<String
 
     // Parse porcelain format for committer-time
     for line in stdout.lines() {
-        if let Some(ts_str) = line.strip_prefix("committer-time ") {
-            if let Ok(ts) = ts_str.parse::<i64>() {
-                let dt = chrono::DateTime::from_timestamp(ts, 0)?;
-                return Some(dt.format("%Y-%m-%d %H:%M:%S").to_string());
-            }
+        if let Some(ts_str) = line.strip_prefix("committer-time ")
+            && let Ok(ts) = ts_str.parse::<i64>()
+        {
+            let dt = chrono::DateTime::from_timestamp(ts, 0)?;
+            return Some(dt.format("%Y-%m-%d %H:%M:%S").to_string());
         }
     }
 
