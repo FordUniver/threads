@@ -524,7 +524,10 @@ fn output_plain(
 
     println!("SCORE | ID | STATUS | PATH | TITLE");
     for r in results {
-        println!("{} | {} | {} | {} | {}", r.score, r.id, r.status, r.path, r.title);
+        println!(
+            "{} | {} | {} | {} | {}",
+            r.score, r.id, r.status, r.path, r.title
+        );
     }
 
     Ok(())

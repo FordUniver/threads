@@ -46,7 +46,11 @@ fn boundary_bonus(prev: Option<char>, current: char, idx: usize) -> i64 {
 fn compute_match_scores(haystack_chars: &[char]) -> Vec<i64> {
     let mut scores = Vec::with_capacity(haystack_chars.len());
     for (idx, &c) in haystack_chars.iter().enumerate() {
-        let prev = if idx == 0 { None } else { Some(haystack_chars[idx - 1]) };
+        let prev = if idx == 0 {
+            None
+        } else {
+            Some(haystack_chars[idx - 1])
+        };
         let b = boundary_bonus(prev, c, idx);
         scores.push(SCORE_MATCH + b);
     }

@@ -88,7 +88,7 @@ pub struct DirectionArgs {
 impl DirectionArgs {
     /// Convert to FindOptions for workspace search.
     ///
-     /// Priority: CLI flags > THREADS_DOWN/THREADS_UP env > default (local only)
+    /// Priority: CLI flags > THREADS_DOWN/THREADS_UP env > default (local only)
     pub fn to_find_options(&self) -> FindOptions {
         let mut options = FindOptions::new();
 
