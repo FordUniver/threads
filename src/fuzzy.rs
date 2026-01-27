@@ -92,9 +92,8 @@ pub fn score(needle: &str, haystack: &str) -> Option<i64> {
         }
     }
 
-    for i in 1..needle_folded.len() {
+    for &want in needle_folded.iter().skip(1) {
         curr.fill(NEG_INF);
-        let want = needle_folded[i];
 
         // best_prefix(j) = max_{k<j} prev[k] + PENALTY_GAP*(k+1)
         let mut best_prefix = NEG_INF;

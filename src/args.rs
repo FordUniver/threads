@@ -271,7 +271,6 @@ mod tests {
         let args = DirectionArgs {
             down: Some(Some(2)),
             up: Some(None),
-            ..Default::default()
         };
         assert_eq!(args.description(), "(down 2, up)");
         assert!(args.is_searching());
