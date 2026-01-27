@@ -120,15 +120,15 @@ test_list_non_recursive_default() {
     output=$(cd "$TEST_WS" && $THREADS_BIN list 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show workspace-level thread"
-    assert_not_contains "$output" "def456" "should not show nested thread without -r"
+    assert_not_contains "$output" "def456" "should not show nested thread without --down"
 
     teardown_test_workspace
     end_test
 }
 
-# Test: list -r includes nested threads
+# Test: list --down includes nested threads
 test_list_recursive() {
-    begin_test "list -r includes nested threads"
+    begin_test "list --down includes nested threads"
     setup_nested_workspace
 
     create_thread "abc123" "Workspace Thread" "active"
@@ -136,13 +136,13 @@ test_list_recursive() {
     create_thread_at_project "ghi789" "Project Thread" "cat1" "proj1" "active"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list -r 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show workspace thread"
-    assert_contains "$output" "def456" "should show category thread with -r"
+    assert_contains "$output" "def456" "should show category thread with --down"
     # Note: shell impl has bug showing "????" for project thread IDs
     # Check for thread name instead
-    assert_contains "$output" "Project Thread" "should show project thread with -r"
+    assert_contains "$output" "Project Thread" "should show project thread with --down"
 
     teardown_test_workspace
     end_test
@@ -550,10 +550,10 @@ test_list_status_and_recursive_combined() {
     create_thread_at_category "def456" "Category Resolved" "cat1" "resolved"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list --status=resolved -r 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --status=resolved --down 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show workspace-level resolved"
-    assert_contains "$output" "def456" "should show category-level resolved with -r"
+    assert_contains "$output" "def456" "should show category-level resolved with --down"
 
     teardown_test_workspace
     end_test

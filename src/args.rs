@@ -70,19 +70,15 @@ impl FormatArgs {
 // DirectionArgs - Search direction flags
 // ============================================================================
 
-/// Common direction flags for recursive/hierarchical thread search.
+/// Common direction flags for hierarchical thread search.
 ///
-/// Provides --down/-d/-r and --up/-u flags for controlling search scope.
+/// Provides --down/-d and --up/-u flags for controlling search scope.
 /// Use `to_find_options()` to convert to FindOptions for workspace search.
 #[derive(Args, Clone, Debug, Default)]
 pub struct DirectionArgs {
     /// Search subdirectories (unlimited depth, or specify N levels)
     #[arg(short = 'd', long = "down", value_name = "N", global = true)]
     pub down: Option<Option<usize>>,
-
-    /// Alias for --down (backward compatibility)
-    #[arg(short = 'r', long, conflicts_with = "down", global = true)]
-    pub recursive: bool,
 
     /// Search parent directories (up to git root, or specify N levels)
     #[arg(short = 'u', long = "up", value_name = "N", global = true)]
@@ -92,15 +88,13 @@ pub struct DirectionArgs {
 impl DirectionArgs {
     /// Convert to FindOptions for workspace search.
     ///
-    /// Priority: CLI flags > THREADS_DOWN/THREADS_UP env > default (local only)
+     /// Priority: CLI flags > THREADS_DOWN/THREADS_UP env > default (local only)
     pub fn to_find_options(&self) -> FindOptions {
         let mut options = FindOptions::new();
 
-        // --down/-d takes priority, then -r as alias for unlimited down, then env var
+        // --down/-d takes priority, then env var
         let down_opt = if self.down.is_some() {
             self.down
-        } else if self.recursive {
-            Some(None) // unlimited depth
         } else {
             // Check THREADS_DOWN env var
             Self::parse_depth_env("THREADS_DOWN")
@@ -145,7 +139,6 @@ impl DirectionArgs {
     /// Check if any direction search is active (from flags or env vars).
     pub fn is_searching(&self) -> bool {
         self.down.is_some()
-            || self.recursive
             || self.up.is_some()
             || Self::parse_depth_env("THREADS_DOWN").is_some()
             || Self::parse_depth_env("THREADS_UP").is_some()
@@ -158,11 +151,9 @@ impl DirectionArgs {
     pub fn description(&self) -> String {
         let mut parts = Vec::new();
 
-        // Resolve down option (--down/-d takes priority over -r, then env)
+        // Resolve down option (--down/-d takes priority, then env)
         let down_opt = if self.down.is_some() {
             self.down
-        } else if self.recursive {
-            Some(None)
         } else {
             Self::parse_depth_env("THREADS_DOWN")
         };
@@ -170,7 +161,7 @@ impl DirectionArgs {
         if let Some(depth) = down_opt {
             match depth {
                 Some(n) => parts.push(format!("down {}", n)),
-                None => parts.push("recursive".to_string()),
+                None => parts.push("down".to_string()),
             }
         }
 
@@ -244,14 +235,6 @@ mod tests {
         assert_eq!(args.description(), "");
         assert!(!args.is_searching());
 
-        // Recursive only
-        let args = DirectionArgs {
-            recursive: true,
-            ..Default::default()
-        };
-        assert_eq!(args.description(), "(recursive)");
-        assert!(args.is_searching());
-
         // Down with limit
         let args = DirectionArgs {
             down: Some(Some(2)),
@@ -265,7 +248,7 @@ mod tests {
             down: Some(None),
             ..Default::default()
         };
-        assert_eq!(args.description(), "(recursive)");
+        assert_eq!(args.description(), "(down)");
         assert!(args.is_searching());
 
         // Up only
@@ -293,10 +276,9 @@ mod tests {
         assert_eq!(args.description(), "(down 2, up)");
         assert!(args.is_searching());
 
-        // Down takes priority over recursive
+        // Down with limit still works
         let args = DirectionArgs {
             down: Some(Some(1)),
-            recursive: true, // Should be ignored
             ..Default::default()
         };
         assert_eq!(args.description(), "(down 1)");
@@ -332,15 +314,6 @@ mod tests {
 
     #[test]
     fn test_direction_to_find_options() {
-        // Recursive flag sets unlimited down
-        let args = DirectionArgs {
-            recursive: true,
-            ..Default::default()
-        };
-        let opts = args.to_find_options();
-        assert_eq!(opts.down, Some(None)); // Unlimited
-        assert_eq!(opts.up, None);
-
         // Down with limit
         let args = DirectionArgs {
             down: Some(Some(3)),
@@ -357,13 +330,12 @@ mod tests {
         let opts = args.to_find_options();
         assert_eq!(opts.up, Some(Some(2)));
 
-        // Down takes priority over recursive
+        // Down unlimited
         let args = DirectionArgs {
-            down: Some(Some(1)),
-            recursive: true,
+            down: Some(None),
             ..Default::default()
         };
         let opts = args.to_find_options();
-        assert_eq!(opts.down, Some(Some(1))); // down wins, not unlimited
+        assert_eq!(opts.down, Some(None));
     }
 }

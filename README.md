@@ -24,6 +24,9 @@ threads new "Add user authentication"
 # List threads at current level
 threads list
 
+# Search thread content (fuzzy)
+threads search "jwt validation"
+
 # Add a todo item
 threads todo abc123 add "Implement JWT validation"
 
@@ -88,6 +91,7 @@ Nested git repositories are respected as boundaries: the tool won't traverse int
 | Command | Description |
 |---------|-------------|
 | `list [path]` | List threads (aliases: `ls`) |
+| `search [path] <query>` | Fuzzy search thread content |
 | `new [path] <title>` | Create a new thread |
 | `move <id> <path>` | Move thread to new location |
 | `commit [ids...]` | Commit thread changes |
@@ -113,7 +117,7 @@ Nested git repositories are respected as boundaries: the tool won't traverse int
 
 ### Directional Search
 
-The `list` and `stats` commands support directional search:
+The `list`, `search`, and `stats` commands support directional search:
 
 ```bash
 # Search subdirectories (N levels, 0=unlimited)
@@ -125,7 +129,7 @@ threads list --up 1
 threads list -u 0
 
 # Recursive alias (unlimited depth down)
-threads list -r
+threads list --down
 ```
 
 ### Status Values

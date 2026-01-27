@@ -47,9 +47,9 @@ test_stats_empty_workspace() {
     end_test
 }
 
-# Test: stats -r includes nested threads
+# Test: stats --down includes nested threads
 test_stats_recursive() {
-    begin_test "stats -r includes nested threads"
+    begin_test "stats --down includes nested threads"
     setup_nested_workspace
 
     # Create threads at different levels
@@ -58,7 +58,7 @@ test_stats_recursive() {
     create_thread_at_project "ccc001" "Project Thread" "cat1" "proj1" "idea"
 
     local output
-    output=$(capture_stdout $THREADS_BIN stats -r)
+    output=$(capture_stdout $THREADS_BIN stats --down)
 
     # Should include all 3 threads in total
     assert_contains "$output" "active" "should include active"

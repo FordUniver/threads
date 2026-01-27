@@ -320,12 +320,12 @@ compare_json_outputs() {
 
 # List commands (text output)
 compare_outputs "list (local level only)" list
-compare_outputs "list -r (recursive)" list -r
+compare_outputs "list --down (recursive)" list --down
 compare_outputs "list --down=1" list --down=1
 
 # List commands (JSON - compare thread IDs only)
 compare_json_outputs "list --json" list --json
-compare_json_outputs "list -r --json" list -r --json
+compare_json_outputs "list --down --json" list --down --json
 
 # Status filter
 compare_outputs "list --status=blocked" list --status=blocked

@@ -9,6 +9,7 @@ mod args;
 mod cache;
 mod cmd;
 mod config;
+mod fuzzy;
 mod git;
 mod input;
 mod output;
@@ -32,6 +33,9 @@ enum Commands {
     /// List threads
     #[command(alias = "ls")]
     List(cmd::list::ListArgs),
+
+    /// Search thread content (fuzzy)
+    Search(cmd::search::SearchArgs),
 
     /// Create a new thread
     New(cmd::new::NewArgs),
@@ -162,6 +166,7 @@ fn main() {
 
     let result = match cli.command {
         Commands::List(args) => cmd::list::run(args, &ws, &loaded_config.config),
+        Commands::Search(args) => cmd::search::run(args, &ws, &loaded_config.config),
         Commands::New(args) => cmd::new::run(args, &ws, &loaded_config.config),
         Commands::Move(args) => cmd::move_cmd::run(args, &ws, &loaded_config.config),
         Commands::Validate(args) => cmd::validate::run(args, &ws, &loaded_config.config),

@@ -13,6 +13,7 @@ pub mod read;
 pub mod remove;
 pub mod reopen;
 pub mod resolve;
+pub mod search;
 pub mod stats;
 pub mod status;
 pub mod todo;

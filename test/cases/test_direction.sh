@@ -296,68 +296,36 @@ test_depth_exceeds_structure() {
 }
 
 # ====================================================================================
-# Backward compatibility tests
+# --down convenience
 # ====================================================================================
 
-# Test: -r flag still works
-test_list_r_flag_works() {
-    begin_test "-r flag still works"
+# Test: --down with no value means unlimited
+test_list_down_unlimited() {
+    begin_test "--down means unlimited"
     setup_nested_workspace
 
     create_thread "abc123" "Root Thread" "active"
     create_thread_at_category "def456" "Category Thread" "cat1" "active"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list -r 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show root"
-    assert_contains "$output" "def456" "should show nested with -r"
+    assert_contains "$output" "def456" "should show nested with --down"
 
     teardown_test_workspace
     end_test
 }
 
-# Test: -r and --down produce same results
-test_list_r_equals_down() {
-    begin_test "-r and --down produce equivalent results"
-    setup_nested_workspace
-
-    create_thread "abc123" "Root Thread" "active"
-    create_thread_at_category "def456" "Category Thread" "cat1" "active"
-    create_thread_at_project "ghi789" "Project Thread" "cat1" "proj1" "active"
-
-    local r_output down_output
-
-    r_output=$(cd "$TEST_WS" && $THREADS_BIN list -r 2>/dev/null)
-    # Use --down=0 for unlimited depth (equivalent to -r)
-    down_output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
-
-    # Both should contain the same threads
-    assert_contains "$r_output" "abc123" "-r should show root"
-    assert_contains "$down_output" "abc123" "--down=0 should show root"
-    assert_contains "$r_output" "def456" "-r should show category"
-    assert_contains "$down_output" "def456" "--down=0 should show category"
-
-    teardown_test_workspace
-    end_test
-}
-
-# Test: behavior when both -r and --down used
-test_list_r_with_down_conflict() {
-    begin_test "-r with --down behavior"
+test_list_r_is_rejected() {
+    begin_test "-r is rejected"
     setup_nested_workspace
 
     create_thread "abc123" "Root Thread" "active"
     create_thread_at_category "def456" "Category Thread" "cat1" "active"
 
-    # Both flags together - should work (may be redundant)
-    local output
-    # Use --down=0 for unlimited depth
-    output=$(cd "$TEST_WS" && $THREADS_BIN list -r --down=0 2>/dev/null) || \
-        output=$(cd "$TEST_WS" && $THREADS_BIN list --down=0 2>/dev/null)
-
-    # Should show nested threads
-    assert_contains "$output" "def456" "should show nested thread"
+    # -r should be unknown now
+    assert_exit_code 1 "$THREADS_BIN" list -r
 
     teardown_test_workspace
     end_test
@@ -474,10 +442,8 @@ test_stats_down_depth_limit
 test_stats_up_depth_limit
 test_depth_exceeds_structure
 
-# Backward compatibility tests
-test_list_r_flag_works
-test_list_r_equals_down
-test_list_r_with_down_conflict
+# -r removal tests
+test_list_r_is_rejected
 
 # Combined direction flags
 test_list_down_and_up_together

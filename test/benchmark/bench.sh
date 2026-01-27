@@ -93,7 +93,7 @@ echo "Running benchmarks..."
 echo
 
 # Operations to benchmark
-OPERATIONS=("list -r" "validate -r" "read" "path")
+OPERATIONS=("list --down" "validate --down" "read" "path")
 
 for op in "${OPERATIONS[@]}"; do
     echo "=== $op ==="
@@ -101,11 +101,11 @@ for op in "${OPERATIONS[@]}"; do
     # Build args
     declare -a op_args
     case "$op" in
-        "list -r")
-            op_args=(list -r)
+        "list --down")
+            op_args=(list --down)
             ;;
-        "validate -r")
-            op_args=(validate -r)
+        "validate --down")
+            op_args=(validate --down)
             ;;
         "read")
             thread_id=$(get_random_thread_id)
@@ -140,5 +140,5 @@ echo "======================================================"
 echo "Results saved to: $CSV_FILE"
 echo
 echo "Notes:"
-echo "  - 'list -r' and 'validate -r' scan all $WORKSPACE_SIZE threads"
+echo "  - 'list --down' and 'validate --down' scan all $WORKSPACE_SIZE threads"
 echo "  - 'read' and 'path' operate on a single random thread"

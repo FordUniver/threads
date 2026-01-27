@@ -162,7 +162,7 @@ test_list_shows_gitroot_relative() {
     create_thread_at_category "abc123" "Cat1 Thread" "cat1" "active"
 
     local output
-    output=$(cd "$TEST_WS" && $THREADS_BIN list -r 2>/dev/null)
+    output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
 
     # Should show path relative to git root (cat1/ prefix)
     assert_contains "$output" "cat1" "should show category path"
@@ -202,8 +202,8 @@ test_validate_paths_consistent() {
 
     local list_output validate_output
 
-    list_output=$(cd "$TEST_WS" && $THREADS_BIN list -r 2>/dev/null)
-    validate_output=$(cd "$TEST_WS" && $THREADS_BIN validate -r 2>/dev/null)
+    list_output=$(cd "$TEST_WS" && $THREADS_BIN list --down 2>/dev/null)
+    validate_output=$(cd "$TEST_WS" && $THREADS_BIN validate --down 2>/dev/null)
 
     # Both should reference cat1 path
     assert_matches "cat1|abc123" "$list_output" "list should show thread"

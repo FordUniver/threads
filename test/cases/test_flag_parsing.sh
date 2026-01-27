@@ -281,8 +281,8 @@ test_flag_f_space_json() {
 # Boolean flags
 # ==============================================================================
 
-test_flag_recursive_boolean() {
-    begin_test "-r (boolean recursive flag)"
+test_flag_down_without_value() {
+    begin_test "--down (no value)"
     setup_nested_workspace
 
     create_thread "abc123" "Root Thread" "active"
@@ -290,16 +290,25 @@ test_flag_recursive_boolean() {
     create_thread_at_project "ghi789" "Proj Thread" "cat1" "proj1" "active"
 
     local output
-    output=$($THREADS_BIN list -r 2>/dev/null)
+    output=$($THREADS_BIN list --down 2>/dev/null)
 
     assert_contains "$output" "abc123" "should show root thread"
-    assert_contains "$output" "def456" "should show cat thread with -r"
-    assert_contains "$output" "ghi789" "should show proj thread with -r"
+    assert_contains "$output" "def456" "should show cat thread with --down"
+    assert_contains "$output" "ghi789" "should show proj thread with --down"
 
     teardown_test_workspace
     end_test
 }
 
+test_flag_r_is_rejected() {
+    begin_test "-r is rejected"
+    setup_test_workspace
+
+    assert_exit_code 1 "$THREADS_BIN" list -r
+
+    teardown_test_workspace
+    end_test
+}
 test_flag_include_closed_boolean() {
     begin_test "--include-closed (boolean flag)"
     setup_test_workspace
@@ -434,7 +443,8 @@ test_flag_s_space_value
 test_flag_format_equals_json
 test_flag_format_space_json
 test_flag_f_space_json
-test_flag_recursive_boolean
+test_flag_down_without_value
+test_flag_r_is_rejected
 test_flag_include_closed_boolean
 test_flag_json_boolean
 test_flags_combined_multiple

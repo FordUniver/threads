@@ -371,7 +371,7 @@ fn output_pretty(
         if !direction.is_searching() && !is_quiet(config) {
             println!(
                 "{}",
-                "Hint: use -r to include nested directories, -u to search parents".dimmed()
+                "Hint: use --down to include nested directories, --up to search parents".dimmed()
             );
         }
         return Ok(());
@@ -455,7 +455,7 @@ fn output_plain(
 
     if results.is_empty() {
         if !direction.is_searching() && !is_quiet(config) {
-            println!("Hint: use -r to include nested directories, -u to search parents");
+            println!("Hint: use --down to include nested directories, --up to search parents");
         }
         return Ok(());
     }
