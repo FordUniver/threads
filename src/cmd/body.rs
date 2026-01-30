@@ -34,15 +34,26 @@ pub struct BodyArgs {
 }
 
 pub fn run(args: BodyArgs, ws: &Path, config: &Config) -> Result<(), String> {
-    // Default to set mode
-    let set_mode = args.set || !args.append;
-
-    // Read content from stdin
     let content = input::read_stdin(false);
 
+    // Read mode: no flags and no stdin content
+    if !args.set && !args.append && content.is_empty() {
+        let file = workspace::find_by_ref(ws, &args.id)?;
+        let t = Thread::parse(&file)?;
+        let body = thread::extract_section(&t.content, "Body");
+        if !body.is_empty() {
+            print!("{}", body);
+        }
+        return Ok(());
+    }
+
+    // Write mode: require content
     if content.is_empty() {
         return Err("no content provided (use stdin)".to_string());
     }
+
+    // Default to set mode for writes
+    let set_mode = args.set || !args.append;
 
     let file = workspace::find_by_ref(ws, &args.id)?;
 

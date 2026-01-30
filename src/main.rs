@@ -72,7 +72,7 @@ enum Commands {
     /// Update thread title/desc
     Update(cmd::update::UpdateArgs),
 
-    /// Edit Body section (stdin for content)
+    /// Read or edit Body section
     Body(cmd::body::BodyArgs),
 
     /// Manage notes
