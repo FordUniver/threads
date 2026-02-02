@@ -164,17 +164,25 @@ fn output_pretty(
         String::new()
     };
 
+    // Title line: truncate if needed (title + status + git info on one line)
+    let inner_width = term_width.saturating_sub(4);
+    let status_git_len = strip_ansi_width(&status_styled) + strip_ansi_width(&git_info) + 2; // "  " separator
+    let title_max = inner_width.saturating_sub(status_git_len);
+    let title_truncated = output::truncate_back(&title, title_max);
+
     let title_line = format!(
         "{}  {}{}",
-        title.cyan().bold(),
+        title_truncated.cyan().bold(),
         status_styled,
         git_info.dimmed()
     );
 
+    // Description: wrap to fit box width
     let header = if thread.frontmatter.desc.is_empty() {
         title_line
     } else {
-        format!("{}\n{}", title_line, thread.frontmatter.desc)
+        let desc_wrapped = crate::wrap::wrap(&thread.frontmatter.desc, inner_width);
+        format!("{}\n{}", title_line, desc_wrapped.join("\n"))
     };
 
     // === Extract sections ===
@@ -199,9 +207,14 @@ fn output_pretty(
         sections.push(format_log(&log));
     }
 
-    // Footer: history + path
-    let history_content = format_history(&git_history, term_width.saturating_sub(4));
-    sections.push(format!("{}\n\n{}", history_content, rel_path.dimmed()));
+    // Footer: history + path (truncate path from front if too long)
+    let history_content = format_history(&git_history, inner_width);
+    let path_truncated = output::truncate_front(&rel_path, inner_width);
+    sections.push(format!(
+        "{}\n\n{}",
+        history_content,
+        path_truncated.dimmed()
+    ));
 
     // === Render box with sections ===
     print_boxed_sections(&sections, term_width, debug);
@@ -255,45 +268,126 @@ fn print_boxed_sections(sections: &[String], max_width: usize, debug: bool) {
     println!("╰{}╯", "─".repeat(max_width - 2));
 }
 
-/// Wrap a line to fit within max_width (respecting ANSI codes)
+/// Wrap a line to fit within max_width (respecting ANSI codes).
+/// Detects common prefixes (bullets, checkboxes, timestamps) and indents continuation lines.
 fn wrap_line(line: &str, max_width: usize) -> Vec<String> {
+    use crate::wrap;
+
     let visible_width = strip_ansi_width(line);
     if visible_width <= max_width {
         return vec![line.to_string()];
     }
 
-    // Simple truncation with ellipsis for now
-    // (Full word-wrapping with ANSI is complex)
-    let mut result = String::new();
+    // Detect prefix patterns and split into (prefix, content)
+    // These patterns match the formatted output from format_notes/todos/log
+    if let Some((prefix, content)) = detect_prefix(line) {
+        return wrap::wrap_with_prefix(&prefix, &content, max_width);
+    }
+
+    // No recognized prefix - wrap with no indent
+    wrap::wrap(line, max_width)
+}
+
+/// Detect common prefix patterns in formatted lines.
+/// Returns (prefix_with_styling, remaining_content) if a pattern is found.
+fn detect_prefix(line: &str) -> Option<(String, String)> {
+    // Strip ANSI to find the visible pattern, but preserve codes in prefix
+    let stripped = strip_ansi_to_string(line);
+
+    // Notes: "• " (bullet + space)
+    if stripped.starts_with("• ") {
+        return split_at_visible_pos(line, 2);
+    }
+
+    // Todos: "☐ " or "☑ " (checkbox + space)
+    if stripped.starts_with("☐ ") || stripped.starts_with("☑ ") {
+        return split_at_visible_pos(line, 2);
+    }
+
+    // Log with timestamp: right-aligned to 4 chars + space = 5 chars total
+    // Examples: " 39m ", "  1h ", " now ", "12mo "
+    // Format from format_log: "{:>4} content" where timestamp is cyan-styled
+    if stripped.len() >= 5 {
+        let first_five = &stripped[..5];
+        let trimmed = first_five.trim_start();
+        // Check if trimmed part (without leading spaces) looks like timestamp + space
+        if trimmed.ends_with(' ') {
+            let ts_part = trimmed.trim_end();
+            if ts_part.ends_with('m')
+                || ts_part.ends_with('h')
+                || ts_part.ends_with('d')
+                || ts_part.ends_with('w')
+                || ts_part.ends_with('y')
+                || ts_part == "now"
+                || ts_part.ends_with("mo")
+            {
+                // Prefix is 5 visible chars (4 for timestamp + 1 space)
+                return split_at_visible_pos(line, 5);
+            }
+        }
+    }
+
+    // Log without timestamp: "   · " (3 spaces + dimmed dot + space = 5 chars)
+    if stripped.starts_with("   · ") {
+        return split_at_visible_pos(line, 5);
+    }
+
+    None
+}
+
+/// Split a string at a visible character position, preserving ANSI codes in both parts.
+fn split_at_visible_pos(line: &str, visible_pos: usize) -> Option<(String, String)> {
+    let mut prefix = String::new();
     let mut visible_count = 0;
     let mut in_escape = false;
+    let mut split_byte_idx = 0;
 
-    for c in line.chars() {
+    for (byte_idx, c) in line.char_indices() {
+        if visible_count >= visible_pos {
+            split_byte_idx = byte_idx;
+            break;
+        }
+
+        prefix.push(c);
+
         if c == '\x1b' {
             in_escape = true;
-            result.push(c);
         } else if in_escape {
-            result.push(c);
             if c == 'm' {
                 in_escape = false;
             }
         } else {
-            let char_width = c.width().unwrap_or(0);
-            if visible_count + char_width > max_width.saturating_sub(1) {
-                result.push('…');
-                break;
+            visible_count += c.width().unwrap_or(0);
+        }
+
+        split_byte_idx = byte_idx + c.len_utf8();
+    }
+
+    if split_byte_idx < line.len() {
+        Some((prefix, line[split_byte_idx..].to_string()))
+    } else {
+        None
+    }
+}
+
+/// Strip ANSI codes and return the visible string
+fn strip_ansi_to_string(s: &str) -> String {
+    let mut visible = String::new();
+    let mut in_escape = false;
+
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' {
+                in_escape = false;
             }
-            visible_count += char_width;
-            result.push(c);
+        } else {
+            visible.push(c);
         }
     }
 
-    // Reset any open ANSI codes
-    if result.contains("\x1b[") {
-        result.push_str("\x1b[0m");
-    }
-
-    vec![result]
+    visible
 }
 
 /// Calculate visible width of a string, ignoring ANSI escape codes
@@ -325,21 +419,29 @@ fn format_body(body: &str) -> String {
     String::from_utf8_lossy(&buf).trim().to_string()
 }
 
-/// Format notes section with dimmed hashes
+/// Format notes section with bullet points (like todos, but without checkboxes)
 fn format_notes(notes: &str) -> String {
-    // Strip hash comments before rendering
     let hash_re = Regex::new(r"\s*<!--\s*[a-f0-9]{4}\s*-->").unwrap();
-    let cleaned: String = notes
-        .lines()
-        .map(|line| hash_re.replace(line, "").to_string())
-        .collect::<Vec<_>>()
-        .join("\n");
 
-    // Render markdown
-    let skin = MadSkin::default();
-    let mut buf = Vec::new();
-    skin.write_text_on(&mut buf, &cleaned).ok();
-    String::from_utf8_lossy(&buf).trim().to_string()
+    notes
+        .lines()
+        .map(|line| {
+            // Strip hash comments
+            let line = hash_re.replace(line, "").to_string();
+
+            // Replace "- " bullets with nice bullet character
+            if let Some(content) = line.strip_prefix("- ") {
+                let rendered = render_inline_markdown(content.trim());
+                format!("{} {}", "•".cyan(), rendered)
+            } else if line.trim().is_empty() {
+                String::new()
+            } else {
+                render_inline_markdown(&line)
+            }
+        })
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// Format todo section with colored checkboxes and markdown
@@ -438,10 +540,17 @@ fn format_log(log: &str) -> String {
                 return Some(format!("{:>4} {}", time.cyan(), rendered));
             }
 
+            // Plain bullet without timestamp: format with placeholder to align
+            if let Some(content) = line.strip_prefix("- ") {
+                let rendered = render_inline_markdown(content.trim());
+                return Some(format!("   {} {}", "·".dimmed(), rendered));
+            }
+
             // Skip empty lines
             if line.trim().is_empty() {
                 None
             } else {
+                // Other content (rare) - render as-is
                 Some(render_inline_markdown(line))
             }
         })

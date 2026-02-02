@@ -78,8 +78,46 @@ test_body_multiline_stdin() {
     end_test
 }
 
+# Test: empty pipe should fail (not silently enter read mode)
+test_body_empty_pipe_fails() {
+    begin_test "body with empty pipe should fail"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    echo "Existing content" | $THREADS_BIN body abc123 --set >/dev/null 2>&1
+
+    # Pipe empty content - should error, not silently succeed
+    local exit_code
+    printf '' | $THREADS_BIN body abc123 >/dev/null 2>&1
+    exit_code=$?
+
+    assert_eq "1" "$exit_code" "empty pipe should return exit code 1"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: empty pipe with --set flag should also fail
+test_body_empty_pipe_with_flag_fails() {
+    begin_test "body --set with empty pipe should fail"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+
+    local exit_code
+    printf '' | $THREADS_BIN body abc123 --set >/dev/null 2>&1
+    exit_code=$?
+
+    assert_eq "1" "$exit_code" "empty pipe with --set should fail"
+
+    teardown_test_workspace
+    end_test
+}
+
 # Run all tests
 test_body_set_replaces
 test_body_append_adds
 test_body_stdin
 test_body_multiline_stdin
+test_body_empty_pipe_fails
+test_body_empty_pipe_with_flag_fails

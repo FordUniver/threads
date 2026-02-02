@@ -7,6 +7,16 @@ use md5::{Digest, Md5};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+// Canonical section names in order of appearance
+const CANONICAL_SECTIONS: &[&str] = &["Body", "Notes", "Todo", "Log"];
+
+/// Check if a line is a canonical section header (## Body, ## Notes, ## Todo, ## Log)
+fn is_canonical_section_header(line: &str) -> bool {
+    CANONICAL_SECTIONS
+        .iter()
+        .any(|&s| line.starts_with(&format!("## {}", s)))
+}
+
 // Cached regexes for hot paths
 static ID_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9a-f]{6})-").unwrap());
 
@@ -293,7 +303,8 @@ pub fn ensure_section(content: &str, name: &str, before: &str) -> String {
 
 /// Replace section content
 pub fn replace_section(content: &str, name: &str, new_content: &str) -> String {
-    let pattern = format!(r"(?ms)(^## {})\n(.+?)(^## |\z)", regex::escape(name));
+    let boundary = section_boundary_pattern(name);
+    let pattern = format!(r"(?ms)(^## {})\n(.+?)({})", regex::escape(name), boundary);
     let re = Regex::new(&pattern).unwrap();
 
     if !re.is_match(content) {
@@ -318,18 +329,99 @@ pub fn append_to_section(content: &str, name: &str, addition: &str) -> String {
     replace_section(content, name, &new_content)
 }
 
-/// Extract section content
+/// Build regex alternation for canonical section boundaries (sections that come after `name`)
+fn section_boundary_pattern(name: &str) -> String {
+    let pos = CANONICAL_SECTIONS.iter().position(|&s| s == name);
+    match pos {
+        Some(idx) if idx + 1 < CANONICAL_SECTIONS.len() => {
+            // Build alternation of sections that come after this one
+            let following: Vec<&str> = CANONICAL_SECTIONS[idx + 1..].to_vec();
+            let alt = following
+                .iter()
+                .map(|s| regex::escape(s))
+                .collect::<Vec<_>>()
+                .join("|");
+            format!(r"(?:^## (?:{})(?:\s*$|\n)|\z)", alt)
+        }
+        _ => {
+            // Unknown section or last section (Log) - only stop at end
+            r"\z".to_string()
+        }
+    }
+}
+
+/// Extract section content with normalization
 pub fn extract_section(content: &str, name: &str) -> String {
-    let pattern = format!(r"(?ms)^## {}\n(.+?)(?:^## |\z)", regex::escape(name));
+    let boundary = section_boundary_pattern(name);
+    let pattern = format!(r"(?ms)^## {}\n(.+?){}", regex::escape(name), boundary);
     let re = Regex::new(&pattern).unwrap();
 
-    if let Some(caps) = re.captures(content) {
+    let raw = if let Some(caps) = re.captures(content) {
         caps.get(1)
             .map(|m| m.as_str().trim().to_string())
             .unwrap_or_default()
     } else {
-        String::new()
+        return String::new();
+    };
+
+    // Apply section-specific normalization
+    match name {
+        "Body" => normalize_body(&raw),
+        "Notes" | "Todo" | "Log" => normalize_list_section(&raw),
+        _ => raw,
     }
+}
+
+/// Normalize Body section: convert `## ` headers to `### ` (h2 → h3)
+/// Body should use h3+ headers since h2 is reserved for canonical sections.
+fn normalize_body(content: &str) -> String {
+    // Match `## ` at start of line that isn't followed by a canonical section name
+    let mut result = String::new();
+    for line in content.lines() {
+        if line.starts_with("## ") && !is_canonical_section_header(line) {
+            // Downgrade h2 to h3
+            result.push_str("###");
+            result.push_str(&line[2..]);
+        } else {
+            result.push_str(line);
+        }
+        result.push('\n');
+    }
+    result.trim_end().to_string()
+}
+
+/// Normalize list-based sections (Notes, Todo, Log): collapse multiple empty lines
+/// and remove empty lines between list items.
+fn normalize_list_section(content: &str) -> String {
+    let mut result = Vec::new();
+    let mut prev_was_item = false;
+    let mut prev_was_empty = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        let is_item = trimmed.starts_with("- ") || trimmed.starts_with("### ");
+        let is_empty = trimmed.is_empty();
+
+        if is_empty {
+            // Skip empty lines between consecutive items
+            if prev_was_item {
+                prev_was_empty = true;
+                continue;
+            }
+            // Collapse multiple empty lines to one
+            if prev_was_empty {
+                continue;
+            }
+            prev_was_empty = true;
+        } else {
+            prev_was_empty = false;
+        }
+
+        result.push(line);
+        prev_was_item = is_item;
+    }
+
+    result.join("\n").trim().to_string()
 }
 
 /// Add a note to the Notes section
@@ -430,7 +522,7 @@ pub fn remove_by_hash(content: &str, section: &str, hash: &str) -> Result<String
     for line in lines {
         if line.starts_with(&format!("## {}", section)) {
             in_section = true;
-        } else if line.starts_with("## ") {
+        } else if is_canonical_section_header(line) {
             in_section = false;
         }
 
@@ -464,7 +556,7 @@ pub fn edit_by_hash(
     for line in lines {
         if line.starts_with(&format!("## {}", section)) {
             in_section = true;
-        } else if line.starts_with("## ") {
+        } else if is_canonical_section_header(line) {
             in_section = false;
         }
 
@@ -505,7 +597,7 @@ pub fn set_todo_checked(
         let mut line = line.to_string();
         if line.starts_with(&section_header) {
             in_section = true;
-        } else if line.starts_with("## ") {
+        } else if is_canonical_section_header(&line) {
             in_section = false;
         }
 
@@ -537,7 +629,7 @@ pub fn count_matching_items(content: &str, section: &str, hash: &str) -> usize {
     for line in lines {
         if line.starts_with(&format!("## {}", section)) {
             in_section = true;
-        } else if line.starts_with("## ") {
+        } else if is_canonical_section_header(line) {
             in_section = false;
         }
 
@@ -660,5 +752,364 @@ mod tests {
                 status, got, want
             );
         }
+    }
+
+    #[test]
+    fn test_extract_section_with_nested_headers() {
+        // Body section contains ## headers that should NOT be treated as section boundaries
+        let content = r#"---
+id: 'abc123'
+name: Test
+status: active
+---
+
+## Body
+
+Some intro text.
+
+## Subsection One
+
+Content under subsection one.
+
+## Subsection Two
+
+Content under subsection two.
+
+## Notes
+
+A note here.
+
+## Todo
+
+- [ ] A task
+
+## Log
+
+- [2026-01-01] Created
+"#;
+
+        let body = extract_section(content, "Body");
+        assert!(
+            body.contains("Subsection One"),
+            "Body should contain 'Subsection One', got: {}",
+            body
+        );
+        assert!(
+            body.contains("Subsection Two"),
+            "Body should contain 'Subsection Two', got: {}",
+            body
+        );
+        assert!(
+            !body.contains("A note here"),
+            "Body should NOT contain Notes content, got: {}",
+            body
+        );
+
+        let notes = extract_section(content, "Notes");
+        assert!(
+            notes.contains("A note here"),
+            "Notes should contain 'A note here', got: {}",
+            notes
+        );
+
+        // Verify h2 headers in Body are normalized to h3
+        assert!(
+            body.contains("### Subsection One"),
+            "h2 in Body should be normalized to h3, got: {}",
+            body
+        );
+    }
+
+    #[test]
+    fn test_normalize_body_converts_h2_to_h3() {
+        let body = "Some intro.\n\n## My Header\n\nContent.\n\n## Another\n\nMore.";
+        let normalized = normalize_body(body);
+
+        // Check h2 converted to h3
+        assert!(
+            normalized.contains("### My Header"),
+            "## should become ###, got: {}",
+            normalized
+        );
+        assert!(
+            normalized.contains("### Another"),
+            "## should become ###, got: {}",
+            normalized
+        );
+
+        // Ensure no bare "## " remains (h2 headers should all be converted)
+        // Note: "### " contains "## " as a substring, so we check for h2 pattern at line start
+        let has_h2 = normalized.lines().any(|l| l.starts_with("## "));
+        assert!(!has_h2, "No h2 headers should remain, got: {}", normalized);
+    }
+
+    #[test]
+    fn test_normalize_list_section_removes_empty_lines() {
+        let section = "- Item one\n\n- Item two\n\n\n- Item three";
+        let normalized = normalize_list_section(section);
+
+        assert_eq!(
+            normalized, "- Item one\n- Item two\n- Item three",
+            "Empty lines between items should be removed"
+        );
+    }
+
+    // ========================================================================
+    // Regression tests for severe truncation bug
+    // Bug: Body with ## headers caused extract_section to truncate early
+    // ========================================================================
+
+    #[test]
+    fn test_extract_body_not_truncated_by_h2_headers() {
+        // This is the exact pattern that caused the bug:
+        // Body contains ## headers that looked like section boundaries
+        let content = r#"---
+id: 'abc123'
+name: Test thread
+status: active
+---
+
+## Body
+
+Introduction paragraph.
+
+## First Topic
+
+Content under first topic.
+
+## Second Topic
+
+Content under second topic.
+
+## Third Topic
+
+This content was being truncated before the fix.
+
+## Notes
+
+- A note
+
+## Todo
+
+- [ ] A task
+
+## Log
+
+- [2026-01-01] Created
+"#;
+
+        let body = extract_section(content, "Body");
+
+        // The critical assertion: ALL content before ## Notes must be present
+        assert!(
+            body.contains("Introduction paragraph"),
+            "Body should contain intro"
+        );
+        assert!(
+            body.contains("First Topic"),
+            "Body should contain First Topic"
+        );
+        assert!(
+            body.contains("Second Topic"),
+            "Body should contain Second Topic"
+        );
+        assert!(
+            body.contains("Third Topic"),
+            "Body should contain Third Topic - this was truncated before fix"
+        );
+        assert!(
+            body.contains("was being truncated"),
+            "Body should contain content under Third Topic"
+        );
+
+        // Verify sections are properly separated
+        assert!(
+            !body.contains("A note"),
+            "Body should NOT contain Notes content"
+        );
+        assert!(
+            !body.contains("A task"),
+            "Body should NOT contain Todo content"
+        );
+    }
+
+    #[test]
+    fn test_extract_section_respects_only_canonical_boundaries() {
+        // Verify that only Body/Notes/Todo/Log act as boundaries
+        let content = r#"---
+id: 'test'
+name: Test
+status: active
+---
+
+## Body
+
+Intro.
+
+## Random Header
+
+This is NOT a canonical section - should be part of Body.
+
+## Another Random
+
+Also part of Body.
+
+## Notes
+
+Real notes section.
+
+## Todo
+
+- [ ] Real task
+
+## Log
+
+- Entry
+"#;
+
+        let body = extract_section(content, "Body");
+        let notes = extract_section(content, "Notes");
+
+        // Body should contain non-canonical ## headers
+        assert!(
+            body.contains("Random Header"),
+            "Non-canonical ## should be in Body"
+        );
+        assert!(
+            body.contains("Another Random"),
+            "Non-canonical ## should be in Body"
+        );
+
+        // Notes should only have its own content
+        assert!(
+            notes.contains("Real notes section"),
+            "Notes should have its content"
+        );
+        assert!(
+            !notes.contains("Random"),
+            "Notes should not have Body content"
+        );
+    }
+
+    #[test]
+    fn test_extract_all_sections_with_complex_body() {
+        // Full integration test with realistic thread structure
+        let content = r#"---
+id: '9559e8'
+name: 'Paper proofreading'
+desc: Technical issues for review
+status: active
+---
+
+## Body
+
+## Overview
+
+Paper needs several fixes.
+
+## Technical Issues
+
+### Type signature mismatch
+
+Details here.
+
+### Reflection axis error
+
+More details.
+
+## Terminology
+
+Key terms need definition.
+
+## Notes
+
+- First note  <!-- a1b2 -->
+- Second note  <!-- c3d4 -->
+
+## Todo
+
+- [ ] Fix issue one  <!-- e5f6 -->
+- [ ] Fix issue two  <!-- g7h8 -->
+
+## Log
+
+- [2026-01-01 10:00:00] Created
+- [2026-01-02 11:00:00] Updated
+"#;
+
+        let body = extract_section(content, "Body");
+        let notes = extract_section(content, "Notes");
+        let todo = extract_section(content, "Todo");
+        let log = extract_section(content, "Log");
+
+        // Body: all subsections present
+        assert!(body.contains("Overview"), "Body missing Overview");
+        assert!(
+            body.contains("Technical Issues"),
+            "Body missing Technical Issues"
+        );
+        assert!(
+            body.contains("Type signature mismatch"),
+            "Body missing subsection"
+        );
+        assert!(
+            body.contains("Reflection axis error"),
+            "Body missing subsection"
+        );
+        assert!(body.contains("Terminology"), "Body missing Terminology");
+
+        // Notes: items present, no Body contamination
+        assert!(notes.contains("First note"), "Notes missing first note");
+        assert!(notes.contains("Second note"), "Notes missing second note");
+        assert!(!notes.contains("Overview"), "Notes contaminated with Body");
+
+        // Todo: items present
+        assert!(todo.contains("Fix issue one"), "Todo missing first item");
+        assert!(todo.contains("Fix issue two"), "Todo missing second item");
+
+        // Log: entries present
+        assert!(log.contains("Created"), "Log missing first entry");
+        assert!(log.contains("Updated"), "Log missing second entry");
+    }
+
+    #[test]
+    fn test_body_h2_normalized_to_h3_in_extraction() {
+        let content = r#"---
+id: 'test'
+name: Test
+status: active
+---
+
+## Body
+
+## My H2 Header
+
+Content.
+
+## Another H2
+
+More content.
+
+## Notes
+
+Note here.
+"#;
+
+        let body = extract_section(content, "Body");
+
+        // H2 headers should be normalized to H3
+        assert!(
+            body.contains("### My H2 Header"),
+            "## should be normalized to ###, got: {}",
+            body
+        );
+        assert!(
+            body.contains("### Another H2"),
+            "## should be normalized to ###"
+        );
+
+        // No bare ## should remain
+        let has_h2 = body.lines().any(|l| l.starts_with("## "));
+        assert!(!has_h2, "No h2 headers should remain after normalization");
     }
 }

@@ -25,9 +25,9 @@ use crate::workspace::FindOptions;
 /// Use `resolve()` to get the effective format with TTY auto-detection.
 #[derive(Args, Clone, Debug, Default)]
 pub struct FormatArgs {
-    /// Output format (auto-detects TTY for pretty vs plain)
-    #[arg(short = 'f', long, value_enum, default_value = "pretty", global = true)]
-    pub format: OutputFormat,
+    /// Output format (auto-detects TTY for pretty vs plain if not specified)
+    #[arg(short = 'f', long, value_enum, global = true)]
+    pub format: Option<OutputFormat>,
 
     /// Output as JSON (shorthand for --format=json)
     #[arg(long, conflicts_with = "format", global = true)]
@@ -37,23 +37,22 @@ pub struct FormatArgs {
 impl FormatArgs {
     /// Resolve the effective output format.
     ///
-    /// Priority: --json flag > --format flag > THREADS_FORMAT env > default (pretty)
-    /// Then applies NO_COLOR/FORCE_COLOR/TTY detection via OutputFormat::resolve().
+    /// Priority: --json flag > --format flag > THREADS_FORMAT env > TTY auto-detection
+    /// Explicit --format=pretty bypasses TTY detection.
     pub fn resolve(&self) -> OutputFormat {
         if self.json {
             return OutputFormat::Json;
         }
 
-        // Check if format was explicitly set (not default)
-        // If format is not pretty (the default), user explicitly chose it
-        if self.format != OutputFormat::Pretty {
-            return self.format.resolve();
+        // Explicit --format flag bypasses TTY detection (user knows what they want)
+        if let Some(format) = self.format {
+            return format;
         }
 
         // Check THREADS_FORMAT env var
         if let Some(env_format) = env_string("THREADS_FORMAT") {
             match env_format.to_lowercase().as_str() {
-                "pretty" => return OutputFormat::Pretty.resolve(),
+                "pretty" => return OutputFormat::Pretty,
                 "plain" => return OutputFormat::Plain,
                 "json" => return OutputFormat::Json,
                 "yaml" => return OutputFormat::Yaml,
@@ -62,7 +61,7 @@ impl FormatArgs {
         }
 
         // Default with TTY/color detection
-        self.format.resolve()
+        OutputFormat::Pretty.resolve()
     }
 }
 

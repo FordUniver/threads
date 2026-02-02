@@ -10,17 +10,21 @@ use crate::output;
 use crate::thread::{self, Thread};
 use crate::workspace;
 
+/// Read or edit the Body section of a thread.
+///
+/// Without flags and from an interactive terminal, displays the current body.
+/// With piped input, writes to the body (--set by default, --append to add).
 #[derive(Args)]
 pub struct BodyArgs {
     /// Thread ID or name reference
     #[arg(add = ArgValueCompleter::new(crate::workspace::complete_thread_ids))]
     id: String,
 
-    /// Replace body content
+    /// Replace body content (default when content is piped)
     #[arg(long)]
     set: bool,
 
-    /// Append to body content
+    /// Append to existing body content
     #[arg(long)]
     append: bool,
 
@@ -34,15 +38,18 @@ pub struct BodyArgs {
 }
 
 pub fn run(args: BodyArgs, ws: &Path, config: &Config) -> Result<(), String> {
+    // Check TTY state before reading - this distinguishes interactive use from empty pipe
+    let stdin_is_tty = input::stdin_is_tty();
     let content = input::read_stdin(false);
 
-    // Read mode: no flags and no stdin content
-    if !args.set && !args.append && content.is_empty() {
+    // Read mode: no flags AND stdin is a terminal (interactive use)
+    // This prevents `printf '' | threads body <id>` from silently succeeding
+    if !args.set && !args.append && stdin_is_tty {
         let file = workspace::find_by_ref(ws, &args.id)?;
         let t = Thread::parse(&file)?;
         let body = thread::extract_section(&t.content, "Body");
         if !body.is_empty() {
-            print!("{}", body);
+            println!("{}", body);
         }
         return Ok(());
     }

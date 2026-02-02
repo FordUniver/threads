@@ -15,6 +15,7 @@ mod input;
 mod output;
 mod thread;
 mod workspace;
+mod wrap;
 
 #[derive(Parser)]
 #[command(name = "threads")]
