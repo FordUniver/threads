@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for 'threads note' command
 
-# Test: note add creates note with hash
+# Test: note add creates note with hash (stored in YAML frontmatter)
 test_note_add() {
     begin_test "note add creates note"
     setup_test_workspace
@@ -10,12 +10,12 @@ test_note_add() {
 
     $THREADS_BIN note abc123 add "This is a note" >/dev/null 2>&1
 
-    local notes
-    notes=$(get_thread_section abc123 Notes)
+    local content
+    content=$(cat "$(get_thread_path abc123)")
 
-    assert_contains "$notes" "This is a note" "should add note text"
-    # Notes should have hash comments
-    assert_contains "$notes" "<!--" "should have hash comment"
+    assert_contains "$content" "This is a note" "should add note text"
+    # Notes stored in YAML with hash field (not HTML comment)
+    assert_contains "$content" "hash:" "should have hash field"
 
     teardown_test_workspace
     end_test
@@ -40,10 +40,10 @@ test_note_remove() {
         # Remove by hash
         $THREADS_BIN note abc123 remove "$hash" >/dev/null 2>&1
 
-        local notes
-        notes=$(get_thread_section abc123 Notes)
+        local content
+        content=$(cat "$(get_thread_path abc123)")
 
-        assert_not_contains "$notes" "Note to remove" "note should be removed"
+        assert_not_contains "$content" "Note to remove" "note should be removed"
     fi
 
     teardown_test_workspace
@@ -70,14 +70,14 @@ test_note_edit() {
         # Edit by hash - shell impl has BSD awk bug, may fail
         $THREADS_BIN note abc123 edit "$hash" "Modified note" >/dev/null 2>&1
 
-        local notes
-        notes=$(get_thread_section abc123 Notes)
+        local content
+        content=$(cat "$(get_thread_path abc123)")
 
         # Skip assertion if edit didn't work (known shell bug)
         # Go/Python implementations should pass this
-        if [[ "$notes" == *"Modified note"* ]]; then
-            assert_contains "$notes" "Modified note" "should contain modified text"
-            assert_not_contains "$notes" "Original note" "should not contain original text"
+        if [[ "$content" == *"Modified note"* ]]; then
+            assert_contains "$content" "Modified note" "should contain modified text"
+            assert_not_contains "$content" "Original note" "should not contain original text"
         else
             skip_test "shell impl has BSD awk bug in note edit"
         fi

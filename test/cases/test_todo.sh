@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for 'threads todo' command
 
-# Test: todo add creates item
+# Test: todo add creates item (stored in YAML frontmatter)
 test_todo_add() {
     begin_test "todo add creates item"
     setup_test_workspace
@@ -10,11 +10,11 @@ test_todo_add() {
 
     $THREADS_BIN todo abc123 add "New task" >/dev/null 2>&1
 
-    local todos
-    todos=$(get_thread_section abc123 Todo)
+    local content
+    content=$(cat "$(get_thread_path abc123)")
 
-    assert_contains "$todos" "New task" "should add todo text"
-    assert_contains "$todos" "[ ]" "should have unchecked checkbox"
+    assert_contains "$content" "New task" "should add todo text"
+    assert_contains "$content" "done: false" "should have unchecked checkbox"
 
     teardown_test_workspace
     end_test
@@ -39,10 +39,10 @@ test_todo_check() {
         # Check it
         $THREADS_BIN todo abc123 check "$hash" >/dev/null 2>&1
 
-        local todos
-        todos=$(get_thread_section abc123 Todo)
+        local content
+        content=$(cat "$(get_thread_path abc123)")
 
-        assert_contains "$todos" "[x]" "should have checked checkbox"
+        assert_contains "$content" "done: true" "should have checked checkbox"
     fi
 
     teardown_test_workspace
@@ -66,10 +66,10 @@ test_todo_uncheck() {
         $THREADS_BIN todo abc123 check "$hash" >/dev/null 2>&1
         $THREADS_BIN todo abc123 uncheck "$hash" >/dev/null 2>&1
 
-        local todos
-        todos=$(get_thread_section abc123 Todo)
+        local content
+        content=$(cat "$(get_thread_path abc123)")
 
-        assert_contains "$todos" "[ ]" "should have unchecked checkbox after uncheck"
+        assert_contains "$content" "done: false" "should have unchecked checkbox after uncheck"
     fi
 
     teardown_test_workspace
@@ -93,17 +93,17 @@ test_todo_remove() {
         # Remove it
         $THREADS_BIN todo abc123 remove "$hash" >/dev/null 2>&1
 
-        local todos
-        todos=$(get_thread_section abc123 Todo)
+        local content
+        content=$(cat "$(get_thread_path abc123)")
 
-        assert_not_contains "$todos" "Task to remove" "todo should be removed"
+        assert_not_contains "$content" "Task to remove" "todo should be removed"
     fi
 
     teardown_test_workspace
     end_test
 }
 
-# Test: todo list has correct checkbox format
+# Test: todo list has correct YAML frontmatter format
 test_todo_list_format() {
     begin_test "todo has correct checkbox format"
     setup_test_workspace
@@ -112,13 +112,12 @@ test_todo_list_format() {
 
     $THREADS_BIN todo abc123 add "Unchecked item" >/dev/null 2>&1
 
-    local path
-    path=$(get_thread_path abc123)
     local content
-    content=$(cat "$path")
+    content=$(cat "$(get_thread_path abc123)")
 
-    # Should have markdown checkbox format: - [ ] or - [x]
-    assert_matches "\- \[ \]" "$content" "should have markdown checkbox format"
+    # Todos stored in YAML frontmatter with done field and hash
+    assert_contains "$content" "done: false" "should have done field"
+    assert_contains "$content" "hash:" "should have hash field"
 
     teardown_test_workspace
     end_test

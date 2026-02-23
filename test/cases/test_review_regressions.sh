@@ -140,7 +140,7 @@ test_note_preserves_dollar_signs() {
     $THREADS_BIN note abc123 add 'Price $100 var $1 $VAR end' >/dev/null 2>&1
 
     local content
-    content=$(get_thread_section "abc123" "Notes")
+    content=$(cat "$(get_thread_path abc123)")
 
     assert_contains "$content" '$100' "should preserve \$100"
     assert_contains "$content" '$1' "should preserve \$1"
@@ -161,7 +161,7 @@ test_todo_preserves_dollar_signs() {
     $THREADS_BIN todo abc123 add 'Price $100 var $1 $VAR end' >/dev/null 2>&1
 
     local content
-    content=$(get_thread_section "abc123" "Todo")
+    content=$(cat "$(get_thread_path abc123)")
 
     assert_contains "$content" '$100' "should preserve \$100"
     assert_contains "$content" '$1' "should preserve \$1"
@@ -182,7 +182,7 @@ test_log_preserves_dollar_signs() {
     $THREADS_BIN log abc123 'Price $100 var $1 $VAR end' >/dev/null 2>&1
 
     local content
-    content=$(get_thread_section "abc123" "Log")
+    content=$(cat "$(get_thread_path abc123)")
 
     assert_contains "$content" '$100' "should preserve \$100"
     assert_contains "$content" '$1' "should preserve \$1"
