@@ -528,7 +528,7 @@ fn format_log(entries: &[LogEntry]) -> String {
 }
 
 /// Convert timestamp string to relative time (e.g., "8m", "2h", "3d")
-fn timestamp_to_relative(ts_str: &str, now: &NaiveDateTime) -> String {
+pub(crate) fn timestamp_to_relative(ts_str: &str, now: &NaiveDateTime) -> String {
     let parsed = NaiveDateTime::parse_from_str(ts_str, "%Y-%m-%d %H:%M:%S");
     let dt = match parsed {
         Ok(dt) => dt,
