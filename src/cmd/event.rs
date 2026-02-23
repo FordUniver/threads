@@ -69,13 +69,30 @@ pub fn run(args: EventArgs, ws: &Path, config: &Config) -> Result<(), String> {
 
     match args.action.as_str() {
         "list" | "ls" => {
+            let format = args.format.resolve();
             let items = t.get_events();
-            if items.is_empty() {
-                println!("No events.");
-            } else {
-                let has_time = items.iter().any(|e| e.time.is_some());
-                let today = Local::now().date_naive();
-                print_event_list(&items, has_time, today);
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&items).map_err(|e| e.to_string())?
+                    );
+                }
+                OutputFormat::Yaml => {
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&items).map_err(|e| e.to_string())?
+                    );
+                }
+                _ => {
+                    if items.is_empty() {
+                        println!("No events.");
+                    } else {
+                        let has_time = items.iter().any(|e| e.time.is_some());
+                        let today = Local::now().date_naive();
+                        print_event_list(&items, has_time, today);
+                    }
+                }
             }
             return Ok(());
         }

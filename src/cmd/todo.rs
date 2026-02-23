@@ -65,13 +65,30 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
 
     match args.action.as_str() {
         "list" | "ls" => {
+            let format = args.format.resolve();
             let items = t.get_todo_items();
-            if items.is_empty() {
-                println!("No todo items.");
-            } else {
-                for item in items {
-                    let mark = if item.done { "[x]" } else { "[ ]" };
-                    println!("{} {} ({})", mark, item.text, item.hash);
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&items).map_err(|e| e.to_string())?
+                    );
+                }
+                OutputFormat::Yaml => {
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&items).map_err(|e| e.to_string())?
+                    );
+                }
+                _ => {
+                    if items.is_empty() {
+                        println!("No todo items.");
+                    } else {
+                        for item in &items {
+                            let mark = if item.done { "[x]" } else { "[ ]" };
+                            println!("{} {} ({})", mark, item.text, item.hash);
+                        }
+                    }
                 }
             }
             return Ok(());

@@ -21,7 +21,7 @@ use crate::workspace::FindOptions;
 
 /// Common output format flags.
 ///
-/// Provides consistent --format/-f and --json flags across commands.
+/// Provides consistent --format/-f, --json, and --yaml flags across commands.
 /// Use `resolve()` to get the effective format with TTY auto-detection.
 #[derive(Args, Clone, Debug, Default)]
 pub struct FormatArgs {
@@ -30,18 +30,26 @@ pub struct FormatArgs {
     pub format: Option<OutputFormat>,
 
     /// Output as JSON (shorthand for --format=json)
-    #[arg(long, conflicts_with = "format", global = true)]
+    #[arg(long, conflicts_with_all = ["format", "yaml"], global = true)]
     pub json: bool,
+
+    /// Output as YAML (shorthand for --format=yaml)
+    #[arg(long, conflicts_with_all = ["format", "json"], global = true)]
+    pub yaml: bool,
 }
 
 impl FormatArgs {
     /// Resolve the effective output format.
     ///
-    /// Priority: --json flag > --format flag > THREADS_FORMAT env > TTY auto-detection
+    /// Priority: --json/--yaml flag > --format flag > THREADS_FORMAT env > TTY auto-detection
     /// Explicit --format=pretty bypasses TTY detection.
     pub fn resolve(&self) -> OutputFormat {
         if self.json {
             return OutputFormat::Json;
+        }
+
+        if self.yaml {
+            return OutputFormat::Yaml;
         }
 
         // Explicit --format flag bypasses TTY detection (user knows what they want)

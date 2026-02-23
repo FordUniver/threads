@@ -552,3 +552,216 @@ test_no_color_empty_ignored
 test_force_color_env
 test_no_color_precedence
 test_format_flag_overrides_env
+
+# ====================================================================================
+# --yaml shorthand and single-thread list format tests
+# ====================================================================================
+
+# Test: --yaml is shorthand for --format=yaml
+test_format_yaml_shorthand() {
+    begin_test "--yaml shorthand equals --format=yaml"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+
+    local yaml_output format_output
+    yaml_output=$($THREADS_BIN list --yaml 2>/dev/null)
+    format_output=$($THREADS_BIN list --format=yaml 2>/dev/null)
+
+    assert_yaml_valid "$yaml_output" "--yaml should produce valid YAML"
+    assert_eq "$yaml_output" "$format_output" "--yaml should equal --format=yaml"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: todo single-thread list --json
+test_todo_single_json() {
+    begin_test "todo single-thread list --json produces valid JSON"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    $THREADS_BIN todo abc123 add "Test task" >/dev/null 2>&1
+
+    local output
+    output=$($THREADS_BIN todo abc123 --json 2>/dev/null)
+
+    assert_json_valid "$output" "todo list --json should be valid JSON"
+    assert_json_has_field "$output" ".[0].text" "JSON should have .text field"
+    assert_json_has_field "$output" ".[0].hash" "JSON should have .hash field"
+    # Use has() since done=false is falsy and would fail assert_json_has_field
+    assert_json_has_field "$output" ".[0] | has(\"done\")" "JSON should have .done field"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: todo single-thread list --format=yaml
+test_todo_single_yaml() {
+    begin_test "todo single-thread list --format=yaml produces valid YAML"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    $THREADS_BIN todo abc123 add "Test task" >/dev/null 2>&1
+
+    local output
+    output=$($THREADS_BIN todo abc123 --format=yaml 2>/dev/null)
+
+    assert_yaml_valid "$output" "todo list --format=yaml should be valid YAML"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: note single-thread list --json
+test_note_single_json() {
+    begin_test "note single-thread list --json produces valid JSON"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    $THREADS_BIN note abc123 add "Test note" >/dev/null 2>&1
+
+    local output
+    output=$($THREADS_BIN note abc123 --json 2>/dev/null)
+
+    assert_json_valid "$output" "note list --json should be valid JSON"
+    assert_json_has_field "$output" ".[0].text" "JSON should have .text field"
+    assert_json_has_field "$output" ".[0].hash" "JSON should have .hash field"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: note single-thread list --format=yaml
+test_note_single_yaml() {
+    begin_test "note single-thread list --format=yaml produces valid YAML"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    $THREADS_BIN note abc123 add "Test note" >/dev/null 2>&1
+
+    local output
+    output=$($THREADS_BIN note abc123 --format=yaml 2>/dev/null)
+
+    assert_yaml_valid "$output" "note list --format=yaml should be valid YAML"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: deadline single-thread list --json
+test_deadline_single_json() {
+    begin_test "deadline single-thread list --json produces valid JSON"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    $THREADS_BIN deadline abc123 add 2026-12-31 "Year end deadline" >/dev/null 2>&1
+
+    local output
+    output=$($THREADS_BIN deadline abc123 --json 2>/dev/null)
+
+    assert_json_valid "$output" "deadline list --json should be valid JSON"
+    assert_json_has_field "$output" ".[0].date" "JSON should have .date field"
+    assert_json_has_field "$output" ".[0].text" "JSON should have .text field"
+    assert_json_has_field "$output" ".[0].hash" "JSON should have .hash field"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: deadline single-thread list --format=yaml
+test_deadline_single_yaml() {
+    begin_test "deadline single-thread list --format=yaml produces valid YAML"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    $THREADS_BIN deadline abc123 add 2026-12-31 "Year end deadline" >/dev/null 2>&1
+
+    local output
+    output=$($THREADS_BIN deadline abc123 --format=yaml 2>/dev/null)
+
+    assert_yaml_valid "$output" "deadline list --format=yaml should be valid YAML"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: event single-thread list --json
+test_event_single_json() {
+    begin_test "event single-thread list --json produces valid JSON"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    $THREADS_BIN event abc123 add 2026-12-31 "Year end event" >/dev/null 2>&1
+
+    local output
+    output=$($THREADS_BIN event abc123 --json 2>/dev/null)
+
+    assert_json_valid "$output" "event list --json should be valid JSON"
+    assert_json_has_field "$output" ".[0].date" "JSON should have .date field"
+    assert_json_has_field "$output" ".[0].text" "JSON should have .text field"
+    assert_json_has_field "$output" ".[0].hash" "JSON should have .hash field"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: event single-thread list --format=yaml
+test_event_single_yaml() {
+    begin_test "event single-thread list --format=yaml produces valid YAML"
+    setup_test_workspace
+
+    create_thread "abc123" "Test Thread" "active"
+    $THREADS_BIN event abc123 add 2026-12-31 "Year end event" >/dev/null 2>&1
+
+    local output
+    output=$($THREADS_BIN event abc123 --format=yaml 2>/dev/null)
+
+    assert_yaml_valid "$output" "event list --format=yaml should be valid YAML"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: validate fix --dry-run --json includes changes array
+test_validate_fix_json_dry_run() {
+    begin_test "validate fix --dry-run --json includes changes array"
+    setup_test_workspace
+
+    # Create a thread with a frontmatter value that needs quoting (contains colon)
+    mkdir -p "$TEST_WS/.threads"
+    cat > "$TEST_WS/.threads/abc123-needs-fix.md" << 'EOF'
+---
+id: abc123
+name: thread: needs quoting
+status: active
+---
+
+## Body
+
+Content here.
+
+## Log
+EOF
+
+    local output
+    output=$($THREADS_BIN validate fix --e002 --dry-run --json 2>/dev/null)
+
+    assert_json_valid "$output" "validate fix --dry-run --json should be valid JSON"
+    assert_json_has_field "$output" ".changes" "JSON should have .changes field"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Run new tests
+test_format_yaml_shorthand
+test_todo_single_json
+test_todo_single_yaml
+test_note_single_json
+test_note_single_yaml
+test_deadline_single_json
+test_deadline_single_yaml
+test_event_single_json
+test_event_single_yaml
+test_validate_fix_json_dry_run

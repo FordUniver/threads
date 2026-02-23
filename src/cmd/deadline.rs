@@ -66,12 +66,29 @@ pub fn run(args: DeadlineArgs, ws: &Path, config: &Config) -> Result<(), String>
 
     match args.action.as_str() {
         "list" | "ls" => {
+            let format = args.format.resolve();
             let items = t.get_deadlines();
-            if items.is_empty() {
-                println!("No deadlines.");
-            } else {
-                let today = Local::now().date_naive();
-                print_deadline_list(&items, today);
+            match format {
+                OutputFormat::Json => {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&items).map_err(|e| e.to_string())?
+                    );
+                }
+                OutputFormat::Yaml => {
+                    print!(
+                        "{}",
+                        serde_yaml::to_string(&items).map_err(|e| e.to_string())?
+                    );
+                }
+                _ => {
+                    if items.is_empty() {
+                        println!("No deadlines.");
+                    } else {
+                        let today = Local::now().date_naive();
+                        print_deadline_list(&items, today);
+                    }
+                }
             }
             return Ok(());
         }

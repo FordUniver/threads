@@ -1076,6 +1076,7 @@ fn run_fix(
     let mut log_entries_fixed = 0;
     let mut headers_removed = 0;
     let mut files_modified = 0;
+    let mut fix_entries: Vec<FixEntry> = Vec::new();
 
     for path in files {
         let rel_path = path
@@ -1105,7 +1106,7 @@ fn run_fix(
         // E002: Fix frontmatter quoting
         if fix_e002 {
             let (new_content, fixed) =
-                fix_frontmatter_quoting(&current_content, &rel_path, dry_run, format);
+                fix_frontmatter_quoting(&current_content, &rel_path, dry_run, format, &mut fix_entries);
             if fixed > 0 {
                 file_fm_fixed = fixed;
                 current_content = new_content;
@@ -1116,7 +1117,7 @@ fn run_fix(
         // W007: Fix log timestamps
         if fix_w007 {
             let (new_lines, fixes, removed) =
-                fix_log_section(&current_content, path, ws, dry_run, &rel_path, format);
+                fix_log_section(&current_content, path, ws, dry_run, &rel_path, format, &mut fix_entries);
             if fixes > 0 || removed > 0 {
                 file_log_fixed = fixes;
                 file_headers_removed = removed;
@@ -1193,6 +1194,7 @@ fn run_fix(
                 "log_entries_fixed": log_entries_fixed,
                 "headers_removed": headers_removed,
                 "files_modified": files_modified,
+                "changes": fix_entries,
             });
             println!("{}", serde_json::to_string_pretty(&output).unwrap());
         }
@@ -1203,6 +1205,7 @@ fn run_fix(
                 "log_entries_fixed": log_entries_fixed,
                 "headers_removed": headers_removed,
                 "files_modified": files_modified,
+                "changes": fix_entries,
             });
             println!("{}", serde_yaml::to_string(&output).unwrap());
         }
@@ -1217,6 +1220,7 @@ fn fix_frontmatter_quoting(
     rel_path: &str,
     dry_run: bool,
     format: OutputFormat,
+    fix_entries: &mut Vec<FixEntry>,
 ) -> (String, usize) {
     // Check for frontmatter delimiters
     if !content.starts_with("---\n") {
@@ -1255,7 +1259,7 @@ fn fix_frontmatter_quoting(
                 let fixed_line = format!("{}: {}", key, quoted);
 
                 if dry_run {
-                    print_fix(format, rel_path, line_num, line, &fixed_line);
+                    print_fix(format, rel_path, line_num, line, &fixed_line, fix_entries);
                 }
 
                 fixed_lines.push(fixed_line);
@@ -1393,6 +1397,7 @@ fn fix_log_section(
     dry_run: bool,
     rel_path: &str,
     format: OutputFormat,
+    fix_entries: &mut Vec<FixEntry>,
 ) -> (Vec<String>, usize, usize) {
     let lines: Vec<&str> = content.lines().collect();
     let mut result: Vec<String> = Vec::new();
@@ -1420,7 +1425,7 @@ fn fix_log_section(
             current_date = Some(caps[1].to_string());
             headers_removed += 1;
             if dry_run {
-                print_fix(format, rel_path, i + 1, line, "(removed)");
+                print_fix(format, rel_path, i + 1, line, "(removed)", fix_entries);
             }
             continue; // Skip adding to result
         }
@@ -1440,7 +1445,7 @@ fn fix_log_section(
                 let rest = &rest[ts.len() + 2..]; // Skip timestamp and closing **
                 let new_line = format!("- [{}]{}", ts, rest);
                 if dry_run {
-                    print_fix(format, rel_path, i + 1, line, &new_line);
+                    print_fix(format, rel_path, i + 1, line, &new_line, fix_entries);
                 }
                 result.push(new_line);
                 fixes += 1;
@@ -1456,7 +1461,7 @@ fn fix_log_section(
                 if let Some(ref date) = current_date {
                     let new_line = format!("- [{} {}:00]{}", date, time, rest);
                     if dry_run {
-                        print_fix(format, rel_path, i + 1, line, &new_line);
+                        print_fix(format, rel_path, i + 1, line, &new_line, fix_entries);
                     }
                     result.push(new_line);
                     fixes += 1;
@@ -1465,7 +1470,7 @@ fn fix_log_section(
                     if let Some(ts) = get_blame_timestamp(path, ws, i + 1) {
                         let new_line = format!("- [{}]{}", ts, rest);
                         if dry_run {
-                            print_fix(format, rel_path, i + 1, line, &new_line);
+                            print_fix(format, rel_path, i + 1, line, &new_line, fix_entries);
                         }
                         result.push(new_line);
                         fixes += 1;
@@ -1489,7 +1494,7 @@ fn fix_log_section(
                 // Use date from header + default time 12:00:00
                 let new_line = format!("- [{} 12:00:00] {}", date, entry_content);
                 if dry_run {
-                    print_fix(format, rel_path, i + 1, line, &new_line);
+                    print_fix(format, rel_path, i + 1, line, &new_line, fix_entries);
                 }
                 result.push(new_line);
                 fixes += 1;
@@ -1498,7 +1503,7 @@ fn fix_log_section(
                 if let Some(ts) = get_blame_timestamp(path, ws, i + 1) {
                     let new_line = format!("- [{}] {}", ts, entry_content);
                     if dry_run {
-                        print_fix(format, rel_path, i + 1, line, &new_line);
+                        print_fix(format, rel_path, i + 1, line, &new_line, fix_entries);
                     }
                     result.push(new_line);
                     fixes += 1;
@@ -1516,14 +1521,34 @@ fn fix_log_section(
     (result, fixes, headers_removed)
 }
 
-fn print_fix(format: OutputFormat, rel_path: &str, line_num: usize, old: &str, new: &str) {
+#[derive(serde::Serialize)]
+struct FixEntry {
+    path: String,
+    line: usize,
+    old: String,
+    new: String,
+}
+
+fn print_fix(
+    format: OutputFormat,
+    rel_path: &str,
+    line_num: usize,
+    old: &str,
+    new: &str,
+    fixes: &mut Vec<FixEntry>,
+) {
     match format {
         OutputFormat::Pretty | OutputFormat::Plain => {
             println!("{}:{}", rel_path, line_num);
             println!("  - {}", old);
             println!("  + {}", new);
         }
-        _ => {}
+        _ => fixes.push(FixEntry {
+            path: rel_path.to_string(),
+            line: line_num,
+            old: old.to_string(),
+            new: new.to_string(),
+        }),
     }
 }
 
