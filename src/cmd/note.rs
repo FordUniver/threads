@@ -293,12 +293,8 @@ fn run_agenda(args: &NoteArgs, ws: &Path, _config: &Config) -> Result<(), String
         }
         _ => {
             for a in &agenda {
-                println!(
-                    "{}  {}  {}",
-                    format!("• {}", a.text),
-                    a.hash.dimmed(),
-                    format!("[{}]", a.thread_id).dimmed()
-                );
+                let bracket_id = format!("[{}]", a.thread_id);
+                println!("• {}  {}  {}", a.text, a.hash.dimmed(), bracket_id.dimmed());
             }
         }
     }
