@@ -26,8 +26,8 @@ pub struct DeadlineArgs {
     #[arg(default_value = "")]
     arg1: String,
 
-    /// Deadline text (for add; trailing words joined)
-    #[arg(default_value = "", trailing_var_arg = true)]
+    /// Deadline text (for add; multiple words joined)
+    #[arg(default_value = "")]
     text: Vec<String>,
 
     #[command(flatten)]
@@ -216,6 +216,33 @@ fn run_agenda(args: &DeadlineArgs, ws: &Path, _config: &Config) -> Result<(), St
             println!(
                 "{}",
                 serde_json::to_string_pretty(&items).map_err(|e| format!("JSON error: {}", e))?
+            );
+        }
+        OutputFormat::Yaml => {
+            use serde::Serialize;
+            #[derive(Serialize)]
+            struct YamlItem<'a> {
+                date: &'a str,
+                text: &'a str,
+                hash: &'a str,
+                thread_id: &'a str,
+                thread_name: &'a str,
+                thread_path: &'a str,
+            }
+            let items: Vec<_> = agenda
+                .iter()
+                .map(|a| YamlItem {
+                    date: &a.date,
+                    text: &a.text,
+                    hash: &a.hash,
+                    thread_id: &a.thread_id,
+                    thread_name: &a.thread_name,
+                    thread_path: &a.thread_path,
+                })
+                .collect();
+            print!(
+                "{}",
+                serde_yaml::to_string(&items).map_err(|e| format!("YAML error: {}", e))?
             );
         }
         OutputFormat::Plain => {

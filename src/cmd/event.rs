@@ -31,7 +31,7 @@ pub struct EventArgs {
     arg1: String,
 
     /// Optional time (HH:MM) or first word of description; rest is description
-    #[arg(default_value = "", trailing_var_arg = true)]
+    #[arg(default_value = "")]
     rest: Vec<String>,
 
     #[command(flatten)]
@@ -254,6 +254,36 @@ fn run_agenda(args: &EventArgs, ws: &Path, _config: &Config) -> Result<(), Strin
             println!(
                 "{}",
                 serde_json::to_string_pretty(&items).map_err(|e| format!("JSON error: {}", e))?
+            );
+        }
+        OutputFormat::Yaml => {
+            use serde::Serialize;
+            #[derive(Serialize)]
+            struct YamlItem<'a> {
+                date: &'a str,
+                #[serde(skip_serializing_if = "Option::is_none")]
+                time: Option<&'a str>,
+                text: &'a str,
+                hash: &'a str,
+                thread_id: &'a str,
+                thread_name: &'a str,
+                thread_path: &'a str,
+            }
+            let items: Vec<_> = agenda
+                .iter()
+                .map(|a| YamlItem {
+                    date: &a.date,
+                    time: a.time.as_deref(),
+                    text: &a.text,
+                    hash: &a.hash,
+                    thread_id: &a.thread_id,
+                    thread_name: &a.thread_name,
+                    thread_path: &a.thread_path,
+                })
+                .collect();
+            print!(
+                "{}",
+                serde_yaml::to_string(&items).map_err(|e| format!("YAML error: {}", e))?
             );
         }
         OutputFormat::Plain => {

@@ -193,9 +193,18 @@ impl Thread {
 
     /// Rebuild content from frontmatter + current body, updating body_start.
     pub fn rebuild_content(&mut self) -> Result<(), String> {
-        // Extract old body before we overwrite content
+        // Extract old body before we overwrite content.
+        // Normalize leading newlines: body_start may land on the '\n' of "---\n"
+        // (off-by-one from parse), and repeated rebuilds can accumulate blank lines.
+        // Strip all leading '\n', then prepend exactly one as the separator.
         let old_body = if self.body_start < self.content.len() {
-            self.content[self.body_start..].to_string()
+            let raw = &self.content[self.body_start..];
+            let trimmed = raw.trim_start_matches('\n');
+            if trimmed.is_empty() {
+                String::new()
+            } else {
+                format!("\n{}", trimmed)
+            }
         } else {
             String::new()
         };
@@ -205,7 +214,8 @@ impl Thread {
 
         let yaml = serde_yaml::to_string(&self.frontmatter)
             .map_err(|e| format!("serializing YAML: {}", e))?;
-        sb.push_str(&yaml);
+        sb.push_str(yaml.trim_end());
+        sb.push('\n');
         sb.push_str("---\n");
 
         let new_body_start = sb.len();
@@ -1752,6 +1762,29 @@ Body here.
             body2.contains("Body here."),
             "body preserved after second rebuild"
         );
+    }
+
+    #[test]
+    fn test_rebuild_content_no_blank_line_accumulation() {
+        let content = "---\nid: abc123\nname: Test\nstatus: active\n---\n\nBody here.\n";
+        let mut t = make_thread_with_content(content);
+
+        // Simulate 5 mutation cycles (each mutates frontmatter twice: item + log)
+        for i in 0..5 {
+            t.add_note(&format!("note {}", i)).expect("add_note failed");
+            t.insert_log_entry(&format!("log {}", i))
+                .expect("insert_log_entry failed");
+        }
+
+        // Count leading newlines in body (after "---\n" closing)
+        let body = &t.content[t.body_start..];
+        let leading_newlines = body.chars().take_while(|&c| c == '\n').count();
+        assert_eq!(
+            leading_newlines, 1,
+            "body should have exactly one leading newline after 5 rebuild cycles, got {}",
+            leading_newlines
+        );
+        assert!(body.contains("Body here."), "body content preserved");
     }
 
     #[test]
