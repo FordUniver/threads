@@ -40,10 +40,11 @@ test_note_remove() {
         # Remove by hash
         $THREADS_BIN note abc123 remove "$hash" >/dev/null 2>&1
 
-        local content
-        content=$(cat "$(get_thread_path abc123)")
+        # Check via note list (not raw file - log entries may still reference the text)
+        local notes_output
+        notes_output=$($THREADS_BIN note abc123 list 2>/dev/null)
 
-        assert_not_contains "$content" "Note to remove" "note should be removed"
+        assert_not_contains "$notes_output" "Note to remove" "note should be removed"
     fi
 
     teardown_test_workspace
@@ -70,14 +71,15 @@ test_note_edit() {
         # Edit by hash - shell impl has BSD awk bug, may fail
         $THREADS_BIN note abc123 edit "$hash" "Modified note" >/dev/null 2>&1
 
-        local content
-        content=$(cat "$(get_thread_path abc123)")
+        # Check via note list (not raw file - log entries may still reference old text)
+        local notes_output
+        notes_output=$($THREADS_BIN note abc123 list 2>/dev/null)
 
         # Skip assertion if edit didn't work (known shell bug)
         # Go/Python implementations should pass this
-        if [[ "$content" == *"Modified note"* ]]; then
-            assert_contains "$content" "Modified note" "should contain modified text"
-            assert_not_contains "$content" "Original note" "should not contain original text"
+        if [[ "$notes_output" == *"Modified note"* ]]; then
+            assert_contains "$notes_output" "Modified note" "should contain modified text"
+            assert_not_contains "$notes_output" "Original note" "should not contain original text"
         else
             skip_test "shell impl has BSD awk bug in note edit"
         fi
