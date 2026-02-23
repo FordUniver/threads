@@ -72,6 +72,7 @@ fn issue_description(code: &str) -> &'static str {
         "W006" => "Malformed checkbox",
         "W007" => "Log entry missing or legacy timestamp",
         "W008" => "Legacy date header",
+        "W009" => "Filename missing ID prefix",
         _ => "Unknown issue",
     }
 }
@@ -803,6 +804,14 @@ fn validate_frontmatter(content: &str, path: &Path, config: &Config) -> Frontmat
                 "ID mismatch: frontmatter has '{}', filename has '{}'",
                 fm.id, filename_id
             ),
+        ));
+    }
+
+    // W009: Frontmatter has ID but filename has no ID prefix
+    if !fm.id.is_empty() && extract_id_from_path(path).is_none() {
+        issues.push(Issue::warning(
+            "W009",
+            format!("frontmatter id '{}' not reflected in filename", fm.id),
         ));
     }
 

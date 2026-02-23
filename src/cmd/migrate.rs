@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use clap::Args;
+use clap::{Args, Subcommand};
 use colored::Colorize;
 
 use crate::args::DirectionArgs;
@@ -12,6 +12,9 @@ use crate::workspace;
 
 #[derive(Args)]
 pub struct MigrateArgs {
+    #[command(subcommand)]
+    action: Option<MigrateAction>,
+
     /// Thread ID to migrate (omit to migrate threads in scope)
     #[arg(default_value = "")]
     id: String,
@@ -28,14 +31,42 @@ pub struct MigrateArgs {
     dry_run: bool,
 }
 
+#[derive(Subcommand)]
+enum MigrateAction {
+    /// Fix migration artifacts: checkbox prefixes and escape sequences in item text
+    Fix {
+        /// Preview changes without writing
+        #[arg(long)]
+        dry_run: bool,
+
+        #[command(flatten)]
+        direction: DirectionArgs,
+
+        /// Fix all threads in workspace
+        #[arg(short = 'a', long)]
+        all: bool,
+    },
+}
+
 pub fn run(args: MigrateArgs, ws: &Path) -> Result<(), String> {
+    match args.action {
+        Some(MigrateAction::Fix {
+            dry_run,
+            direction,
+            all,
+        }) => run_fix(ws, dry_run, &direction, all),
+        None => run_migrate(args, ws),
+    }
+}
+
+fn run_migrate(args: MigrateArgs, ws: &Path) -> Result<(), String> {
     if !args.id.is_empty() {
         // Single thread
         let file = workspace::find_by_ref(ws, &args.id)?;
         migrate_file(&file, ws, args.dry_run)?;
     } else {
         // Multi-thread mode
-        let files = collect_files(&args, ws)?;
+        let files = collect_migrate_files(&args, ws)?;
         if files.is_empty() {
             println!("No threads found.");
             return Ok(());
@@ -84,14 +115,70 @@ pub fn run(args: MigrateArgs, ws: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn collect_files(args: &MigrateArgs, ws: &Path) -> Result<Vec<PathBuf>, String> {
-    if args.all {
+fn run_fix(ws: &Path, dry_run: bool, direction: &DirectionArgs, all: bool) -> Result<(), String> {
+    let files = collect_scoped_files(ws, direction, all)?;
+    if files.is_empty() {
+        println!("No threads found.");
+        return Ok(());
+    }
+
+    let mut fixed = 0;
+    let mut clean = 0;
+    let mut errors = 0;
+
+    for file in &files {
+        match fix_file(file, ws, dry_run) {
+            Ok(true) => fixed += 1,
+            Ok(false) => clean += 1,
+            Err(e) => {
+                let rel = file.strip_prefix(ws).unwrap_or(file);
+                eprintln!("{}: {}", rel.display(), e);
+                errors += 1;
+            }
+        }
+    }
+
+    if dry_run {
+        println!("\nDry run: {} would be fixed, {} clean", fixed, clean);
+    } else {
+        let mut parts = Vec::new();
+        if fixed > 0 {
+            parts.push(format!("{} fixed", fixed));
+        }
+        if clean > 0 {
+            parts.push(format!("{} clean", clean));
+        }
+        if errors > 0 {
+            parts.push(format!("{} errors", errors).red().to_string());
+        }
+        if !parts.is_empty() {
+            println!("{}", parts.join(", "));
+        }
+    }
+
+    if errors > 0 {
+        return Err(format!("{} files had errors", errors));
+    }
+
+    Ok(())
+}
+
+fn collect_migrate_files(args: &MigrateArgs, ws: &Path) -> Result<Vec<PathBuf>, String> {
+    collect_scoped_files(ws, &args.direction, args.all)
+}
+
+fn collect_scoped_files(
+    ws: &Path,
+    direction: &DirectionArgs,
+    all: bool,
+) -> Result<Vec<PathBuf>, String> {
+    if all {
         return workspace::find_all_threads(ws);
     }
 
     let scope = workspace::infer_scope(ws, None)?;
     let start_path = scope.threads_dir.parent().unwrap_or(ws);
-    let options = args.direction.to_find_options();
+    let options = direction.to_find_options();
     workspace::find_threads_with_options(start_path, ws, &options)
 }
 
@@ -202,6 +289,78 @@ fn migrate_file(file: &Path, ws: &Path, dry_run: bool) -> Result<bool, String> {
             parts.join(", ")
         }
     );
+
+    Ok(true)
+}
+
+/// Fix migration artifacts in a single thread file.
+/// Returns Ok(true) if fixes were applied, Ok(false) if file was already clean.
+fn fix_file(file: &Path, ws: &Path, dry_run: bool) -> Result<bool, String> {
+    let mut t = Thread::parse(file)?;
+
+    let rel = file
+        .strip_prefix(ws)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| file.to_string_lossy().to_string());
+
+    let mut n_checkboxes = 0usize;
+    let mut n_escapes = 0usize;
+
+    // Fix todo items: strip checkbox prefixes, fix done state
+    for item in &mut t.frontmatter.todo {
+        if let Some(rest) = item.text.strip_prefix("[ ] ") {
+            item.text = rest.to_string();
+            item.done = false;
+            n_checkboxes += 1;
+        } else if let Some(rest) = item.text.strip_prefix("[x] ") {
+            item.text = rest.to_string();
+            item.done = true;
+            n_checkboxes += 1;
+        }
+    }
+
+    // Fix escape sequences in all item types
+    for item in &mut t.frontmatter.todo {
+        if item.text.contains("\\!") {
+            item.text = item.text.replace("\\!", "!");
+            n_escapes += 1;
+        }
+    }
+    for item in &mut t.frontmatter.notes {
+        if item.text.contains("\\!") {
+            item.text = item.text.replace("\\!", "!");
+            n_escapes += 1;
+        }
+    }
+    for entry in &mut t.frontmatter.log {
+        if entry.text.contains("\\!") {
+            entry.text = entry.text.replace("\\!", "!");
+            n_escapes += 1;
+        }
+    }
+
+    if n_checkboxes == 0 && n_escapes == 0 {
+        return Ok(false);
+    }
+
+    let mut parts = Vec::new();
+    if n_checkboxes > 0 {
+        parts.push(format!("{} checkboxes", n_checkboxes));
+    }
+    if n_escapes > 0 {
+        parts.push(format!("{} escapes", n_escapes));
+    }
+    let summary = parts.join(", ");
+
+    if dry_run {
+        println!("would fix {}: {}", rel, summary);
+        return Ok(true);
+    }
+
+    t.rebuild_content()?;
+    t.write()?;
+
+    println!("fixed {}: {}", rel, summary);
 
     Ok(true)
 }

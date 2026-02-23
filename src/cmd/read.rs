@@ -70,46 +70,10 @@ struct ThreadOutput {
     desc: String,
     path: String,
     body: String,
-    notes: String,
-    todo: String,
-    log: String,
+    notes: Vec<NoteItem>,
+    todo: Vec<TodoItem>,
+    log: Vec<LogEntry>,
     raw: String,
-}
-
-/// Convert NoteItems to section-format string for structured output backward compat
-fn notes_to_section_string(notes: &[NoteItem]) -> String {
-    notes
-        .iter()
-        .map(|n| format!("- {}  <!-- {} -->", n.text, n.hash))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Convert TodoItems to section-format string for structured output backward compat
-fn todos_to_section_string(todos: &[TodoItem]) -> String {
-    todos
-        .iter()
-        .map(|t| {
-            let mark = if t.done { "x" } else { " " };
-            format!("- [{}] {}  <!-- {} -->", mark, t.text, t.hash)
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// Convert LogEntries to section-format string for structured output backward compat
-fn log_to_section_string(entries: &[LogEntry]) -> String {
-    entries
-        .iter()
-        .map(|e| {
-            if e.ts.is_empty() {
-                format!("- {}", e.text)
-            } else {
-                format!("- [{}] {}", e.ts, e.text)
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 /// Output thread as JSON or YAML
@@ -119,26 +83,6 @@ fn output_structured(
     raw_content: &str,
     format: OutputFormat,
 ) -> Result<(), String> {
-    let notes_items = thread.get_notes();
-    let todo_items = thread.get_todo_items();
-    let log_entries = thread.get_log_entries();
-
-    let notes_str = if notes_items.is_empty() {
-        thread::extract_section(&thread.content, "Notes")
-    } else {
-        notes_to_section_string(&notes_items)
-    };
-    let todo_str = if todo_items.is_empty() {
-        thread::extract_section(&thread.content, "Todo")
-    } else {
-        todos_to_section_string(&todo_items)
-    };
-    let log_str = if log_entries.is_empty() {
-        thread::extract_section(&thread.content, "Log")
-    } else {
-        log_to_section_string(&log_entries)
-    };
-
     let output = ThreadOutput {
         id: thread.frontmatter.id.clone(),
         name: thread.name().to_string(),
@@ -146,9 +90,9 @@ fn output_structured(
         desc: thread.frontmatter.desc.clone(),
         path: rel_path.to_string(),
         body: thread::extract_section(&thread.content, "Body"),
-        notes: notes_str,
-        todo: todo_str,
-        log: log_str,
+        notes: thread.get_notes(),
+        todo: thread.get_todo_items(),
+        log: thread.get_log_entries(),
         raw: raw_content.to_string(),
     };
 
