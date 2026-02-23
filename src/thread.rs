@@ -23,7 +23,6 @@ static ID_PREFIX_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([0-9a-f]{
 static HASH_COMMENT_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"<!--\s*([a-f0-9]{4})\s*-->").unwrap());
 
-
 /// Closed statuses (threads that don't need attention)
 pub const CLOSED_STATUSES: &[&str] = &["resolved", "superseded", "deferred", "rejected"];
 
@@ -242,10 +241,13 @@ impl Thread {
     /// Add a note to frontmatter (prepend). Returns the generated hash.
     pub fn add_note(&mut self, text: &str) -> Result<String, String> {
         let hash = generate_hash(text);
-        self.frontmatter.notes.insert(0, NoteItem {
-            text: text.to_string(),
-            hash: hash.clone(),
-        });
+        self.frontmatter.notes.insert(
+            0,
+            NoteItem {
+                text: text.to_string(),
+                hash: hash.clone(),
+            },
+        );
         self.rebuild_content()?;
         Ok(hash)
     }
@@ -253,11 +255,14 @@ impl Thread {
     /// Add a todo item to frontmatter (prepend). Returns the generated hash.
     pub fn add_todo_item(&mut self, text: &str) -> Result<String, String> {
         let hash = generate_hash(text);
-        self.frontmatter.todo.insert(0, TodoItem {
-            text: text.to_string(),
-            hash: hash.clone(),
-            done: false,
-        });
+        self.frontmatter.todo.insert(
+            0,
+            TodoItem {
+                text: text.to_string(),
+                hash: hash.clone(),
+                done: false,
+            },
+        );
         self.rebuild_content()?;
         Ok(hash)
     }
@@ -265,10 +270,13 @@ impl Thread {
     /// Add a log entry to frontmatter (prepend with current timestamp).
     pub fn insert_log_entry(&mut self, entry: &str) -> Result<(), String> {
         let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-        self.frontmatter.log.insert(0, LogEntry {
-            ts,
-            text: entry.to_string(),
-        });
+        self.frontmatter.log.insert(
+            0,
+            LogEntry {
+                ts,
+                text: entry.to_string(),
+            },
+        );
         self.rebuild_content()
     }
 
@@ -278,7 +286,10 @@ impl Thread {
         match section {
             "Notes" => {
                 if !self.frontmatter.notes.is_empty() {
-                    return self.frontmatter.notes.iter()
+                    return self
+                        .frontmatter
+                        .notes
+                        .iter()
                         .filter(|n| n.hash.starts_with(hash))
                         .count();
                 }
@@ -286,7 +297,10 @@ impl Thread {
             }
             "Todo" => {
                 if !self.frontmatter.todo.is_empty() {
-                    return self.frontmatter.todo.iter()
+                    return self
+                        .frontmatter
+                        .todo
+                        .iter()
                         .filter(|t| t.hash.starts_with(hash))
                         .count();
                 }
@@ -302,7 +316,10 @@ impl Thread {
         match section {
             "Notes" => {
                 if !self.frontmatter.notes.is_empty() {
-                    let pos = self.frontmatter.notes.iter()
+                    let pos = self
+                        .frontmatter
+                        .notes
+                        .iter()
                         .position(|n| n.hash.starts_with(hash))
                         .ok_or_else(|| format!("no item with hash '{}' found", hash))?;
                     self.frontmatter.notes.remove(pos);
@@ -311,7 +328,10 @@ impl Thread {
             }
             "Todo" => {
                 if !self.frontmatter.todo.is_empty() {
-                    let pos = self.frontmatter.todo.iter()
+                    let pos = self
+                        .frontmatter
+                        .todo
+                        .iter()
                         .position(|t| t.hash.starts_with(hash))
                         .ok_or_else(|| format!("no item with hash '{}' found", hash))?;
                     self.frontmatter.todo.remove(pos);
@@ -327,11 +347,19 @@ impl Thread {
 
     /// Edit an item by hash in the given section.
     /// Operates on frontmatter if populated, otherwise falls back to section content.
-    pub fn edit_by_hash(&mut self, section: &str, hash: &str, new_text: &str) -> Result<(), String> {
+    pub fn edit_by_hash(
+        &mut self,
+        section: &str,
+        hash: &str,
+        new_text: &str,
+    ) -> Result<(), String> {
         match section {
             "Notes" => {
                 if !self.frontmatter.notes.is_empty() {
-                    let item = self.frontmatter.notes.iter_mut()
+                    let item = self
+                        .frontmatter
+                        .notes
+                        .iter_mut()
                         .find(|n| n.hash.starts_with(hash))
                         .ok_or_else(|| format!("no item with hash '{}' found", hash))?;
                     item.text = new_text.to_string();
@@ -349,7 +377,10 @@ impl Thread {
     /// Operates on frontmatter if populated, otherwise falls back to section content.
     pub fn set_todo_checked(&mut self, hash: &str, checked: bool) -> Result<(), String> {
         if !self.frontmatter.todo.is_empty() {
-            let item = self.frontmatter.todo.iter_mut()
+            let item = self
+                .frontmatter
+                .todo
+                .iter_mut()
                 .find(|t| t.hash.starts_with(hash))
                 .ok_or_else(|| format!("no item with hash '{}' found", hash))?;
             item.done = checked;
@@ -457,7 +488,6 @@ pub fn generate_hash(text: &str) -> String {
 // ============================================================================
 // Section-based operations (legacy / fallback / migration use)
 // ============================================================================
-
 
 /// Replace section content
 pub fn replace_section(content: &str, name: &str, new_content: &str) -> String {
@@ -624,10 +654,8 @@ pub fn get_log_entries_from_section(content: &str) -> Vec<LogEntry> {
     }
 
     // Regexes for the various legacy log formats
-    let bracket_ts_re =
-        Regex::new(r"^- \[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\](.*)$").unwrap();
-    let bold_ts_re =
-        Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*(.*)$").unwrap();
+    let bracket_ts_re = Regex::new(r"^- \[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\](.*)$").unwrap();
+    let bold_ts_re = Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*(.*)$").unwrap();
     let time_re = Regex::new(r"^- \*\*(\d{2}:\d{2})\*\*(.*)$").unwrap();
     let date_re = Regex::new(r"^### (\d{4}-\d{2}-\d{2})$").unwrap();
 
@@ -670,7 +698,6 @@ pub fn get_log_entries_from_section(content: &str) -> Vec<LogEntry> {
 
     entries
 }
-
 
 /// Remove item by hash from a markdown section
 pub fn remove_by_hash_from_section(
@@ -831,7 +858,11 @@ pub fn strip_old_sections(body: &str) -> String {
     }
 
     // Trim trailing empty lines
-    while result_lines.last().map(|l| l.trim().is_empty()).unwrap_or(false) {
+    while result_lines
+        .last()
+        .map(|l| l.trim().is_empty())
+        .unwrap_or(false)
+    {
         result_lines.pop();
     }
 
@@ -1403,8 +1434,14 @@ Some body.
         assert_eq!(t.frontmatter.notes[0].hash, hash);
 
         // Content rebuilt with notes in YAML
-        assert!(t.content.contains("notes:"), "content should contain notes:");
-        assert!(t.content.contains("New note"), "content should contain note text");
+        assert!(
+            t.content.contains("notes:"),
+            "content should contain notes:"
+        );
+        assert!(
+            t.content.contains("New note"),
+            "content should contain note text"
+        );
 
         // Body still present
         assert!(t.content.contains("Some body."), "body should be preserved");
@@ -1420,7 +1457,9 @@ status: active
 "#;
 
         let mut t = make_thread_with_content(content);
-        let hash = t.add_todo_item("Do something").expect("add_todo_item failed");
+        let hash = t
+            .add_todo_item("Do something")
+            .expect("add_todo_item failed");
 
         assert_eq!(t.frontmatter.todo.len(), 1);
         assert_eq!(t.frontmatter.todo[0].text, "Do something");
@@ -1438,7 +1477,8 @@ status: active
 "#;
 
         let mut t = make_thread_with_content(content);
-        t.insert_log_entry("Did a thing").expect("insert_log_entry failed");
+        t.insert_log_entry("Did a thing")
+            .expect("insert_log_entry failed");
 
         assert_eq!(t.frontmatter.log.len(), 1);
         assert_eq!(t.frontmatter.log[0].text, "Did a thing");
@@ -1459,10 +1499,12 @@ todo:
 "#;
 
         let mut t = make_thread_with_content(content);
-        t.set_todo_checked("a1b2", true).expect("set_todo_checked failed");
+        t.set_todo_checked("a1b2", true)
+            .expect("set_todo_checked failed");
         assert!(t.frontmatter.todo[0].done);
 
-        t.set_todo_checked("a1b2", false).expect("set_todo_checked failed");
+        t.set_todo_checked("a1b2", false)
+            .expect("set_todo_checked failed");
         assert!(!t.frontmatter.todo[0].done);
     }
 
@@ -1481,7 +1523,8 @@ notes:
 "#;
 
         let mut t = make_thread_with_content(content);
-        t.remove_by_hash("Notes", "a1b2").expect("remove_by_hash failed");
+        t.remove_by_hash("Notes", "a1b2")
+            .expect("remove_by_hash failed");
 
         assert_eq!(t.frontmatter.notes.len(), 1);
         assert_eq!(t.frontmatter.notes[0].text, "Note two");
@@ -1562,9 +1605,13 @@ Body here.
         assert!(body.contains("Body here."), "body preserved after rebuild");
 
         // Add log entry (second rebuild)
-        t.insert_log_entry("test entry").expect("insert_log_entry failed");
+        t.insert_log_entry("test entry")
+            .expect("insert_log_entry failed");
         let body2 = &t.content[t.body_start..];
-        assert!(body2.contains("Body here."), "body preserved after second rebuild");
+        assert!(
+            body2.contains("Body here."),
+            "body preserved after second rebuild"
+        );
     }
 
     #[test]
@@ -1613,7 +1660,10 @@ Some content here.
 
         let stripped = strip_old_sections(body);
 
-        assert!(stripped.contains("Some content here."), "Body content preserved");
+        assert!(
+            stripped.contains("Some content here."),
+            "Body content preserved"
+        );
         assert!(!stripped.contains("Note one"), "Notes removed");
         assert!(!stripped.contains("Task"), "Todo removed");
         assert!(!stripped.contains("Entry"), "Log removed");
@@ -1660,6 +1710,9 @@ Some content.
 
         // Section extraction should return empty (no section exists)
         let section_notes = extract_section(&t.content, "Notes");
-        assert!(section_notes.is_empty(), "No Notes section in migrated file");
+        assert!(
+            section_notes.is_empty(),
+            "No Notes section in migrated file"
+        );
     }
 }

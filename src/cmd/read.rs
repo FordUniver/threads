@@ -363,7 +363,11 @@ fn detect_prefix(line: &str) -> Option<(String, String)> {
     // Examples: " 39m ", "  1h ", " now ", "12mo "
     // Format from format_log: "{:>4} content" where timestamp is cyan-styled
     if stripped.len() >= 5 {
-        let end = stripped.char_indices().nth(5).map(|(i, _)| i).unwrap_or(stripped.len());
+        let end = stripped
+            .char_indices()
+            .nth(5)
+            .map(|(i, _)| i)
+            .unwrap_or(stripped.len());
         let first_five = &stripped[..end];
         let trimmed = first_five.trim_start();
         // Check if trimmed part (without leading spaces) looks like timestamp + space
