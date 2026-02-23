@@ -353,20 +353,17 @@ impl Thread {
         hash: &str,
         new_text: &str,
     ) -> Result<(), String> {
-        match section {
-            "Notes" => {
-                if !self.frontmatter.notes.is_empty() {
-                    let item = self
-                        .frontmatter
-                        .notes
-                        .iter_mut()
-                        .find(|n| n.hash.starts_with(hash))
-                        .ok_or_else(|| format!("no item with hash '{}' found", hash))?;
-                    item.text = new_text.to_string();
-                    return self.rebuild_content();
-                }
+        if section == "Notes" {
+            if !self.frontmatter.notes.is_empty() {
+                let item = self
+                    .frontmatter
+                    .notes
+                    .iter_mut()
+                    .find(|n| n.hash.starts_with(hash))
+                    .ok_or_else(|| format!("no item with hash '{}' found", hash))?;
+                item.text = new_text.to_string();
+                return self.rebuild_content();
             }
-            _ => {}
         }
         // Fallback to section-based edit
         self.content = edit_by_hash_from_section(&self.content, section, hash, new_text)?;
