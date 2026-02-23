@@ -95,6 +95,46 @@ test_log_agenda_json() {
     assert_json_field "$output" ".[0].thread_id" "abc123" "thread_id should match"
     assert_json_field_not_empty "$output" ".[0].thread_name" "thread_name field should be present"
     assert_json_field_not_empty "$output" ".[0].thread_path" "thread_path field should be present"
+    assert_json_field_not_empty "$output" ".[0].ts" "ts field should be present"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: most recent entry appears first
+test_log_agenda_sort_order() {
+    begin_test "log agenda: most recent entry appears first"
+    setup_test_workspace
+
+    create_thread "abc123" "My Thread" "active"
+    $THREADS_BIN log abc123 "older entry" >/dev/null 2>&1
+    sleep 1
+    $THREADS_BIN log abc123 "newer entry" >/dev/null 2>&1
+
+    local output
+    output=$(cd "$TEST_WS" && $THREADS_BIN log 2>/dev/null)
+
+    local line_newer line_older
+    line_newer=$(echo "$output" | grep -n "newer entry" | cut -d: -f1)
+    line_older=$(echo "$output" | grep -n "older entry" | cut -d: -f1)
+    assert_gt "$line_older" "$line_newer" "newer entry should appear before older entry"
+
+    teardown_test_workspace
+    end_test
+}
+
+# Test: --yaml output is valid
+test_log_agenda_yaml() {
+    begin_test "log agenda: --yaml output is valid"
+    setup_test_workspace
+
+    create_thread "abc123" "YAML Thread" "active"
+    $THREADS_BIN log abc123 "YAML entry" >/dev/null 2>&1
+
+    local output
+    output=$(cd "$TEST_WS" && $THREADS_BIN log --format=yaml 2>/dev/null)
+
+    assert_yaml_valid "$output" "output should be valid YAML"
 
     teardown_test_workspace
     end_test
@@ -143,5 +183,7 @@ test_log_agenda_open_entry
 test_log_agenda_closed_thread
 test_log_agenda_down
 test_log_agenda_json
+test_log_agenda_sort_order
+test_log_agenda_yaml
 test_log_agenda_multiple_threads
 test_log_single_thread_add

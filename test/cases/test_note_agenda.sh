@@ -125,6 +125,23 @@ test_note_agenda_multiple_threads() {
     end_test
 }
 
+# Test: --yaml output is valid
+test_note_agenda_yaml() {
+    begin_test "note agenda: --yaml output is valid"
+    setup_test_workspace
+
+    create_thread "abc123" "YAML Thread" "active"
+    $THREADS_BIN note abc123 add "YAML note" >/dev/null 2>&1
+
+    local output
+    output=$(cd "$TEST_WS" && $THREADS_BIN note --format=yaml 2>/dev/null)
+
+    assert_yaml_valid "$output" "output should be valid YAML"
+
+    teardown_test_workspace
+    end_test
+}
+
 # Test: single-thread list still works when id provided
 test_note_single_thread_list() {
     begin_test "note single-thread list unaffected"
@@ -164,6 +181,7 @@ test_note_agenda_open_note
 test_note_agenda_closed_thread
 test_note_agenda_down
 test_note_agenda_json
+test_note_agenda_yaml
 test_note_agenda_multiple_threads
 test_note_single_thread_list
 test_note_single_thread_add
