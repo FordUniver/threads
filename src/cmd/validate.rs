@@ -1105,8 +1105,13 @@ fn run_fix(
 
         // E002: Fix frontmatter quoting
         if fix_e002 {
-            let (new_content, fixed) =
-                fix_frontmatter_quoting(&current_content, &rel_path, dry_run, format, &mut fix_entries);
+            let (new_content, fixed) = fix_frontmatter_quoting(
+                &current_content,
+                &rel_path,
+                dry_run,
+                format,
+                &mut fix_entries,
+            );
             if fixed > 0 {
                 file_fm_fixed = fixed;
                 current_content = new_content;
@@ -1116,8 +1121,15 @@ fn run_fix(
 
         // W007: Fix log timestamps
         if fix_w007 {
-            let (new_lines, fixes, removed) =
-                fix_log_section(&current_content, path, ws, dry_run, &rel_path, format, &mut fix_entries);
+            let (new_lines, fixes, removed) = fix_log_section(
+                &current_content,
+                path,
+                ws,
+                dry_run,
+                &rel_path,
+                format,
+                &mut fix_entries,
+            );
             if fixes > 0 || removed > 0 {
                 file_log_fixed = fixes;
                 file_headers_removed = removed;

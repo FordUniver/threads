@@ -138,13 +138,11 @@ fn run_agenda(args: &LogArgs, ws: &Path, _config: &Config) -> Result<(), String>
     }
 
     // Sort: entries with ts descending (most recent first); empty ts last
-    agenda.sort_by(|a, b| {
-        match (a.ts.is_empty(), b.ts.is_empty()) {
-            (true, true) => std::cmp::Ordering::Equal,
-            (true, false) => std::cmp::Ordering::Greater,
-            (false, true) => std::cmp::Ordering::Less,
-            (false, false) => b.ts.cmp(&a.ts),
-        }
+    agenda.sort_by(|a, b| match (a.ts.is_empty(), b.ts.is_empty()) {
+        (true, true) => std::cmp::Ordering::Equal,
+        (true, false) => std::cmp::Ordering::Greater,
+        (false, true) => std::cmp::Ordering::Less,
+        (false, false) => b.ts.cmp(&a.ts),
     });
 
     match format {
