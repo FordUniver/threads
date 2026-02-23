@@ -60,8 +60,11 @@ struct ThreadInfoData {
     updated_dt: Option<DateTime<Local>>,
     git_status: String,
     log_count: usize,
+    note_count: usize,
     todo_count: usize,
     todo_done: usize,
+    deadline_count: usize,
+    event_count: usize,
     git_history: Vec<GitLogEntry>,
 }
 
@@ -113,9 +116,12 @@ pub fn run(args: InfoArgs, ws: &Path) -> Result<(), String> {
 
     let git_status = get_git_status(&repo, &rel_path);
     let log_count = thread.get_log_entries().len();
+    let note_count = thread.get_notes().len();
     let todo_items = thread.get_todo_items();
     let todo_count = todo_items.len();
     let todo_done = todo_items.iter().filter(|t| t.done).count();
+    let deadline_count = thread.get_deadlines().len();
+    let event_count = thread.get_events().len();
     let git_history = get_git_history(ws, &rel_path);
 
     // Get timestamps from git history (created = initial commit, updated = most recent)
@@ -133,8 +139,11 @@ pub fn run(args: InfoArgs, ws: &Path) -> Result<(), String> {
         updated_dt,
         git_status,
         log_count,
+        note_count,
         todo_count,
         todo_done,
+        deadline_count,
+        event_count,
         git_history,
     };
 
@@ -173,10 +182,30 @@ fn output_pretty(info: &ThreadInfoData) -> Result<(), String> {
         String::new()
     };
 
-    let right_side = format!(
-        "{} · {} · {}{}",
-        info.log_count, todo_text, status_styled, git_part
-    );
+    let mut stats_parts: Vec<String> = vec![info.log_count.to_string(), todo_text];
+    if info.note_count > 0 {
+        stats_parts.push(format!(
+            "{} note{}",
+            info.note_count,
+            if info.note_count == 1 { "" } else { "s" }
+        ));
+    }
+    if info.deadline_count > 0 {
+        stats_parts.push(format!(
+            "{} deadline{}",
+            info.deadline_count,
+            if info.deadline_count == 1 { "" } else { "s" }
+        ));
+    }
+    if info.event_count > 0 {
+        stats_parts.push(format!(
+            "{} event{}",
+            info.event_count,
+            if info.event_count == 1 { "" } else { "s" }
+        ));
+    }
+    stats_parts.push(format!("{}{}", status_styled, git_part));
+    let right_side = stats_parts.join(" · ");
 
     // Title line: title followed by stats (no HFILL - table handles width)
     let title = info.title.cyan().bold().to_string();
@@ -360,7 +389,29 @@ fn output_plain(info: &ThreadInfoData) -> Result<(), String> {
     } else {
         format!("{}/{} todos", info.todo_done, info.todo_count)
     };
-    println!("{} log {} | {}", info.log_count, log_word, todo_display);
+    let mut stat_parts = vec![format!("{} log {}", info.log_count, log_word), todo_display];
+    if info.note_count > 0 {
+        stat_parts.push(format!(
+            "{} note{}",
+            info.note_count,
+            if info.note_count == 1 { "" } else { "s" }
+        ));
+    }
+    if info.deadline_count > 0 {
+        stat_parts.push(format!(
+            "{} deadline{}",
+            info.deadline_count,
+            if info.deadline_count == 1 { "" } else { "s" }
+        ));
+    }
+    if info.event_count > 0 {
+        stat_parts.push(format!(
+            "{} event{}",
+            info.event_count,
+            if info.event_count == 1 { "" } else { "s" }
+        ));
+    }
+    println!("{}", stat_parts.join(" | "));
     println!();
 
     // History
@@ -394,8 +445,11 @@ fn output_json(info: &ThreadInfoData) -> Result<(), String> {
         updated: String,
         git_status: String,
         log_count: usize,
+        note_count: usize,
         todo_count: usize,
         todo_done: usize,
+        deadline_count: usize,
+        event_count: usize,
         git_history: Vec<String>,
     }
 
@@ -414,8 +468,11 @@ fn output_json(info: &ThreadInfoData) -> Result<(), String> {
         updated: info.updated_iso(),
         git_status: info.git_status.clone(),
         log_count: info.log_count,
+        note_count: info.note_count,
         todo_count: info.todo_count,
         todo_done: info.todo_done,
+        deadline_count: info.deadline_count,
+        event_count: info.event_count,
         git_history: history_strings,
     };
 
@@ -439,8 +496,11 @@ fn output_yaml(info: &ThreadInfoData) -> Result<(), String> {
         updated: String,
         git_status: String,
         log_count: usize,
+        note_count: usize,
         todo_count: usize,
         todo_done: usize,
+        deadline_count: usize,
+        event_count: usize,
         git_history: Vec<String>,
     }
 
@@ -459,8 +519,11 @@ fn output_yaml(info: &ThreadInfoData) -> Result<(), String> {
         updated: info.updated_iso(),
         git_status: info.git_status.clone(),
         log_count: info.log_count,
+        note_count: info.note_count,
         todo_count: info.todo_count,
         todo_done: info.todo_done,
+        deadline_count: info.deadline_count,
+        event_count: info.event_count,
         git_history: history_strings,
     };
 

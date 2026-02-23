@@ -192,6 +192,8 @@ fn output_pretty(
     let body = thread::extract_section(&thread.content, "Body");
     let notes_items = thread.get_notes();
     let todo_items = thread.get_todo_items();
+    let deadline_items = thread.get_deadlines();
+    let event_items = thread.get_events();
     let log_entries = thread.get_log_entries();
 
     // === Build sections dynamically ===
@@ -205,6 +207,12 @@ fn output_pretty(
     }
     if !todo_items.is_empty() {
         sections.push(format_todos(&todo_items));
+    }
+    if !deadline_items.is_empty() {
+        sections.push(format_deadlines(&deadline_items));
+    }
+    if !event_items.is_empty() {
+        sections.push(format_events(&event_items));
     }
     if !log_entries.is_empty() {
         sections.push(format_log(&log_entries));
@@ -450,6 +458,38 @@ fn format_todos(todos: &[TodoItem]) -> String {
             } else {
                 format!("{} {}", "☐".yellow(), rendered)
             }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Format deadline items with date styling
+fn format_deadlines(items: &[DeadlineItem]) -> String {
+    use crate::cmd::deadline::style_deadline_date;
+    let today = Local::now().date_naive();
+    items
+        .iter()
+        .map(|item| {
+            let date_styled = style_deadline_date(&item.date, today);
+            format!("{}  {}  {}", date_styled, item.text, item.hash.dimmed())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Format event items with date (and optional time) styling
+fn format_events(items: &[EventItem]) -> String {
+    use crate::cmd::deadline::style_deadline_date;
+    let today = Local::now().date_naive();
+    items
+        .iter()
+        .map(|item| {
+            let date_styled = style_deadline_date(&item.date, today);
+            let when = match &item.time {
+                Some(t) => format!("{} {}", date_styled, t),
+                None => date_styled,
+            };
+            format!("{}  {}  {}", when, item.text, item.hash.dimmed())
         })
         .collect::<Vec<_>>()
         .join("\n")

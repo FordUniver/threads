@@ -53,7 +53,10 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
     }
 
     if args.id.is_empty() {
-        return Err("usage: threads todo <id> [add <text> | check <hash> | uncheck <hash> | remove <hash>]".to_string());
+        return Err(
+            "usage: threads todo <id> [add <text> | check <hash> | uncheck <hash> | remove <hash>]"
+                .to_string(),
+        );
     }
 
     let file = workspace::find_by_ref(ws, &args.id)?;
