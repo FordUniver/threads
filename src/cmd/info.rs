@@ -112,7 +112,10 @@ pub fn run(args: InfoArgs, ws: &Path) -> Result<(), String> {
     };
 
     let git_status = get_git_status(&repo, &rel_path);
-    let (log_count, todo_count, todo_done) = count_items(&thread.content);
+    let log_count = thread.get_log_entries().len();
+    let todo_items = thread.get_todo_items();
+    let todo_count = todo_items.len();
+    let todo_done = todo_items.iter().filter(|t| t.done).count();
     let git_history = get_git_history(ws, &rel_path);
 
     // Get timestamps from git history (created = initial commit, updated = most recent)
@@ -510,42 +513,6 @@ fn get_git_status(repo: &Repository, rel_path: &str) -> String {
     }
 
     status.to_string()
-}
-
-fn count_items(content: &str) -> (usize, usize, usize) {
-    let mut log_count = 0;
-    let mut todo_count = 0;
-    let mut todo_done = 0;
-    let mut in_log = false;
-    let mut in_todo = false;
-
-    for line in content.lines() {
-        if line.starts_with("## Log") {
-            in_log = true;
-            in_todo = false;
-        } else if line.starts_with("## Todo") {
-            in_todo = true;
-            in_log = false;
-        } else if line.starts_with("## ") {
-            in_log = false;
-            in_todo = false;
-        }
-
-        if in_log && line.starts_with("- **") {
-            log_count += 1;
-        }
-
-        if in_todo {
-            if line.starts_with("- [ ]") {
-                todo_count += 1;
-            } else if line.starts_with("- [x]") {
-                todo_count += 1;
-                todo_done += 1;
-            }
-        }
-    }
-
-    (log_count, todo_count, todo_done)
 }
 
 fn get_git_history(ws: &Path, rel_path: &str) -> Vec<GitLogEntry> {
