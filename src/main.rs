@@ -85,6 +85,12 @@ enum Commands {
     /// Add log entry
     Log(cmd::log::LogArgs),
 
+    /// Manage deadlines
+    Deadline(cmd::deadline::DeadlineArgs),
+
+    /// Manage events
+    Event(cmd::event::EventArgs),
+
     /// Migrate threads from section-based to frontmatter-based format
     Migrate(cmd::migrate::MigrateArgs),
 
@@ -186,6 +192,8 @@ fn main() {
         Commands::Note(args) => cmd::note::run(args, &ws, &loaded_config.config),
         Commands::Todo(args) => cmd::todo::run(args, &ws, &loaded_config.config),
         Commands::Log(args) => cmd::log::run(args, &ws, &loaded_config.config),
+        Commands::Deadline(args) => cmd::deadline::run(args, &ws, &loaded_config.config),
+        Commands::Event(args) => cmd::event::run(args, &ws, &loaded_config.config),
         Commands::Migrate(args) => cmd::migrate::run(args, &ws),
         Commands::Close(args) => cmd::resolve::run(args, &ws, &loaded_config.config),
         Commands::Reopen(args) => cmd::reopen::run(args, &ws, &loaded_config.config),

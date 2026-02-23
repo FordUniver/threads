@@ -53,6 +53,22 @@ pub struct LogEntry {
     pub text: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeadlineItem {
+    pub date: String, // "YYYY-MM-DD"
+    pub text: String,
+    pub hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventItem {
+    pub date: String, // "YYYY-MM-DD"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<String>, // "HH:MM" or absent
+    pub text: String,
+    pub hash: String,
+}
+
 // ============================================================================
 // Frontmatter
 // ============================================================================
@@ -74,6 +90,10 @@ pub struct Frontmatter {
     pub todo: Vec<TodoItem>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub log: Vec<LogEntry>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deadlines: Vec<DeadlineItem>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<EventItem>,
 }
 
 /// Thread represents a parsed thread file
@@ -366,6 +386,131 @@ impl Thread {
         // Fallback to section-based edit
         self.content = edit_by_hash_from_section(&self.content, section, hash, new_text)?;
         Ok(())
+    }
+
+    // ========================================================================
+    // Deadline operations
+    // ========================================================================
+
+    /// Get all deadline items.
+    pub fn get_deadlines(&self) -> Vec<DeadlineItem> {
+        self.frontmatter.deadlines.clone()
+    }
+
+    /// Add a deadline to frontmatter (prepend). Returns the generated hash.
+    pub fn add_deadline(&mut self, date: &str, text: &str) -> Result<String, String> {
+        let hash = generate_hash(&format!("{}{}", date, text));
+        // Check for collision
+        if self
+            .frontmatter
+            .deadlines
+            .iter()
+            .any(|d| d.hash.starts_with(&hash))
+        {
+            return Err(format!("hash collision for '{}'", hash));
+        }
+        self.frontmatter.deadlines.insert(
+            0,
+            DeadlineItem {
+                date: date.to_string(),
+                text: text.to_string(),
+                hash: hash.clone(),
+            },
+        );
+        self.rebuild_content()?;
+        Ok(hash)
+    }
+
+    /// Remove a deadline by hash prefix. Errors on ambiguous or missing hash.
+    pub fn remove_deadline_by_hash(&mut self, hash: &str) -> Result<(), String> {
+        let count = self
+            .frontmatter
+            .deadlines
+            .iter()
+            .filter(|d| d.hash.starts_with(hash))
+            .count();
+        if count == 0 {
+            return Err(format!("no deadline with hash '{}' found", hash));
+        }
+        if count > 1 {
+            return Err(format!(
+                "ambiguous hash '{}' matches {} deadlines",
+                hash, count
+            ));
+        }
+        let pos = self
+            .frontmatter
+            .deadlines
+            .iter()
+            .position(|d| d.hash.starts_with(hash))
+            .unwrap();
+        self.frontmatter.deadlines.remove(pos);
+        self.rebuild_content()
+    }
+
+    // ========================================================================
+    // Event operations
+    // ========================================================================
+
+    /// Get all event items.
+    pub fn get_events(&self) -> Vec<EventItem> {
+        self.frontmatter.events.clone()
+    }
+
+    /// Add an event to frontmatter (prepend). Returns the generated hash.
+    pub fn add_event(
+        &mut self,
+        date: &str,
+        time: Option<&str>,
+        text: &str,
+    ) -> Result<String, String> {
+        let hash = generate_hash(&format!("{}{}{}", date, time.unwrap_or(""), text));
+        if self
+            .frontmatter
+            .events
+            .iter()
+            .any(|e| e.hash.starts_with(&hash))
+        {
+            return Err(format!("hash collision for '{}'", hash));
+        }
+        self.frontmatter.events.insert(
+            0,
+            EventItem {
+                date: date.to_string(),
+                time: time.map(str::to_string),
+                text: text.to_string(),
+                hash: hash.clone(),
+            },
+        );
+        self.rebuild_content()?;
+        Ok(hash)
+    }
+
+    /// Remove an event by hash prefix. Errors on ambiguous or missing hash.
+    pub fn remove_event_by_hash(&mut self, hash: &str) -> Result<(), String> {
+        let count = self
+            .frontmatter
+            .events
+            .iter()
+            .filter(|e| e.hash.starts_with(hash))
+            .count();
+        if count == 0 {
+            return Err(format!("no event with hash '{}' found", hash));
+        }
+        if count > 1 {
+            return Err(format!(
+                "ambiguous hash '{}' matches {} events",
+                hash, count
+            ));
+        }
+        let pos = self
+            .frontmatter
+            .events
+            .iter()
+            .position(|e| e.hash.starts_with(hash))
+            .unwrap();
+        self.frontmatter.events.remove(pos);
+        self.rebuild_content()
     }
 
     /// Set a todo item's checked state by hash.

@@ -13,7 +13,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::args::FormatArgs;
 use crate::git;
 use crate::output::{self, OutputFormat};
-use crate::thread::{self, LogEntry, NoteItem, Thread, TodoItem};
+use crate::thread::{self, DeadlineItem, EventItem, LogEntry, NoteItem, Thread, TodoItem};
 use crate::workspace;
 
 #[derive(Args)]
@@ -73,6 +73,8 @@ struct ThreadOutput {
     notes: Vec<NoteItem>,
     todo: Vec<TodoItem>,
     log: Vec<LogEntry>,
+    deadlines: Vec<DeadlineItem>,
+    events: Vec<EventItem>,
     raw: String,
 }
 
@@ -93,6 +95,8 @@ fn output_structured(
         notes: thread.get_notes(),
         todo: thread.get_todo_items(),
         log: thread.get_log_entries(),
+        deadlines: thread.get_deadlines(),
+        events: thread.get_events(),
         raw: raw_content.to_string(),
     };
 

@@ -1,6 +1,8 @@
 pub mod body;
 pub mod cache;
 pub mod config_cmd;
+pub mod deadline;
+pub mod event;
 pub mod git_cmd;
 pub mod info;
 pub mod list;

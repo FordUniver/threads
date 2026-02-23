@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local, NaiveDate, Utc};
 use clap::Args;
 use colored::Colorize;
 use serde::Serialize;
@@ -59,6 +59,9 @@ struct ThreadInfo {
     /// Git file status (M/S/A/?/D or empty for clean)
     #[serde(skip_serializing_if = "Option::is_none")]
     git_status: Option<String>,
+    /// Nearest upcoming deadline date (YYYY-MM-DD), or None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    due: Option<String>,
 }
 
 impl ThreadInfo {
@@ -206,6 +209,17 @@ pub fn run(args: ListArgs, git_root: &Path, config: &Config) -> Result<(), Strin
         let file_status = git::file_status(&repo, thread_rel_path);
         let git_status_str = format_git_status(&file_status);
 
+        // Nearest upcoming deadline
+        let today_str = Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let due = {
+            let deadlines = t.get_deadlines();
+            deadlines
+                .into_iter()
+                .map(|d| d.date)
+                .filter(|date| date.as_str() >= today_str.as_str())
+                .min()
+        };
+
         results.push(ThreadInfo {
             id: t.id().to_string(),
             status: base_status,
@@ -226,6 +240,7 @@ pub fn run(args: ListArgs, git_root: &Path, config: &Config) -> Result<(), Strin
             } else {
                 Some(git_status_str.to_string())
             },
+            due,
         });
     }
 
@@ -275,6 +290,8 @@ struct TableRow {
     path: String,
     #[tabled(rename = "GIT")]
     git_status: String,
+    #[tabled(rename = "DUE")]
+    due: String,
     #[tabled(rename = "TITLE")]
     title: String,
 }
@@ -291,6 +308,27 @@ fn format_git_status(status: &git::FileStatus) -> &'static str {
         git::FileStatus::Deleted => "D",
         git::FileStatus::Changed => "M",
         git::FileStatus::Unknown => "",
+    }
+}
+
+/// Style the DUE date for table display.
+fn style_due_date(due: Option<&str>, today: NaiveDate) -> String {
+    let date_str = match due {
+        Some(d) => d,
+        None => return String::new(),
+    };
+    match NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+        Ok(d) => {
+            let days = (d - today).num_days();
+            if days == 0 {
+                date_str.red().bold().to_string()
+            } else if days <= 7 {
+                date_str.yellow().to_string()
+            } else {
+                date_str.to_string()
+            }
+        }
+        Err(_) => date_str.to_string(),
     }
 }
 
@@ -379,7 +417,8 @@ fn output_pretty(
 
     // Build table rows
     let term_width = output::terminal_width();
-    let title_max = term_width.saturating_sub(58).max(20); // Leave room for other columns (added NEW column)
+    let title_max = term_width.saturating_sub(70).max(20); // Leave room for other columns (added NEW, DUE columns)
+    let today = Local::now().date_naive();
 
     let rows: Vec<TableRow> = results
         .iter()
@@ -389,6 +428,8 @@ fn output_pretty(
             // PWD paths are bold, others dimmed
             let path_styled = output::style_path(&path_display, t.is_pwd);
 
+            let due_styled = style_due_date(t.due.as_deref(), today);
+
             TableRow {
                 id: output::style_id(&t.id).to_string(),
                 status: output::style_status(&t.status).to_string(),
@@ -396,6 +437,7 @@ fn output_pretty(
                 modified: t.updated_short(),
                 path: path_styled,
                 git_status: t.git_status.clone().unwrap_or_default(),
+                due: due_styled,
                 title: output::truncate_back(&t.title, title_max),
             }
         })
@@ -461,17 +503,18 @@ fn output_plain(
     }
 
     // Pipe-delimited format, no truncation, full paths
-    println!("ID | STATUS | CREATED | UPDATED | PATH | GIT | TITLE");
+    println!("ID | STATUS | CREATED | UPDATED | PATH | GIT | DUE | TITLE");
 
     for t in results {
         println!(
-            "{} | {} | {} | {} | {} | {} | {}",
+            "{} | {} | {} | {} | {} | {} | {} | {}",
             t.id,
             t.status,
             t.created_plain(),
             t.updated_plain(),
             t.path,
             t.git_status.as_deref().unwrap_or(""),
+            t.due.as_deref().unwrap_or(""),
             t.title
         );
     }
@@ -496,6 +539,8 @@ struct ThreadInfoJson {
     is_pwd: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     git_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    due: Option<String>,
 }
 
 impl From<&ThreadInfo> for ThreadInfoJson {
@@ -512,6 +557,7 @@ impl From<&ThreadInfo> for ThreadInfoJson {
             path_absolute: t.path_absolute.clone(),
             is_pwd: t.is_pwd,
             git_status: t.git_status.clone(),
+            due: t.due.clone(),
         }
     }
 }
