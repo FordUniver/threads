@@ -6,7 +6,7 @@ use clap_complete::engine::ArgValueCompleter;
 use crate::config::{Config, env_bool, is_quiet};
 use crate::git;
 use crate::output;
-use crate::thread::{self, Thread};
+use crate::thread::Thread;
 use crate::workspace;
 
 #[derive(Args)]
@@ -39,13 +39,13 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
 
     match args.action.as_str() {
         "list" | "ls" => {
-            let items = thread::get_todo_items(&t.content);
+            let items = t.get_todo_items();
             if items.is_empty() {
                 println!("No todo items.");
             } else {
-                for (checked, text, hash) in items {
-                    let mark = if checked { "[x]" } else { "[ ]" };
-                    println!("{} {} ({})", mark, text, hash);
+                for item in items {
+                    let mark = if item.done { "[x]" } else { "[ ]" };
+                    println!("{} {} ({})", mark, item.text, item.hash);
                 }
             }
             return Ok(());
@@ -56,8 +56,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
             }
             let text = &args.item;
 
-            let (new_content, hash) = thread::add_todo_item(&t.content, text);
-            t.content = new_content;
+            let hash = t.add_todo_item(text)?;
 
             println!("Added to Todo: {} (id: {})", text, hash);
         }
@@ -68,7 +67,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
             let hash = &args.item;
 
             // Check for ambiguous hash
-            let count = thread::count_matching_items(&t.content, "Todo", hash);
+            let count = t.count_matching_items("Todo", hash);
             if count == 0 {
                 return Err(format!("no unchecked item with hash '{}' found", hash));
             }
@@ -76,7 +75,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
                 return Err(format!("ambiguous hash '{}' matches {} items", hash, count));
             }
 
-            t.content = thread::set_todo_checked(&t.content, "Todo", hash, true)?;
+            t.set_todo_checked(hash, true)?;
 
             println!("Checked item {}", hash);
         }
@@ -87,7 +86,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
             let hash = &args.item;
 
             // Check for ambiguous hash
-            let count = thread::count_matching_items(&t.content, "Todo", hash);
+            let count = t.count_matching_items("Todo", hash);
             if count == 0 {
                 return Err(format!("no checked item with hash '{}' found", hash));
             }
@@ -95,7 +94,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
                 return Err(format!("ambiguous hash '{}' matches {} items", hash, count));
             }
 
-            t.content = thread::set_todo_checked(&t.content, "Todo", hash, false)?;
+            t.set_todo_checked(hash, false)?;
 
             println!("Unchecked item {}", hash);
         }
@@ -106,7 +105,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
             let hash = &args.item;
 
             // Check for ambiguous hash
-            let count = thread::count_matching_items(&t.content, "Todo", hash);
+            let count = t.count_matching_items("Todo", hash);
             if count == 0 {
                 return Err(format!("no item with hash '{}' found", hash));
             }
@@ -114,7 +113,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
                 return Err(format!("ambiguous hash '{}' matches {} items", hash, count));
             }
 
-            t.content = thread::remove_by_hash(&t.content, "Todo", hash)?;
+            t.remove_by_hash("Todo", hash)?;
 
             println!("Removed item {}", hash);
         }

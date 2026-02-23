@@ -6,7 +6,6 @@ use chrono::{Local, NaiveDateTime};
 use clap::Args;
 use clap_complete::engine::ArgValueCompleter;
 use colored::Colorize;
-use regex::Regex;
 use serde::Serialize;
 use termimad::MadSkin;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -14,7 +13,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use crate::args::FormatArgs;
 use crate::git;
 use crate::output::{self, OutputFormat};
-use crate::thread::{self, Thread};
+use crate::thread::{self, LogEntry, NoteItem, Thread, TodoItem};
 use crate::workspace;
 
 #[derive(Args)]
@@ -77,6 +76,42 @@ struct ThreadOutput {
     raw: String,
 }
 
+/// Convert NoteItems to section-format string for structured output backward compat
+fn notes_to_section_string(notes: &[NoteItem]) -> String {
+    notes
+        .iter()
+        .map(|n| format!("- {}  <!-- {} -->", n.text, n.hash))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Convert TodoItems to section-format string for structured output backward compat
+fn todos_to_section_string(todos: &[TodoItem]) -> String {
+    todos
+        .iter()
+        .map(|t| {
+            let mark = if t.done { "x" } else { " " };
+            format!("- [{}] {}  <!-- {} -->", mark, t.text, t.hash)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Convert LogEntries to section-format string for structured output backward compat
+fn log_to_section_string(entries: &[LogEntry]) -> String {
+    entries
+        .iter()
+        .map(|e| {
+            if e.ts.is_empty() {
+                format!("- {}", e.text)
+            } else {
+                format!("- [{}] {}", e.ts, e.text)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Output thread as JSON or YAML
 fn output_structured(
     thread: &Thread,
@@ -84,6 +119,26 @@ fn output_structured(
     raw_content: &str,
     format: OutputFormat,
 ) -> Result<(), String> {
+    let notes_items = thread.get_notes();
+    let todo_items = thread.get_todo_items();
+    let log_entries = thread.get_log_entries();
+
+    let notes_str = if notes_items.is_empty() {
+        thread::extract_section(&thread.content, "Notes")
+    } else {
+        notes_to_section_string(&notes_items)
+    };
+    let todo_str = if todo_items.is_empty() {
+        thread::extract_section(&thread.content, "Todo")
+    } else {
+        todos_to_section_string(&todo_items)
+    };
+    let log_str = if log_entries.is_empty() {
+        thread::extract_section(&thread.content, "Log")
+    } else {
+        log_to_section_string(&log_entries)
+    };
+
     let output = ThreadOutput {
         id: thread.frontmatter.id.clone(),
         name: thread.name().to_string(),
@@ -91,9 +146,9 @@ fn output_structured(
         desc: thread.frontmatter.desc.clone(),
         path: rel_path.to_string(),
         body: thread::extract_section(&thread.content, "Body"),
-        notes: thread::extract_section(&thread.content, "Notes"),
-        todo: thread::extract_section(&thread.content, "Todo"),
-        log: thread::extract_section(&thread.content, "Log"),
+        notes: notes_str,
+        todo: todo_str,
+        log: log_str,
         raw: raw_content.to_string(),
     };
 
@@ -187,9 +242,9 @@ fn output_pretty(
 
     // === Extract sections ===
     let body = thread::extract_section(&thread.content, "Body");
-    let notes = thread::extract_section(&thread.content, "Notes");
-    let todos = thread::extract_section(&thread.content, "Todo");
-    let log = thread::extract_section(&thread.content, "Log");
+    let notes_items = thread.get_notes();
+    let todo_items = thread.get_todo_items();
+    let log_entries = thread.get_log_entries();
 
     // === Build sections dynamically ===
     let mut sections: Vec<String> = vec![header];
@@ -197,14 +252,14 @@ fn output_pretty(
     if !body.is_empty() {
         sections.push(format_body(&body));
     }
-    if !notes.is_empty() {
-        sections.push(format_notes(&notes));
+    if !notes_items.is_empty() {
+        sections.push(format_notes(&notes_items));
     }
-    if !todos.is_empty() {
-        sections.push(format_todos(&todos));
+    if !todo_items.is_empty() {
+        sections.push(format_todos(&todo_items));
     }
-    if !log.is_empty() {
-        sections.push(format_log(&log));
+    if !log_entries.is_empty() {
+        sections.push(format_log(&log_entries));
     }
 
     // Footer: history + path (truncate path from front if too long)
@@ -308,7 +363,8 @@ fn detect_prefix(line: &str) -> Option<(String, String)> {
     // Examples: " 39m ", "  1h ", " now ", "12mo "
     // Format from format_log: "{:>4} content" where timestamp is cyan-styled
     if stripped.len() >= 5 {
-        let first_five = &stripped[..5];
+        let end = stripped.char_indices().nth(5).map(|(i, _)| i).unwrap_or(stripped.len());
+        let first_five = &stripped[..end];
         let trimmed = first_five.trim_start();
         // Check if trimmed part (without leading spaces) looks like timestamp + space
         if trimmed.ends_with(' ') {
@@ -419,57 +475,30 @@ fn format_body(body: &str) -> String {
     String::from_utf8_lossy(&buf).trim().to_string()
 }
 
-/// Format notes section with bullet points (like todos, but without checkboxes)
-fn format_notes(notes: &str) -> String {
-    let hash_re = Regex::new(r"\s*<!--\s*[a-f0-9]{4}\s*-->").unwrap();
-
+/// Format notes items with bullet points
+fn format_notes(notes: &[NoteItem]) -> String {
     notes
-        .lines()
-        .map(|line| {
-            // Strip hash comments
-            let line = hash_re.replace(line, "").to_string();
-
-            // Replace "- " bullets with nice bullet character
-            if let Some(content) = line.strip_prefix("- ") {
-                let rendered = render_inline_markdown(content.trim());
-                format!("{} {}", "•".cyan(), rendered)
-            } else if line.trim().is_empty() {
-                String::new()
-            } else {
-                render_inline_markdown(&line)
-            }
+        .iter()
+        .map(|item| {
+            let rendered = render_inline_markdown(&item.text);
+            format!("{} {}", "•".cyan(), rendered)
         })
-        .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// Format todo section with colored checkboxes and markdown
-fn format_todos(todos: &str) -> String {
-    let hash_re = Regex::new(r"\s*<!--\s*[a-f0-9]{4}\s*-->").unwrap();
-
+/// Format todo items with colored checkboxes and markdown
+fn format_todos(todos: &[TodoItem]) -> String {
     todos
-        .lines()
-        .map(|line| {
-            // Strip hash comments
-            let line = hash_re.replace(line, "").to_string();
-
-            // Replace checkboxes with unicode squares
-            if line.contains("- [x]") {
-                let content = line.replace("- [x]", "").trim().to_string();
-                let rendered = render_inline_markdown(&content);
+        .iter()
+        .map(|item| {
+            let rendered = render_inline_markdown(&item.text);
+            if item.done {
                 format!("{} {}", "☑".green(), rendered)
-            } else if line.contains("- [ ]") {
-                let content = line.replace("- [ ]", "").trim().to_string();
-                let rendered = render_inline_markdown(&content);
-                format!("{} {}", "☐".yellow(), rendered)
-            } else if line.trim().is_empty() {
-                String::new()
             } else {
-                render_inline_markdown(&line)
+                format!("{} {}", "☐".yellow(), rendered)
             }
         })
-        .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -487,71 +516,19 @@ fn render_inline_markdown(text: &str) -> String {
         .to_string()
 }
 
-/// Format log section with relative timestamps and markdown
-fn format_log(log: &str) -> String {
-    // Current format: - [2026-01-22 12:25:00] message
-    let bracket_ts_re = Regex::new(r"^- \[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\](.*)$").unwrap();
-    // Legacy bold format: - **2026-01-22 12:25:00** message
-    let bold_ts_re = Regex::new(r"^- \*\*(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\*\*(.*)$").unwrap();
-    // Legacy time-only format: - **12:25** message (under ### date header)
-    let time_re = Regex::new(r"^- \*\*(\d{2}:\d{2})\*\*(.*)$").unwrap();
-    // Legacy date header
-    let date_re = Regex::new(r"^### (\d{4}-\d{2}-\d{2})$").unwrap();
-
+/// Format log entries with relative timestamps and markdown
+fn format_log(entries: &[LogEntry]) -> String {
     let now = Local::now().naive_local();
-    let mut current_date = String::new();
 
-    log.lines()
-        .filter_map(|line| {
-            // Skip legacy date headers
-            if let Some(caps) = date_re.captures(line) {
-                current_date = caps[1].to_string();
-                return None;
-            }
-
-            // Current format: bracket timestamp
-            if let Some(caps) = bracket_ts_re.captures(line) {
-                let ts_str = &caps[1];
-                let rest = &caps[2];
-                let relative = timestamp_to_relative(ts_str, &now);
-                let rendered = render_inline_markdown(rest.trim());
-                return Some(format!("{:>4} {}", relative.cyan(), rendered));
-            }
-
-            // Legacy bold format: full timestamp
-            if let Some(caps) = bold_ts_re.captures(line) {
-                let ts_str = &caps[1];
-                let rest = &caps[2];
-                let relative = timestamp_to_relative(ts_str, &now);
-                let rendered = render_inline_markdown(rest.trim());
-                return Some(format!("{:>4} {}", relative.cyan(), rendered));
-            }
-
-            // Legacy time-only format (use current_date context)
-            if let Some(caps) = time_re.captures(line) {
-                let time = &caps[1];
-                let rest = &caps[2];
-                let rendered = render_inline_markdown(rest.trim());
-                if !current_date.is_empty() {
-                    let ts_str = format!("{} {}:00", current_date, time);
-                    let relative = timestamp_to_relative(&ts_str, &now);
-                    return Some(format!("{:>4} {}", relative.cyan(), rendered));
-                }
-                return Some(format!("{:>4} {}", time.cyan(), rendered));
-            }
-
-            // Plain bullet without timestamp: format with placeholder to align
-            if let Some(content) = line.strip_prefix("- ") {
-                let rendered = render_inline_markdown(content.trim());
-                return Some(format!("   {} {}", "·".dimmed(), rendered));
-            }
-
-            // Skip empty lines
-            if line.trim().is_empty() {
-                None
+    entries
+        .iter()
+        .map(|entry| {
+            let rendered = render_inline_markdown(&entry.text);
+            if entry.ts.is_empty() {
+                format!("   {} {}", "·".dimmed(), rendered)
             } else {
-                // Other content (rare) - render as-is
-                Some(render_inline_markdown(line))
+                let relative = timestamp_to_relative(&entry.ts, &now);
+                format!("{:>4} {}", relative.cyan(), rendered)
             }
         })
         .collect::<Vec<_>>()

@@ -5,6 +5,7 @@ pub mod git_cmd;
 pub mod info;
 pub mod list;
 pub mod log;
+pub mod migrate;
 pub mod move_cmd;
 pub mod new;
 pub mod note;

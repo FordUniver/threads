@@ -85,6 +85,9 @@ enum Commands {
     /// Add log entry
     Log(cmd::log::LogArgs),
 
+    /// Migrate threads from section-based to frontmatter-based format
+    Migrate(cmd::migrate::MigrateArgs),
+
     /// Mark thread closed
     #[command(alias = "resolve")]
     Close(cmd::resolve::ResolveArgs),
@@ -183,6 +186,7 @@ fn main() {
         Commands::Note(args) => cmd::note::run(args, &ws, &loaded_config.config),
         Commands::Todo(args) => cmd::todo::run(args, &ws, &loaded_config.config),
         Commands::Log(args) => cmd::log::run(args, &ws, &loaded_config.config),
+        Commands::Migrate(args) => cmd::migrate::run(args, &ws),
         Commands::Close(args) => cmd::resolve::run(args, &ws, &loaded_config.config),
         Commands::Reopen(args) => cmd::reopen::run(args, &ws, &loaded_config.config),
         Commands::Remove(args) => cmd::remove::run(args, &ws, &loaded_config.config),

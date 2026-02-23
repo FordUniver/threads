@@ -65,7 +65,6 @@ fn issue_description(code: &str) -> &'static str {
         "E005" => "ID mismatch with filename",
         "E006" => "Invalid status value",
         "E007" => "Duplicate ID across threads",
-        "W001" => "Unknown section header",
         "W002" => "Duplicate section",
         "W003" => "Sections out of order",
         "W004" => "Old log format",
@@ -856,13 +855,9 @@ fn validate_sections(content: &str, _config: &Config) -> Vec<Issue> {
             let section = caps.get(1).unwrap().as_str().to_string();
             let line_display = line_num + 1;
 
-            // W001: Unknown section
+            // Skip non-canonical sections: body content may freely use ## headers
             if !valid_sections.contains(&section.as_str()) {
-                issues.push(Issue::warning_at(
-                    "W001",
-                    line_display,
-                    format!("unknown section '{}'", section),
-                ));
+                continue;
             }
 
             // W002: Duplicate section

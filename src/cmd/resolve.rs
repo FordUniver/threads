@@ -8,7 +8,7 @@ use crate::args::FormatArgs;
 use crate::config::{Config, env_bool, is_quiet};
 use crate::git;
 use crate::output::{self, OutputFormat};
-use crate::thread::{self, Thread};
+use crate::thread::Thread;
 use crate::workspace;
 
 #[derive(Args)]
@@ -57,7 +57,7 @@ pub fn run(args: ResolveArgs, ws: &Path, config: &Config) -> Result<(), String> 
     } else {
         format!("Closed ({}).", closed_status)
     };
-    t.content = thread::insert_log_entry(&t.content, &log_msg);
+    t.insert_log_entry(&log_msg)?;
 
     t.write()?;
 

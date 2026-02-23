@@ -85,7 +85,7 @@ pub fn run(args: ReopenArgs, ws: &Path, config: &Config) -> Result<(), String> {
     t.set_frontmatter_field("status", &new_status)?;
 
     // Add log entry
-    t.content = thread::insert_log_entry(&t.content, "Reopened.");
+    t.insert_log_entry("Reopened.")?;
 
     t.write()?;
 
