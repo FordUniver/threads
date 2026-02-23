@@ -28,7 +28,7 @@ pub struct EventArgs {
 
     /// Date (YYYY-MM-DD) for add, or hash prefix for remove
     #[arg(default_value = "")]
-    arg1: String,
+    date_or_hash: String,
 
     /// Optional time (HH:MM) or first word of description; rest is description
     #[arg(default_value = "")]
@@ -80,7 +80,7 @@ pub fn run(args: EventArgs, ws: &Path, config: &Config) -> Result<(), String> {
             return Ok(());
         }
         "add" => {
-            let date = &args.arg1;
+            let date = &args.date_or_hash;
             if date.is_empty() {
                 return Err(
                     "usage: threads event <id> add <YYYY-MM-DD> [HH:MM] <text...>".to_string(),
@@ -108,7 +108,7 @@ pub fn run(args: EventArgs, ws: &Path, config: &Config) -> Result<(), String> {
             println!("Added event: {}{} {} (id: {})", date, time_part, text, hash);
         }
         "remove" | "rm" => {
-            let hash = &args.arg1;
+            let hash = &args.date_or_hash;
             if hash.is_empty() {
                 return Err("usage: threads event <id> remove <hash>".to_string());
             }

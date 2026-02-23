@@ -24,7 +24,7 @@ pub struct DeadlineArgs {
 
     /// Date (YYYY-MM-DD) for add, or hash prefix for remove
     #[arg(default_value = "")]
-    arg1: String,
+    date_or_hash: String,
 
     /// Deadline text (for add; multiple words joined)
     #[arg(default_value = "")]
@@ -76,7 +76,7 @@ pub fn run(args: DeadlineArgs, ws: &Path, config: &Config) -> Result<(), String>
             return Ok(());
         }
         "add" => {
-            let date = &args.arg1;
+            let date = &args.date_or_hash;
             if date.is_empty() {
                 return Err("usage: threads deadline <id> add <YYYY-MM-DD> <text...>".to_string());
             }
@@ -95,7 +95,7 @@ pub fn run(args: DeadlineArgs, ws: &Path, config: &Config) -> Result<(), String>
             println!("Added deadline: {} {} (id: {})", date, text, hash);
         }
         "remove" | "rm" => {
-            let hash = &args.arg1;
+            let hash = &args.date_or_hash;
             if hash.is_empty() {
                 return Err("usage: threads deadline <id> remove <hash>".to_string());
             }

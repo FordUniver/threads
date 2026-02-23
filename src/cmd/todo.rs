@@ -44,7 +44,7 @@ pub struct TodoArgs {
 
     /// Commit message
     #[arg(short = 'm', long)]
-    m: Option<String>,
+    message: Option<String>,
 }
 
 pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
@@ -158,7 +158,7 @@ pub fn run(args: TodoArgs, ws: &Path, config: &Config) -> Result<(), String> {
         let repo = workspace::open()?;
         let rel_path = file.strip_prefix(ws).unwrap_or(&file);
         let msg = args
-            .m
+            .message
             .unwrap_or_else(|| git::generate_commit_message(&repo, &[rel_path]));
         git::auto_commit(&repo, &file, &msg)?;
     } else if !is_quiet(config) {
