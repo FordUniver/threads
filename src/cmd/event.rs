@@ -14,8 +14,7 @@ use crate::output::{self, OutputFormat};
 use crate::thread::{self, EventItem, Thread};
 use crate::workspace;
 
-static TIME_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^\d{2}:\d{2}$").unwrap());
+static TIME_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{2}:\d{2}$").unwrap());
 
 #[derive(Args)]
 pub struct EventArgs {
@@ -61,8 +60,7 @@ pub fn run(args: EventArgs, ws: &Path, config: &Config) -> Result<(), String> {
 
     if args.id.is_empty() {
         return Err(
-            "usage: threads event <id> [add <date> [HH:MM] <text...> | remove <hash>]"
-                .to_string(),
+            "usage: threads event <id> [add <date> [HH:MM] <text...> | remove <hash>]".to_string(),
         );
     }
 
@@ -217,9 +215,12 @@ fn run_agenda(args: &EventArgs, ws: &Path, _config: &Config) -> Result<(), Strin
 
     // Sort by date then time (None sorts before Some)
     agenda.sort_by(|a, b| {
-        a.date
-            .cmp(&b.date)
-            .then(a.time.as_deref().unwrap_or("").cmp(b.time.as_deref().unwrap_or("")))
+        a.date.cmp(&b.date).then(
+            a.time
+                .as_deref()
+                .unwrap_or("")
+                .cmp(b.time.as_deref().unwrap_or("")),
+        )
     });
 
     let has_time = agenda.iter().any(|a| a.time.is_some());
@@ -252,8 +253,7 @@ fn run_agenda(args: &EventArgs, ws: &Path, _config: &Config) -> Result<(), Strin
                 .collect();
             println!(
                 "{}",
-                serde_json::to_string_pretty(&items)
-                    .map_err(|e| format!("JSON error: {}", e))?
+                serde_json::to_string_pretty(&items).map_err(|e| format!("JSON error: {}", e))?
             );
         }
         OutputFormat::Plain => {
@@ -278,12 +278,7 @@ fn run_agenda(args: &EventArgs, ws: &Path, _config: &Config) -> Result<(), Strin
                 } else {
                     println!(
                         "{} | {} | {} | {} | {} | {}",
-                        a.date,
-                        a.text,
-                        a.hash,
-                        a.thread_id,
-                        a.thread_name,
-                        a.thread_path
+                        a.date, a.text, a.hash, a.thread_id, a.thread_name, a.thread_path
                     );
                 }
             }
@@ -296,7 +291,13 @@ fn run_agenda(args: &EventArgs, ws: &Path, _config: &Config) -> Result<(), Strin
                     .time
                     .as_deref()
                     .map(|tm| format!("  {}", tm))
-                    .unwrap_or_else(|| if has_time { "      ".to_string() } else { String::new() });
+                    .unwrap_or_else(|| {
+                        if has_time {
+                            "      ".to_string()
+                        } else {
+                            String::new()
+                        }
+                    });
                 println!(
                     "{}{}  {}  {}  {}",
                     date_styled,

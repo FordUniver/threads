@@ -56,7 +56,9 @@ pub fn run(args: DeadlineArgs, ws: &Path, config: &Config) -> Result<(), String>
 
     // Single-thread mode requires an id
     if args.id.is_empty() {
-        return Err("usage: threads deadline <id> [add <date> <text...> | remove <hash>]".to_string());
+        return Err(
+            "usage: threads deadline <id> [add <date> <text...> | remove <hash>]".to_string(),
+        );
     }
 
     let file = workspace::find_by_ref(ws, &args.id)?;
@@ -76,9 +78,7 @@ pub fn run(args: DeadlineArgs, ws: &Path, config: &Config) -> Result<(), String>
         "add" => {
             let date = &args.arg1;
             if date.is_empty() {
-                return Err(
-                    "usage: threads deadline <id> add <YYYY-MM-DD> <text...>".to_string(),
-                );
+                return Err("usage: threads deadline <id> add <YYYY-MM-DD> <text...>".to_string());
             }
             // Validate date
             NaiveDate::parse_from_str(date, "%Y-%m-%d")
@@ -86,9 +86,7 @@ pub fn run(args: DeadlineArgs, ws: &Path, config: &Config) -> Result<(), String>
 
             let text = args.text.join(" ");
             if text.is_empty() {
-                return Err(
-                    "usage: threads deadline <id> add <YYYY-MM-DD> <text...>".to_string(),
-                );
+                return Err("usage: threads deadline <id> add <YYYY-MM-DD> <text...>".to_string());
             }
 
             let hash = t.add_deadline(date, &text)?;
@@ -217,8 +215,7 @@ fn run_agenda(args: &DeadlineArgs, ws: &Path, _config: &Config) -> Result<(), St
                 .collect();
             println!(
                 "{}",
-                serde_json::to_string_pretty(&items)
-                    .map_err(|e| format!("JSON error: {}", e))?
+                serde_json::to_string_pretty(&items).map_err(|e| format!("JSON error: {}", e))?
             );
         }
         OutputFormat::Plain => {
@@ -252,12 +249,7 @@ fn run_agenda(args: &DeadlineArgs, ws: &Path, _config: &Config) -> Result<(), St
 fn print_deadline_list(items: &[DeadlineItem], today: NaiveDate) {
     for item in items {
         let date_styled = style_deadline_date(&item.date, today);
-        println!(
-            "{}  {}  ({})",
-            date_styled,
-            item.text,
-            item.hash.dimmed()
-        );
+        println!("{}  {}  ({})", date_styled, item.text, item.hash.dimmed());
     }
 }
 
