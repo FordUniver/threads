@@ -26,13 +26,6 @@ desc: $desc
 status: $status
 ---
 
-## Body
-
-## Notes
-
-## Todo
-
-## Log
 EOF
 }
 
@@ -123,15 +116,22 @@ get_thread_section() {
         return 1
     fi
 
-    # Extract content between ## Section and next ## or EOF
-    # Uses portable awk (BSD/GNU compatible)
-    awk -v section="$section" '
-        /^## / {
-            in_section = ($0 == "## " section)
-            next
-        }
-        in_section { print }
-    ' "$path"
+    # Body: everything after the second --- (frontmatter end)
+    # Other sections: content between ## Section and next ## or EOF
+    if [[ "$section" == "Body" ]]; then
+        awk '
+            /^---$/ { delim++; next }
+            delim >= 2 { print }
+        ' "$path"
+    else
+        awk -v section="$section" '
+            /^## / {
+                in_section = ($0 == "## " section)
+                next
+            }
+            in_section { print }
+        ' "$path"
+    fi
 }
 
 # Check if section contains text

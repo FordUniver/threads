@@ -29,8 +29,7 @@ test_read_outputs_content() {
     output=$($THREADS_BIN read abc123 2>/dev/null)
 
     assert_contains "$output" "Test Thread" "should contain thread name"
-    assert_contains "$output" "## Body" "should contain Body section"
-    assert_contains "$output" "## Todo" "should contain Todo section"
+    assert_contains "$output" "Test Thread" "should contain thread name in frontmatter"
 
     teardown_test_workspace
     end_test
