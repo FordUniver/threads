@@ -194,4 +194,3 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
 
     Ok(())
 }
-

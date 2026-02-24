@@ -283,7 +283,16 @@ pub fn run(args: ValidateArgs, ws: &Path, config: &Config) -> Result<(), String>
             w007,
             w010,
             dry_run,
-        }) => run_fix(&files, ws, e002, w007, w010, dry_run, format, include_closed),
+        }) => run_fix(
+            &files,
+            ws,
+            e002,
+            w007,
+            w010,
+            dry_run,
+            format,
+            include_closed,
+        ),
     }
 }
 
