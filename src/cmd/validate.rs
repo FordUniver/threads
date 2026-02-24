@@ -10,6 +10,7 @@ use regex::Regex;
 use serde::Serialize;
 
 use crate::args::{DirectionArgs, FilterArgs, FormatArgs};
+use crate::cmd::migrate::migrate_file_for_validate;
 use crate::config::Config;
 use crate::output::OutputFormat;
 use crate::thread::{self, Frontmatter, extract_id_from_path};
@@ -25,11 +26,9 @@ static VALID_ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9a-f]{6}
 /// Matches section headers (## Name)
 static SECTION_HEADER_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^## (.+)$").unwrap());
 
-/// Matches valid section names
-static VALID_SECTIONS: &[&str] = &["Body", "Notes", "Todo", "Log"];
-
-/// Canonical section order
-static SECTION_ORDER: &[&str] = &["Body", "Notes", "Todo", "Log"];
+/// Legacy section names that must not appear in fully migrated threads.
+/// Finding any of these triggers W010.
+static LEGACY_SECTIONS: &[&str] = &["Body", "Notes", "Todo", "Log"];
 
 /// Matches log date headers (### YYYY-MM-DD) - legacy format to be removed
 static LOG_DATE_HEADER_RE: LazyLock<Regex> =
@@ -65,14 +64,13 @@ fn issue_description(code: &str) -> &'static str {
         "E005" => "ID mismatch with filename",
         "E006" => "Invalid status value",
         "E007" => "Duplicate ID across threads",
-        "W002" => "Duplicate section",
-        "W003" => "Sections out of order",
         "W004" => "Old log format",
         "W005" => "Invalid timestamp",
         "W006" => "Malformed checkbox",
         "W007" => "Log entry missing or legacy timestamp",
         "W008" => "Legacy date header",
         "W009" => "Filename missing ID prefix",
+        "W010" => "Legacy markdown section found",
         _ => "Unknown issue",
     }
 }
@@ -125,6 +123,10 @@ enum ValidateAction {
         /// Fix W007: Add timestamps to log entries (from git blame)
         #[arg(long)]
         w007: bool,
+
+        /// Fix W010: Strip legacy markdown sections (migrate to current format)
+        #[arg(long)]
+        w010: bool,
 
         /// Show what would be fixed without making changes
         #[arg(long)]
@@ -279,8 +281,9 @@ pub fn run(args: ValidateArgs, ws: &Path, config: &Config) -> Result<(), String>
         Some(ValidateAction::Fix {
             e002,
             w007,
+            w010,
             dry_run,
-        }) => run_fix(&files, ws, e002, w007, dry_run, format, include_closed),
+        }) => run_fix(&files, ws, e002, w007, w010, dry_run, format, include_closed),
     }
 }
 
@@ -852,63 +855,24 @@ fn extract_yaml_error_line(e: &serde_yaml::Error) -> Option<usize> {
 
 fn validate_sections(content: &str, _config: &Config) -> Vec<Issue> {
     let mut issues = Vec::new();
-    let mut seen_sections: HashMap<String, usize> = HashMap::new();
-    let mut section_positions: Vec<(String, usize)> = Vec::new();
-
-    // Use canonical section names
-    let valid_sections = VALID_SECTIONS;
-    let section_order = SECTION_ORDER;
 
     for (line_num, line) in content.lines().enumerate() {
         if let Some(caps) = SECTION_HEADER_RE.captures(line) {
-            let section = caps.get(1).unwrap().as_str().to_string();
+            let section = caps.get(1).unwrap().as_str();
             let line_display = line_num + 1;
 
-            // Skip non-canonical sections: body content may freely use ## headers
-            if !valid_sections.contains(&section.as_str()) {
-                continue;
-            }
-
-            // W002: Duplicate section
-            if let Some(&first_line) = seen_sections.get(&section) {
+            // W010: Any legacy section name found means the file needs migration.
+            // Non-legacy ## headers in body content are fine and are ignored.
+            if LEGACY_SECTIONS.contains(&section) {
                 issues.push(Issue::warning_at(
-                    "W002",
+                    "W010",
                     line_display,
                     format!(
-                        "duplicate section '{}' (first at line {})",
-                        section, first_line
+                        "legacy section '## {}' found — run 'threads migrate'",
+                        section
                     ),
                 ));
-            } else {
-                seen_sections.insert(section.clone(), line_display);
-                section_positions.push((section, line_display));
             }
-        }
-    }
-
-    // W003: Check section order
-    let known_positions: Vec<(usize, usize)> = section_positions
-        .iter()
-        .filter_map(|(name, line)| {
-            section_order
-                .iter()
-                .position(|&s| s == name)
-                .map(|order| (order, *line))
-        })
-        .collect();
-
-    for i in 1..known_positions.len() {
-        if known_positions[i].0 < known_positions[i - 1].0 {
-            let current_name = section_order[known_positions[i].0];
-            let prev_name = section_order[known_positions[i - 1].0];
-            issues.push(Issue::warning_at(
-                "W003",
-                known_positions[i].1,
-                format!(
-                    "section '{}' should come before '{}'",
-                    current_name, prev_name
-                ),
-            ));
         }
     }
 
@@ -1064,17 +1028,19 @@ fn run_fix(
     ws: &Path,
     fix_e002: bool,
     fix_w007: bool,
+    fix_w010: bool,
     dry_run: bool,
     format: OutputFormat,
     include_closed: bool,
 ) -> Result<(), String> {
-    if !fix_e002 && !fix_w007 {
-        return Err("specify at least one fix: --e002, --w007".to_string());
+    if !fix_e002 && !fix_w007 && !fix_w010 {
+        return Err("specify at least one fix: --e002, --w007, --w010".to_string());
     }
 
     let mut frontmatter_fixed = 0;
     let mut log_entries_fixed = 0;
     let mut headers_removed = 0;
+    let mut legacy_migrated = 0;
     let mut files_modified = 0;
     let mut fix_entries: Vec<FixEntry> = Vec::new();
 
@@ -1102,6 +1068,7 @@ fn run_fix(
         let mut file_fm_fixed = 0;
         let mut file_log_fixed = 0;
         let mut file_headers_removed = 0;
+        let mut file_legacy_migrated = false;
 
         // E002: Fix frontmatter quoting
         if fix_e002 {
@@ -1138,6 +1105,21 @@ fn run_fix(
             }
         }
 
+        // W010: migrate legacy sections.
+        // migrate_file_for_validate handles its own file write; we only track the count here.
+        if fix_w010 {
+            match migrate_file_for_validate(path, ws, dry_run) {
+                Ok(true) => {
+                    file_legacy_migrated = true;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("W010 fix failed for {}: {}", rel_path, e);
+                }
+            }
+        }
+
+        // E002/W007: write updated content if modified
         if file_changed {
             frontmatter_fixed += file_fm_fixed;
             log_entries_fixed += file_log_fixed;
@@ -1166,6 +1148,13 @@ fn run_fix(
                 }
             }
         }
+
+        if file_legacy_migrated {
+            legacy_migrated += 1;
+            if !file_changed {
+                files_modified += 1;
+            }
+        }
     }
 
     // Summary
@@ -1181,6 +1170,9 @@ fn run_fix(
             }
             if headers_removed > 0 {
                 parts.push(format!("{} headers removed", headers_removed));
+            }
+            if legacy_migrated > 0 {
+                parts.push(format!("{} files migrated", legacy_migrated));
             }
 
             if dry_run {
@@ -1205,6 +1197,7 @@ fn run_fix(
                 "frontmatter_fixed": frontmatter_fixed,
                 "log_entries_fixed": log_entries_fixed,
                 "headers_removed": headers_removed,
+                "legacy_migrated": legacy_migrated,
                 "files_modified": files_modified,
                 "changes": fix_entries,
             });
@@ -1216,6 +1209,7 @@ fn run_fix(
                 "frontmatter_fixed": frontmatter_fixed,
                 "log_entries_fixed": log_entries_fixed,
                 "headers_removed": headers_removed,
+                "legacy_migrated": legacy_migrated,
                 "files_modified": files_modified,
                 "changes": fix_entries,
             });

@@ -7,8 +7,9 @@ use md5::{Digest, Md5};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-// Canonical section names in order of appearance
-const CANONICAL_SECTIONS: &[&str] = &["Body", "Notes", "Todo", "Log"];
+// Canonical section names for legacy fallback parsing (migration support)
+// "Body" is intentionally absent: body is now everything after frontmatter, not a named section.
+const CANONICAL_SECTIONS: &[&str] = &["Notes", "Todo", "Log"];
 
 /// Check if a line is a canonical section header (## Body, ## Notes, ## Todo, ## Log)
 fn is_canonical_section_header(line: &str) -> bool {
@@ -169,8 +170,7 @@ impl Thread {
         base_status(&self.frontmatter.status)
     }
 
-    /// Get the body content after frontmatter
-    #[allow(dead_code)]
+    /// Get the body content after frontmatter (trimmed)
     pub fn body(&self) -> &str {
         if self.body_start >= self.content.len() {
             ""
@@ -229,6 +229,56 @@ impl Thread {
     /// Write the thread to disk
     pub fn write(&self) -> Result<(), String> {
         fs::write(&self.path, &self.content).map_err(|e| format!("writing file: {}", e))
+    }
+
+    /// Create a new thread from scratch.
+    ///
+    /// Produces a properly formatted thread with the initial log entry in frontmatter and
+    /// no legacy markdown sections. The caller must set `path` before calling `write()`.
+    pub fn new(
+        id: &str,
+        name: &str,
+        desc: &str,
+        status: &str,
+        initial_body: &str,
+    ) -> Result<Self, String> {
+        let ts = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let frontmatter = Frontmatter {
+            id: id.to_string(),
+            name: name.to_string(),
+            desc: desc.to_string(),
+            status: status.to_string(),
+            log: vec![LogEntry {
+                ts,
+                text: "Created thread.".to_string(),
+            }],
+            ..Frontmatter::default()
+        };
+
+        let yaml = serde_yaml::to_string(&frontmatter)
+            .map_err(|e| format!("serializing YAML: {}", e))?;
+
+        let mut content = String::new();
+        content.push_str("---\n");
+        content.push_str(yaml.trim_end());
+        content.push('\n');
+        content.push_str("---\n");
+
+        let body_start = content.len();
+
+        let body_trimmed = initial_body.trim();
+        if !body_trimmed.is_empty() {
+            content.push('\n');
+            content.push_str(body_trimmed);
+            content.push('\n');
+        }
+
+        Ok(Thread {
+            path: String::new(),
+            frontmatter,
+            content,
+            body_start,
+        })
     }
 
     /// Get path relative to workspace
@@ -616,11 +666,6 @@ pub fn is_valid_status_with_config(
 // Hash generation
 // ============================================================================
 
-/// Escape $ characters in replacement strings for regex ($ is backreference, $$ is literal $)
-fn escape_for_replacement(text: &str) -> String {
-    text.replace('$', "$$")
-}
-
 /// Generate a 4-character hash for an item
 pub fn generate_hash(text: &str) -> String {
     let now = std::time::SystemTime::now()
@@ -638,34 +683,6 @@ pub fn generate_hash(text: &str) -> String {
 // ============================================================================
 // Section-based operations (legacy / fallback / migration use)
 // ============================================================================
-
-/// Replace section content
-pub fn replace_section(content: &str, name: &str, new_content: &str) -> String {
-    let boundary = section_boundary_pattern(name);
-    let pattern = format!(r"(?ms)(^## {})\n(.+?)({})", regex::escape(name), boundary);
-    let re = Regex::new(&pattern).unwrap();
-
-    if !re.is_match(content) {
-        return content.to_string();
-    }
-
-    re.replace(
-        content,
-        format!("$1\n\n{}\n\n$3", escape_for_replacement(new_content)),
-    )
-    .to_string()
-}
-
-/// Append to section content
-pub fn append_to_section(content: &str, name: &str, addition: &str) -> String {
-    let section_content = extract_section(content, name);
-    let mut new_content = section_content.trim().to_string();
-    if !new_content.is_empty() {
-        new_content.push('\n');
-    }
-    new_content.push_str(addition);
-    replace_section(content, name, &new_content)
-}
 
 /// Build regex alternation for canonical section boundaries (sections that come after `name`)
 fn section_boundary_pattern(name: &str) -> String {
@@ -983,28 +1000,47 @@ pub fn count_matching_items_from_section(content: &str, section: &str, hash: &st
     count
 }
 
-/// Strip old Notes/Todo/Log sections from a markdown body string.
+/// Strip old Body/Notes/Todo/Log sections from a markdown body string.
+///
+/// - `## Body`: header line removed, content beneath preserved.
+/// - `## Notes`, `## Todo`, `## Log`: header and all content removed (moved to frontmatter).
+///
 /// Returns the stripped content with trailing whitespace trimmed.
 /// Used by the migrate command.
 pub fn strip_old_sections(body: &str) -> String {
-    let sections_to_strip = ["Notes", "Todo", "Log"];
+    let full_strip = ["Notes", "Todo", "Log"];
     let mut result_lines: Vec<&str> = Vec::new();
     let mut in_stripped_section = false;
+    let mut skip_next_blank = false;
 
     for line in body.lines() {
         if let Some(section_name) = line.strip_prefix("## ") {
             let section_name = section_name.trim();
-            if sections_to_strip.contains(&section_name) {
+            if full_strip.contains(&section_name) {
                 in_stripped_section = true;
+                continue;
+            } else if section_name == "Body" {
+                // Strip header only; preserve content beneath it.
+                // Skip the single blank line immediately following the header.
+                in_stripped_section = false;
+                skip_next_blank = true;
                 continue;
             } else {
                 in_stripped_section = false;
             }
         }
 
-        if !in_stripped_section {
-            result_lines.push(line);
+        if in_stripped_section {
+            continue;
         }
+
+        if skip_next_blank && line.trim().is_empty() {
+            skip_next_blank = false;
+            continue;
+        }
+        skip_next_blank = false;
+
+        result_lines.push(line);
     }
 
     // Trim trailing empty lines
@@ -1137,16 +1173,14 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_section_with_nested_headers() {
-        // Body section contains ## headers that should NOT be treated as section boundaries.
-        // With the new format, ## headers in Body are no longer bumped to ###.
+    fn test_body_contains_nested_h2_headers() {
+        // ## is the top-level heading in body (# is implicitly the thread title from frontmatter).
+        // Non-canonical ## headers in body are not treated as section boundaries.
         let content = r#"---
 id: 'abc123'
 name: Test
 status: active
 ---
-
-## Body
 
 Some intro text.
 
@@ -1157,21 +1191,11 @@ Content under subsection one.
 ## Subsection Two
 
 Content under subsection two.
-
-## Notes
-
-A note here.
-
-## Todo
-
-- [ ] A task
-
-## Log
-
-- [2026-01-01] Created
 "#;
 
-        let body = extract_section(content, "Body");
+        let t = make_thread_with_content(content);
+        let body = t.content[t.body_start..].trim();
+
         assert!(
             body.contains("Subsection One"),
             "Body should contain 'Subsection One', got: {}",
@@ -1183,22 +1207,8 @@ A note here.
             body
         );
         assert!(
-            !body.contains("A note here"),
-            "Body should NOT contain Notes content, got: {}",
-            body
-        );
-
-        let notes = extract_section(content, "Notes");
-        assert!(
-            notes.contains("A note here"),
-            "Notes should contain 'A note here', got: {}",
-            notes
-        );
-
-        // h2 headers in Body are now preserved as h2 (not bumped to h3)
-        assert!(
             body.contains("## Subsection One"),
-            "h2 in Body should be preserved as h2, got: {}",
+            "## headings should be preserved as-is, got: {}",
             body
         );
     }
@@ -1215,21 +1225,17 @@ A note here.
     }
 
     // ========================================================================
-    // Regression tests for severe truncation bug
-    // Bug: Body with ## headers caused extract_section to truncate early
+    // Body access via body_start (new format: no ## Body section header)
     // ========================================================================
 
     #[test]
-    fn test_extract_body_not_truncated_by_h2_headers() {
-        // This is the exact pattern that caused the bug:
-        // Body contains ## headers that looked like section boundaries
+    fn test_body_not_truncated_by_h2_headers() {
+        // ## headers in body do not act as section boundaries.
         let content = r#"---
 id: 'abc123'
 name: Test thread
 status: active
 ---
-
-## Body
 
 Introduction paragraph.
 
@@ -1243,125 +1249,72 @@ Content under second topic.
 
 ## Third Topic
 
-This content was being truncated before the fix.
-
-## Notes
-
-- A note
-
-## Todo
-
-- [ ] A task
-
-## Log
-
-- [2026-01-01] Created
+This content was previously truncated when ## Body was a named section.
 "#;
 
-        let body = extract_section(content, "Body");
+        let t = make_thread_with_content(content);
+        let body = t.content[t.body_start..].trim();
 
-        // The critical assertion: ALL content before ## Notes must be present
-        assert!(
-            body.contains("Introduction paragraph"),
-            "Body should contain intro"
-        );
-        assert!(
-            body.contains("First Topic"),
-            "Body should contain First Topic"
-        );
-        assert!(
-            body.contains("Second Topic"),
-            "Body should contain Second Topic"
-        );
-        assert!(
-            body.contains("Third Topic"),
-            "Body should contain Third Topic - this was truncated before fix"
-        );
-        assert!(
-            body.contains("was being truncated"),
-            "Body should contain content under Third Topic"
-        );
-
-        // Verify sections are properly separated
-        assert!(
-            !body.contains("A note"),
-            "Body should NOT contain Notes content"
-        );
-        assert!(
-            !body.contains("A task"),
-            "Body should NOT contain Todo content"
-        );
+        assert!(body.contains("Introduction paragraph"), "Body should contain intro");
+        assert!(body.contains("First Topic"), "Body should contain First Topic");
+        assert!(body.contains("Second Topic"), "Body should contain Second Topic");
+        assert!(body.contains("Third Topic"), "Body should contain Third Topic");
+        assert!(body.contains("previously truncated"), "Body should contain content under Third Topic");
     }
 
     #[test]
-    fn test_extract_section_respects_only_canonical_boundaries() {
-        // Verify that only Body/Notes/Todo/Log act as boundaries
+    fn test_body_includes_non_canonical_h2_headers() {
+        // Any ## header in body is body content, not a section boundary.
         let content = r#"---
 id: 'test'
 name: Test
 status: active
 ---
 
-## Body
-
 Intro.
 
 ## Random Header
 
-This is NOT a canonical section - should be part of Body.
+This is not a canonical section - it is part of the body.
 
 ## Another Random
 
-Also part of Body.
-
-## Notes
-
-Real notes section.
-
-## Todo
-
-- [ ] Real task
-
-## Log
-
-- Entry
+Also part of the body.
 "#;
 
-        let body = extract_section(content, "Body");
-        let notes = extract_section(content, "Notes");
+        let t = make_thread_with_content(content);
+        let body = t.content[t.body_start..].trim();
 
-        // Body should contain non-canonical ## headers
-        assert!(
-            body.contains("Random Header"),
-            "Non-canonical ## should be in Body"
-        );
-        assert!(
-            body.contains("Another Random"),
-            "Non-canonical ## should be in Body"
-        );
-
-        // Notes should only have its own content
-        assert!(
-            notes.contains("Real notes section"),
-            "Notes should have its content"
-        );
-        assert!(
-            !notes.contains("Random"),
-            "Notes should not have Body content"
-        );
+        assert!(body.contains("Random Header"), "Non-canonical ## should be in body");
+        assert!(body.contains("Another Random"), "Non-canonical ## should be in body");
     }
 
     #[test]
-    fn test_extract_all_sections_with_complex_body() {
-        // Full integration test with realistic thread structure
+    fn test_body_and_frontmatter_coexist_with_complex_structure() {
+        // Full integration test: structured data in frontmatter, free body in markdown.
         let content = r#"---
 id: '9559e8'
 name: 'Paper proofreading'
 desc: Technical issues for review
 status: active
+notes:
+- text: First note
+  hash: a1b2
+- text: Second note
+  hash: c3d4
+todo:
+- text: Fix issue one
+  hash: e5f6
+  done: false
+- text: Fix issue two
+  hash: g7h8
+  done: false
+log:
+- ts: '2026-01-01 10:00:00'
+  text: Created
+- ts: '2026-01-02 11:00:00'
+  text: Updated
 ---
-
-## Body
 
 ## Overview
 
@@ -1380,56 +1333,34 @@ More details.
 ## Terminology
 
 Key terms need definition.
-
-## Notes
-
-- First note  <!-- a1b2 -->
-- Second note  <!-- c3d4 -->
-
-## Todo
-
-- [ ] Fix issue one  <!-- e5f6 -->
-- [ ] Fix issue two  <!-- g7h8 -->
-
-## Log
-
-- [2026-01-01 10:00:00] Created
-- [2026-01-02 11:00:00] Updated
 "#;
 
-        let body = extract_section(content, "Body");
-        let notes = extract_section(content, "Notes");
-        let todo = extract_section(content, "Todo");
-        let log = extract_section(content, "Log");
+        let t = make_thread_with_content(content);
+        let body = t.content[t.body_start..].trim();
 
         // Body: all subsections present
         assert!(body.contains("Overview"), "Body missing Overview");
-        assert!(
-            body.contains("Technical Issues"),
-            "Body missing Technical Issues"
-        );
-        assert!(
-            body.contains("Type signature mismatch"),
-            "Body missing subsection"
-        );
-        assert!(
-            body.contains("Reflection axis error"),
-            "Body missing subsection"
-        );
+        assert!(body.contains("Technical Issues"), "Body missing Technical Issues");
+        assert!(body.contains("Type signature mismatch"), "Body missing subsection");
+        assert!(body.contains("Reflection axis error"), "Body missing subsection");
         assert!(body.contains("Terminology"), "Body missing Terminology");
 
-        // Notes: items present, no Body contamination
-        assert!(notes.contains("First note"), "Notes missing first note");
-        assert!(notes.contains("Second note"), "Notes missing second note");
-        assert!(!notes.contains("Overview"), "Notes contaminated with Body");
+        // Notes from frontmatter
+        let notes = t.get_notes();
+        assert_eq!(notes.len(), 2);
+        assert_eq!(notes[0].text, "First note");
+        assert_eq!(notes[1].text, "Second note");
 
-        // Todo: items present
-        assert!(todo.contains("Fix issue one"), "Todo missing first item");
-        assert!(todo.contains("Fix issue two"), "Todo missing second item");
+        // Todo from frontmatter
+        let todos = t.get_todo_items();
+        assert_eq!(todos.len(), 2);
+        assert_eq!(todos[0].text, "Fix issue one");
 
-        // Log: entries present
-        assert!(log.contains("Created"), "Log missing first entry");
-        assert!(log.contains("Updated"), "Log missing second entry");
+        // Log from frontmatter
+        let log = t.get_log_entries();
+        assert_eq!(log.len(), 2);
+        assert_eq!(log[0].text, "Created");
+        assert_eq!(log[1].text, "Updated");
     }
 
     // ========================================================================
@@ -1468,8 +1399,6 @@ log:
   - ts: '2026-02-23 14:30:00'
     text: Created
 ---
-
-## Body
 
 Some body content.
 "#;
@@ -1566,8 +1495,6 @@ id: abc123
 name: Test
 status: active
 ---
-
-## Body
 
 Some body.
 "#;
@@ -1764,6 +1691,65 @@ Body here.
         );
     }
 
+    // ========================================================================
+    // Thread::new() constructor tests
+    // ========================================================================
+
+    #[test]
+    fn test_thread_new_no_legacy_sections() {
+        let t = Thread::new("abc123", "Test Thread", "A test", "active", "").unwrap();
+        assert!(!t.content.contains("## Body"), "new thread must not have ## Body");
+        assert!(!t.content.contains("## Notes"), "new thread must not have ## Notes");
+        assert!(!t.content.contains("## Todo"), "new thread must not have ## Todo");
+        assert!(!t.content.contains("## Log"), "new thread must not have ## Log");
+    }
+
+    #[test]
+    fn test_thread_new_log_in_frontmatter() {
+        let t = Thread::new("abc123", "Test Thread", "A test", "active", "").unwrap();
+        assert_eq!(t.frontmatter.log.len(), 1, "exactly one initial log entry");
+        assert_eq!(t.frontmatter.log[0].text, "Created thread.");
+        assert!(!t.frontmatter.log[0].ts.is_empty(), "timestamp must be set");
+    }
+
+    #[test]
+    fn test_thread_new_with_body() {
+        let t =
+            Thread::new("abc123", "Test", "desc", "active", "## Overview\n\nSome content.").unwrap();
+        let body = t.content[t.body_start..].trim();
+        assert!(body.contains("## Overview"), "body content preserved");
+        assert!(body.contains("Some content."), "body content preserved");
+        assert!(!body.is_empty());
+    }
+
+    #[test]
+    fn test_thread_new_empty_body() {
+        let t = Thread::new("abc123", "Test", "desc", "active", "").unwrap();
+        let body = t.content[t.body_start..].trim();
+        assert!(body.is_empty(), "empty body produces no markdown content");
+    }
+
+    #[test]
+    fn test_thread_new_parses_correctly() {
+        // Content produced by Thread::new() must round-trip through Thread::parse().
+        let t = Thread::new("abc123", "Test Thread", "A description", "active", "Body text.").unwrap();
+        // Re-parse via parse_frontmatter (simulated since we have no file)
+        let mut t2 = Thread {
+            path: "abc123-test-thread.md".to_string(),
+            frontmatter: Frontmatter::default(),
+            content: t.content.clone(),
+            body_start: 0,
+        };
+        t2.parse_frontmatter().expect("content from Thread::new() must parse cleanly");
+        assert_eq!(t2.frontmatter.id, "abc123");
+        assert_eq!(t2.frontmatter.name, "Test Thread");
+        assert_eq!(t2.frontmatter.desc, "A description");
+        assert_eq!(t2.frontmatter.status, "active");
+        assert_eq!(t2.frontmatter.log.len(), 1);
+        let body = t2.content[t2.body_start..].trim();
+        assert!(body.contains("Body text."));
+    }
+
     #[test]
     fn test_rebuild_content_no_blank_line_accumulation() {
         let content = "---\nid: abc123\nname: Test\nstatus: active\n---\n\nBody here.\n";
@@ -1837,6 +1823,7 @@ Some content here.
             stripped.contains("Some content here."),
             "Body content preserved"
         );
+        assert!(!stripped.contains("## Body"), "Body header removed");
         assert!(!stripped.contains("Note one"), "Notes removed");
         assert!(!stripped.contains("Task"), "Todo removed");
         assert!(!stripped.contains("Entry"), "Log removed");
@@ -1853,13 +1840,13 @@ Just body content.
 "#;
 
         let stripped = strip_old_sections(body);
-        assert!(stripped.contains("Just body content."), "Body preserved");
-        assert!(stripped.contains("## Body"), "Body header preserved");
+        assert!(stripped.contains("Just body content."), "Body content preserved");
+        assert!(!stripped.contains("## Body"), "Body header removed");
     }
 
     #[test]
     fn test_migration_idempotent() {
-        // A thread that has already been migrated (items in frontmatter, no sections)
+        // A fully migrated thread: all items in frontmatter, no legacy markdown sections.
         let content = r#"---
 id: abc123
 name: Test
@@ -1869,23 +1856,23 @@ notes:
     hash: a1b2
 ---
 
-## Body
-
 Some content.
 "#;
 
         let t = make_thread_with_content(content);
 
-        // get_notes should return from frontmatter, not parse empty section
+        // get_notes returns from frontmatter
         let notes = t.get_notes();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].text, "Already migrated note");
 
-        // Section extraction should return empty (no section exists)
+        // No legacy sections present
         let section_notes = extract_section(&t.content, "Notes");
-        assert!(
-            section_notes.is_empty(),
-            "No Notes section in migrated file"
-        );
+        assert!(section_notes.is_empty(), "No Notes section in migrated file");
+        assert!(!t.content.contains("## Body"), "No ## Body header in migrated file");
+
+        // Body content still accessible
+        let body = t.content[t.body_start..].trim();
+        assert!(body.contains("Some content."), "Body content preserved");
     }
 }

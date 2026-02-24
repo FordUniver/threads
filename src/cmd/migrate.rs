@@ -182,6 +182,11 @@ fn collect_scoped_files(
     workspace::find_threads_with_options(start_path, ws, &options)
 }
 
+/// Public entry point for validate fix --w010.
+pub fn migrate_file_for_validate(file: &Path, ws: &Path, dry_run: bool) -> Result<bool, String> {
+    migrate_file(file, ws, dry_run)
+}
+
 /// Migrate a single thread file from section-based to frontmatter-based storage.
 /// Returns Ok(true) if migration was performed, Ok(false) if already migrated.
 fn migrate_file(file: &Path, ws: &Path, dry_run: bool) -> Result<bool, String> {
@@ -200,9 +205,12 @@ fn migrate_file(file: &Path, ws: &Path, dry_run: bool) -> Result<bool, String> {
         .lines()
         .any(|l| l.starts_with("- ["));
     let has_log_section = !thread::extract_section(&t.content, "Log").is_empty();
+    let has_body_section = t.content[t.body_start..]
+        .trim_start_matches('\n')
+        .starts_with("## Body");
 
-    if !has_notes_section && !has_todo_section && !has_log_section {
-        // Already migrated or empty sections
+    if !has_notes_section && !has_todo_section && !has_log_section && !has_body_section {
+        // Already fully migrated
         if dry_run {
             println!("already migrated: {}", rel.dimmed());
         }
@@ -241,11 +249,14 @@ fn migrate_file(file: &Path, ws: &Path, dry_run: bool) -> Result<bool, String> {
         if n_log > 0 {
             parts.push(format!("{} log entries", n_log));
         }
+        if has_body_section {
+            parts.push("## Body header".to_string());
+        }
         println!(
             "would migrate: {} ({})",
             rel,
             if parts.is_empty() {
-                "empty sections".to_string()
+                "legacy sections".to_string()
             } else {
                 parts.join(", ")
             }
@@ -279,12 +290,15 @@ fn migrate_file(file: &Path, ws: &Path, dry_run: bool) -> Result<bool, String> {
     if n_log > 0 {
         parts.push(format!("{} log entries", n_log));
     }
+    if has_body_section {
+        parts.push("## Body header".to_string());
+    }
 
     println!(
         "migrated: {} ({})",
         rel,
         if parts.is_empty() {
-            "empty sections stripped".to_string()
+            "legacy sections stripped".to_string()
         } else {
             parts.join(", ")
         }

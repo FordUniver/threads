@@ -7,7 +7,7 @@ use crate::config::{Config, env_bool, is_quiet};
 use crate::git;
 use crate::input;
 use crate::output;
-use crate::thread::{self, Thread};
+use crate::thread::Thread;
 use crate::workspace;
 
 /// Read or edit the Body section of a thread.
@@ -47,7 +47,7 @@ pub fn run(args: BodyArgs, ws: &Path, config: &Config) -> Result<(), String> {
     if !args.set && !args.append && stdin_is_tty {
         let file = workspace::find_by_ref(ws, &args.id)?;
         let t = Thread::parse(&file)?;
-        let body = thread::extract_section(&t.content, "Body");
+        let body = t.content[t.body_start..].trim();
         if !body.is_empty() {
             println!("{}", body);
         }
@@ -67,9 +67,17 @@ pub fn run(args: BodyArgs, ws: &Path, config: &Config) -> Result<(), String> {
     let mut t = Thread::parse(&file)?;
 
     if set_mode {
-        t.content = thread::replace_section(&t.content, "Body", &content);
+        let new_body = format!("\n{}\n", content.trim_end());
+        t.content = format!("{}{}", &t.content[..t.body_start], new_body);
     } else {
-        t.content = thread::append_to_section(&t.content, "Body", &content);
+        let existing = t.content[t.body_start..].trim().to_string();
+        let combined = if existing.is_empty() {
+            content.trim_end().to_string()
+        } else {
+            format!("{}\n{}", existing, content.trim_end())
+        };
+        let new_body = format!("\n{}\n", combined);
+        t.content = format!("{}{}", &t.content[..t.body_start], new_body);
     }
 
     t.write()?;

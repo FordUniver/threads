@@ -1,7 +1,6 @@
 use std::fs;
 use std::path::Path;
 
-use chrono::Local;
 use clap::Args;
 use serde::Serialize;
 
@@ -10,7 +9,7 @@ use crate::config::{Config, env_bool, env_string, is_quiet};
 use crate::git;
 use crate::input;
 use crate::output::{self, OutputFormat};
-use crate::thread;
+use crate::thread::{self, Thread};
 use crate::workspace;
 
 #[derive(Args)]
@@ -137,39 +136,11 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
         return Err(format!("thread already exists: {}", thread_path.display()));
     }
 
-    // Generate content
-    let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-
-    let mut content = String::new();
-    content.push_str("---\n");
-    content.push_str(&format!("id: {}\n", id));
-    content.push_str(&format!("name: {}\n", quote_yaml_value(&title)));
-    content.push_str(&format!("desc: {}\n", quote_yaml_value(&args.desc)));
-    content.push_str(&format!("status: {}\n", status));
-    content.push_str("---\n\n");
-
-    // Add Body section
-    content.push_str("## Body\n\n");
-    if !body.is_empty() {
-        content.push_str(&body);
-        if !body.ends_with('\n') {
-            content.push('\n');
-        }
-        content.push('\n');
-    }
-
-    // Add Notes section (empty by default)
-    content.push_str("## Notes\n\n");
-
-    // Add Todo section
-    content.push_str("## Todo\n\n");
-
-    // Add Log section
-    content.push_str("## Log\n\n");
-    content.push_str(&format!("- [{}] Created thread.\n", timestamp));
-
-    // Write file
-    fs::write(&thread_path, &content).map_err(|e| format!("writing thread file: {}", e))?;
+    // Build thread using the canonical constructor (initial log entry in frontmatter, no legacy sections)
+    let mut t = Thread::new(&id, &title, &args.desc, &status, &body)
+        .map_err(|e| format!("creating thread: {}", e))?;
+    t.path = thread_path.to_string_lossy().to_string();
+    t.write()?;
 
     // Display path relative to git root
     let rel_path = workspace::path_relative_to_git_root(git_root, &thread_path);
@@ -224,45 +195,3 @@ pub fn run(args: NewArgs, git_root: &Path, config: &Config) -> Result<(), String
     Ok(())
 }
 
-/// Quote a YAML value if it contains special characters
-fn quote_yaml_value(value: &str) -> String {
-    // Check if already quoted
-    if (value.starts_with('"') && value.ends_with('"'))
-        || (value.starts_with('\'') && value.ends_with('\''))
-    {
-        return value.to_string();
-    }
-
-    // Check if quoting is needed
-    let special_chars = [
-        ':', '#', '[', ']', '{', '}', ',', '&', '*', '!', '|', '>', '%', '@', '`',
-    ];
-    let special_starts = [
-        '-', '?', ':', '&', '*', '!', '|', '>', '\'', '"', '%', '@', '`',
-    ];
-
-    let needs_quoting = value.chars().any(|c| special_chars.contains(&c))
-        || value
-            .chars()
-            .next()
-            .map(|c| special_starts.contains(&c))
-            .unwrap_or(false)
-        || value != value.trim()
-        || matches!(
-            value.to_lowercase().as_str(),
-            "true" | "false" | "null" | "yes" | "no" | "on" | "off"
-        )
-        || value.parse::<f64>().is_ok();
-
-    if needs_quoting {
-        // Prefer single quotes unless value contains them
-        if value.contains('\'') {
-            let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
-            format!("\"{}\"", escaped)
-        } else {
-            format!("'{}'", value)
-        }
-    } else {
-        value.to_string()
-    }
-}

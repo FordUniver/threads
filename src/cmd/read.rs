@@ -91,7 +91,7 @@ fn output_structured(
         status: thread.frontmatter.status.clone(),
         desc: thread.frontmatter.desc.clone(),
         path: rel_path.to_string(),
-        body: thread::extract_section(&thread.content, "Body"),
+        body: thread.content[thread.body_start..].trim().to_string(),
         notes: thread.get_notes(),
         todo: thread.get_todo_items(),
         log: thread.get_log_entries(),
@@ -188,8 +188,8 @@ fn output_pretty(
         format!("{}\n{}", title_line, desc_wrapped.join("\n"))
     };
 
-    // === Extract sections ===
-    let body = thread::extract_section(&thread.content, "Body");
+    // === Extract body and structured items ===
+    let body = thread.content[thread.body_start..].trim().to_string();
     let notes_items = thread.get_notes();
     let todo_items = thread.get_todo_items();
     let deadline_items = thread.get_deadlines();
