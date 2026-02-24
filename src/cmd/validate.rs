@@ -1032,6 +1032,7 @@ fn is_valid_timestamp(ts: &str) -> bool {
 // Fix Subcommand
 // ============================================================================
 
+#[allow(clippy::too_many_arguments)]
 fn run_fix(
     files: &[PathBuf],
     ws: &Path,
